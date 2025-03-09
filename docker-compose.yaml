@@ -1,0 +1,35 @@
+name: RustyGPT
+services:
+  backend:
+    image: backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '8080:8080'
+    environment:
+      DATABASE_URL: 'postgres://tinroof:rusty@postgres/rusty_gpt' # Connection string to the database
+      FRONTEND_DIR: '/rusty_gpt/frontend' # Where the frontend will be served from
+      CUDA_VISIBLE_DEVICES: '0' # Ensure GPU availability
+    volumes:
+      - ./frontend/dist:/rusty_gpt/frontend # Mount pre-built frontend files
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rusty_gpt
+      POSTGRES_USER: tinroof
+      POSTGRES_PASSWORD: rusty
+    volumes:
+      - ./.data/postgres:/var/lib/postgresql/data
+    restart: unless-stopped
