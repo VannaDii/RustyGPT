@@ -9,10 +9,17 @@ services:
       - '8080:8080'
     environment:
       DATABASE_URL: 'postgres://tinroof:rusty@postgres/rusty_gpt' # Connection string to the database
-      FRONTEND_DIR: '/rusty_gpt/frontend' # Where the frontend will be served from
+      FRONTEND_DIR: '/rusty_gpt/frontend' # Where the frontend will be served from (this is the default location)
       CUDA_VISIBLE_DEVICES: '0' # Ensure GPU availability
-    volumes:
-      - ./frontend/dist:/rusty_gpt/frontend # Mount pre-built frontend files
+      JWT_SECRET: 'super_secret_key' # Secret key for JWT authentication
+      APPLE_CLIENT_ID: 'your_apple_client_id' # Apple OAuth client ID
+      APPLE_TEAM_ID: 'your_apple_team_id' # Apple team ID
+      APPLE_PRIVATE_KEY: 'your_apple_private_key' # Apple private key
+      APPLE_KEY_ID: 'your_apple_key_id' # Apple key ID
+      GITHUB_CLIENT_ID: 'your_github_client_id' # GitHub OAuth client ID
+      GITHUB_CLIENT_SECRET: 'your_github_client_secret' # GitHub OAuth client secret
+    #volumes: # You could uncomment this section if you want to mount a custom frontend
+    #  - ./frontend/dist:/rusty_gpt/frontend # Mount pre-built frontend files
     deploy:
       resources:
         reservations:
@@ -32,4 +39,5 @@ services:
       POSTGRES_PASSWORD: rusty
     volumes:
       - ./.data/postgres:/var/lib/postgresql/data
+      - ./.data/postgres-init:/docker-entrypoint-initdb.d # Mount init scripts for automatic execution on container start
     restart: unless-stopped

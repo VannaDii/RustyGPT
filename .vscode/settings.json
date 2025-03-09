@@ -1,6 +1,8 @@
 {
   "cSpell.words": [
     "chrono",
+    "CUDA",
+    "initdb",
     "tinroof"
   ],
   "liveServer.settings.multiRootWorkspaceName": "rusty_gpt"

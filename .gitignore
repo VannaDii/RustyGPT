@@ -73,7 +73,6 @@ rust-project.json
 .history
 .ionide
 .coverage
-.data/*
-!.data/.gitkeep
+.data/postgres
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,macos,rust,rust-analyzer
