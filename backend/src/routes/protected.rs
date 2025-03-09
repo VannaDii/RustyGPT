@@ -1,7 +1,13 @@
-use crate::handlers::conversation::conversation_routes;
-use axum::Router;
+use crate::handlers::{conversation::conversation_routes, streaming::simple_sse_handler};
+use axum::{Router, routing::get};
 
 /// Function to register the protected routes
 pub fn create_router_protected() -> Router {
-    Router::new().merge(conversation_routes()) // Merge multiple route groups here
+    // Create the main router
+    let router = Router::new().merge(conversation_routes());
+
+    // Add the streaming route
+    let router = router.route("/api/stream/{user_id}", get(simple_sse_handler));
+
+    router
 }

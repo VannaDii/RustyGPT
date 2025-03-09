@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 axum = { version = "0.8.1", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3.30"
 http = "1.2.0"
 hyper = { version = "1", features = ["client", "http1", "full"] }
 oauth2 = "5.0.0"
@@ -20,6 +21,7 @@ sqlx = { version = "0.8.3", features = [
   "uuid",
 ] }
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1.15"
 tower = "0.5.2"
 tower-http = { version = "0.6.2", features = ["cors", "fs"] }
 tower-service = "0.3.3"
@@ -27,4 +29,5 @@ uuid = { version = "1", features = ["serde", "v4", "js"] }
 shared = { path = "../shared" }
 
 [dev-dependencies]
+axum-test = "14.0.0"
 tower = "0.5.2"

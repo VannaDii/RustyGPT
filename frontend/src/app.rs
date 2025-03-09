@@ -37,7 +37,11 @@ pub fn app() -> Html {
         let selected_conversation = selected_conversation.clone();
         Callback::from(move |id: String| {
             let id_uuid = Uuid::parse_str(&id).unwrap();
-            if let Some(con) = conversations_select.iter().find(|c| c.id == id_uuid).cloned() {
+            if let Some(con) = conversations_select
+                .iter()
+                .find(|c| c.id == id_uuid)
+                .cloned()
+            {
                 selected_conversation.set(Some(con));
             }
         })
@@ -140,7 +144,11 @@ pub fn app() -> Html {
                 <ChatView conversation={(*selected_conversation).clone()} />
                 <div class="p-4 flex justify-center">
                     <div class="w-full md:w-3/5">
-                        <ChatInput on_send={on_send} />
+                        <ChatInput
+                            on_send={on_send}
+                            conversation_id={selected_conversation.as_ref().map(|c| c.id)}
+                            user_id={selected_conversation.as_ref().and_then(|c| c.participant_ids.first().cloned())}
+                        />
                     </div>
                 </div>
             </div>

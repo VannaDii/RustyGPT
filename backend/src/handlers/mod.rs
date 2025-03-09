@@ -1,6 +1,7 @@
 pub mod apple_auth;
 pub mod conversation;
 pub mod github_auth;
+pub mod streaming;
 
 #[cfg(test)]
 mod conversation_test;
