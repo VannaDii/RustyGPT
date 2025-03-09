@@ -21,8 +21,11 @@ mod handlers;
 mod routes;
 mod services;
 
+#[cfg(test)]
+mod main_test;
+
 // Middleware to check if a user is authenticated
-async fn auth_middleware(
+pub async fn auth_middleware(
     req: Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {

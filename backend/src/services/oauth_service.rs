@@ -37,7 +37,7 @@ pub async fn handle_apple_oauth(pool: &PgPool, auth_code: String) -> Result<Uuid
     Ok(row.register_oauth_user.unwrap())
 }
 
-fn create_http_client() -> reqwest::Client {
+pub fn create_http_client() -> reqwest::Client {
     let http_client = reqwest::ClientBuilder::new()
         // Following redirects opens the client up to SSRF vulnerabilities.
         .redirect(reqwest::redirect::Policy::none())
