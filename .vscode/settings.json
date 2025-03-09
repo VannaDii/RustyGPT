@@ -5,5 +5,18 @@
     "initdb",
     "tinroof"
   ],
-  "liveServer.settings.multiRootWorkspaceName": "rusty_gpt"
+  "liveServer.settings.multiRootWorkspaceName": "rusty_gpt",
+  "postman.settings.dotenv-detection-notification-visibility": false,
+  "sqltools.connections": [
+    {
+      "previewLimit": 50,
+      "server": "localhost",
+      "port": 5432,
+      "driver": "PostgreSQL",
+      "name": "rusty_gpt_local",
+      "database": "rusty_gpt",
+      "username": "tinroof",
+      "password": "rusty"
+    }
+  ]
 }

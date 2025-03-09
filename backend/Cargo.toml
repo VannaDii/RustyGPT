@@ -4,11 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = "0.8.1"
-hyper = "1"
-tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8.1", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
+http = "1.2.0"
+hyper = { version = "1", features = ["client", "http1", "full"] }
+oauth2 = "5.0.0"
+reqwest = "0.12.12"
+hyper-rustls = { version = "0.27.5", features = ["http1", "webpki-roots"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
+sqlx = { version = "0.8.3", features = ["postgres", "macros", "runtime-tokio", "uuid"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6.2", features = ["cors", "fs"] }
 uuid = { version = "1", features = ["serde", "v4", "js"] }
 shared = { path = "../shared" }

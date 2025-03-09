@@ -1,0 +1,1 @@
+SELECT "register_oauth_user" ('vanna@dicatania.me', NULL, 'github_id');
