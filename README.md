@@ -1,5 +1,7 @@
 # RustyGPT
 
+[![CI](https://github.com/VannaDii/RustyGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/VannaDii/RustyGPT/actions/workflows/ci.yml) [![Lint](https://github.com/VannaDii/RustyGPT/actions/workflows/lint.yml/badge.svg)](https://github.com/VannaDii/RustyGPT/actions/workflows/lint.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/VannaDii/RustyGPT/blob/main/CONTRIBUTING.md) [![Rust Version](https://img.shields.io/badge/rust-stable-blue.svg)](https://www.rust-lang.org/)
+
 ## Overview
 
 **RustyGPT** is a learning-driven Rust project focused on mastering Rust for building efficient, scalable backend systems with a modern frontend. The project explores **Axum** for API development, **PostgreSQL** for database management, and **AI model integration** in Rust.
@@ -145,8 +147,40 @@ APPLE_TOKEN_URL=https://appleid.apple.com/auth/token
 
 ## Contributing
 
-This is an evolving project focused on learning and best practices. Contributions and suggestions are welcome!
+We welcome contributions from the community! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on how to get started, coding standards, and our development process.
+
+Before contributing, please review our:
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security Policy](SECURITY.md)
+- [Roadmap](ROADMAP.md) for planned features
+
+### Getting Started as a Contributor
+
+1. Fork the repository
+2. Create a new branch for your feature or bugfix
+3. Make your changes
+4. Run tests to ensure they pass
+5. Submit a pull request
+
+## Community
+
+- **Issues**: Use GitHub issues to report bugs or request features
+- **Discussions**: Join our GitHub discussions for questions and ideas
+- **Pull Requests**: Submit PRs for bug fixes or features aligned with our roadmap
+
+## Roadmap
+
+See our [Roadmap](ROADMAP.md) for planned features and improvements, including:
+
+- Workflow and task management
+- Image generation capabilities
+- And more!
+
+## Changelog
+
+See the [Changelog](CHANGELOG.md) for a history of changes and releases.
 
 ## License
 
-MIT License. See `LICENSE` for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
