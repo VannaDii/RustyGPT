@@ -12,6 +12,7 @@ Thank you for considering contributing to RustyGPT! This document provides guide
   - [Creating a Branch](#creating-a-branch)
   - [Making Changes](#making-changes)
   - [Testing](#testing)
+  - [Git Hooks](#git-hooks)
   - [Submitting a Pull Request](#submitting-a-pull-request)
 - [Coding Standards](#coding-standards)
   - [Rust Style Guidelines](#rust-style-guidelines)
@@ -97,6 +98,30 @@ The project follows a clean architecture with clear separation of concerns:
    ```
 
 3. Ensure your changes don't break existing functionality
+
+### Git Hooks
+
+The project uses Git hooks to ensure code quality and consistency:
+
+1. **Pre-Push Hook**: Automatically runs the same checks as CI before pushing to GitHub:
+
+   - Code formatting (`cargo fmt`)
+   - Linting (`cargo clippy`)
+   - Building (`cargo build`)
+   - Testing (`cargo test`)
+   - Frontend building (`trunk build`)
+   - Security audit (`cargo audit`)
+
+   This helps catch issues early and ensures your code will pass CI checks.
+
+   The hook is installed automatically when you clone the repository. If you need to reinstall it:
+
+   ```bash
+   # Make sure the hook is executable
+   chmod +x .git/hooks/pre-push
+   ```
+
+   If any of the checks fail, the push will be aborted, allowing you to fix the issues before pushing.
 
 ### Submitting a Pull Request
 

@@ -118,13 +118,20 @@ APPLE_TOKEN_URL=https://appleid.apple.com/auth/token
    - Configure environment variables (create a `.env` file based on `.env.template`)
      - `cp .env.template .env`
 
-3. **Run with Docker Compose**
+3. **Install Git Hooks**
+
+   ```sh
+   # Install Git hooks to run CI checks before pushing
+   ./scripts/install-hooks.sh
+   ```
+
+4. **Run with Docker Compose**
 
    ```sh
    docker-compose up --build
    ```
 
-4. **Run Backend Only**
+5. **Run Backend Only**
 
    ```sh
    cd backend
@@ -133,14 +140,14 @@ APPLE_TOKEN_URL=https://appleid.apple.com/auth/token
 
    The server will start on `http://localhost:8080`
 
-5. **Run Frontend Only**
+6. **Run Frontend Only**
 
    ```sh
    cd frontend
    trunk serve
    ```
 
-6. **Run Tests**
+7. **Run Tests**
    ```sh
    cargo test
    ```
