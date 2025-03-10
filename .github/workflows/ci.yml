@@ -59,11 +59,29 @@ jobs:
           echo "GITHUB_CLIENT_ID=test_client_id" >> .env
           echo "GITHUB_CLIENT_SECRET=test_client_secret" >> .env
           echo "APPLE_CLIENT_ID=test_client_id" >> .env
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost/rusty_gpt" >> .env
+
+      - name: Initialize database schema
+        run: |
+          export PGPASSWORD=postgres
+          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/01-init-schema.sql
+          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/02-stored-procedures.sql
+          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/03-seed-data.sql
+
+      - name: Install SQLx CLI and prepare query cache
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres
+          export $(grep DATABASE_URL .env)
+          cargo sqlx prepare
 
       - name: Build
+        env:
+          SQLX_OFFLINE: true
         run: cargo build --verbose
 
       - name: Run tests
+        env:
+          SQLX_OFFLINE: true
         run: cargo test --verbose
 
       - name: Build frontend

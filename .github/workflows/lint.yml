@@ -18,6 +18,19 @@ jobs:
   clippy:
     name: Lint
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rusty_gpt
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +44,30 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Create .env file
+        run: |
+          cp .env.template .env
+          echo "GITHUB_CLIENT_ID=test_client_id" >> .env
+          echo "GITHUB_CLIENT_SECRET=test_client_secret" >> .env
+          echo "APPLE_CLIENT_ID=test_client_id" >> .env
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost/rusty_gpt" >> .env
+
+      - name: Initialize database schema
+        run: |
+          export PGPASSWORD=postgres
+          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/01-init-schema.sql
+          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/02-stored-procedures.sql
+          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/03-seed-data.sql
+
+      - name: Install SQLx CLI and prepare query cache
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres
+          export $(grep DATABASE_URL .env)
+          cargo sqlx prepare
+
       - name: Clippy check
+        env:
+          SQLX_OFFLINE: true
         run: |
           cargo clippy --all-features -- -D warnings
 
