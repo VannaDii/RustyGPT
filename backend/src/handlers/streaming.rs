@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::Path,
     http::{StatusCode, header},
     response::Response,
 };
@@ -26,54 +26,6 @@ pub async fn simple_sse_handler(Path(user_id): Path<String>) -> Response {
             "data: Connected to SSE stream for user {}\n\n",
             user_id
         )))
-        .unwrap()
-}
-
-/// Handler for SSE connections with state
-pub async fn sse_handler(
-    Path(user_id): Path<String>,
-    State(state): State<SharedState>,
-) -> Response {
-    // Parse user_id from string to Uuid
-    let user_id = match Uuid::parse_str(&user_id) {
-        Ok(id) => id,
-        Err(_) => {
-            // Return error response for invalid UUID
-            return Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(axum::body::Body::from("Invalid user ID"))
-                .unwrap();
-        }
-    };
-
-    // Create a channel for this user
-    let (tx, _rx) = mpsc::channel::<String>(100);
-
-    // Store the sender in shared state
-    {
-        let mut state = state.lock().await;
-        state.insert(user_id, tx.clone());
-    }
-
-    // Create a simple keep-alive task that sends a comment every 30 seconds
-    // This helps keep the connection alive
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
-        loop {
-            interval.tick().await;
-            if tx.send(": keep-alive\n\n".to_string()).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    // Return a streaming response
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/event-stream")
-        .header(header::CACHE_CONTROL, "no-cache")
-        .header(header::CONNECTION, "keep-alive")
-        .body(axum::body::Body::from("data: Connected to SSE stream\n\n"))
         .unwrap()
 }
 

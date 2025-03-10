@@ -2,7 +2,7 @@ use axum::{
     Router,
     extract::{Extension, Json, Path},
     http::{StatusCode, header},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::{get, post},
 };
 use chrono::Utc;
@@ -73,12 +73,14 @@ pub async fn send_message(
 
     // Simulate generating a response in chunks
     // In a real application, this would come from an AI model
+    // Use the content from the request to personalize the response
+    let content = &request.content;
     let response_chunks = vec![
         "I'm ".to_string(),
         "thinking ".to_string(),
         "about ".to_string(),
         "your ".to_string(),
-        "question. ".to_string(),
+        format!("question: '{}'. ", content),
         "Here's ".to_string(),
         "my ".to_string(),
         "response.".to_string(),

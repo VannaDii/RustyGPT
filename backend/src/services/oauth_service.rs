@@ -38,12 +38,11 @@ pub async fn handle_apple_oauth(pool: &PgPool, auth_code: String) -> Result<Uuid
 }
 
 pub fn create_http_client() -> reqwest::Client {
-    let http_client = reqwest::ClientBuilder::new()
+    reqwest::ClientBuilder::new()
         // Following redirects opens the client up to SSRF vulnerabilities.
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .expect("Client should build");
-    http_client
+        .expect("Client should build")
 }
 
 pub async fn handle_github_oauth(pool: &PgPool, auth_code: String) -> Result<Uuid, sqlx::Error> {

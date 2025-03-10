@@ -114,7 +114,7 @@ pub fn chat_input(props: &ChatInputProps) -> Html {
 
 // Function to send a message to the server
 async fn send_message(conversation_id: Uuid, user_id: Uuid, content: &str) -> Result<(), String> {
-    let mut opts = RequestInit::new();
+    let opts = RequestInit::new();
     opts.set_method("POST");
     opts.set_mode(RequestMode::Cors);
 
