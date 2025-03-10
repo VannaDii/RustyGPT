@@ -13,7 +13,7 @@ pub struct ChatViewProps {
 #[function_component(ChatView)]
 pub fn chat_view(props: &ChatViewProps) -> Html {
     // State to track streaming messages
-    let streaming_messages = use_state(|| HashMap::<Uuid, String>::new());
+    let streaming_messages = use_state(HashMap::<Uuid, String>::new);
 
     // Callback for handling message chunks
     let on_message_chunk = {

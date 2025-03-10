@@ -1,7 +1,7 @@
 use uuid::Uuid;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{HtmlInputElement, Request, RequestInit, RequestMode, Response, console};
+use web_sys::{HtmlInputElement, Request, RequestInit, RequestMode, Response};
 use yew::{Callback, Html, Properties, events::SubmitEvent, function_component, html, use_state};
 
 #[derive(Properties, PartialEq)]
@@ -15,7 +15,7 @@ pub struct ChatInputProps {
 
 #[function_component(ChatInput)]
 pub fn chat_input(props: &ChatInputProps) -> Html {
-    let input_value = use_state(|| String::new());
+    let input_value = use_state(String::new);
     let is_sending = use_state(|| false);
     let error = use_state(|| None::<String>);
 
@@ -115,8 +115,8 @@ pub fn chat_input(props: &ChatInputProps) -> Html {
 // Function to send a message to the server
 async fn send_message(conversation_id: Uuid, user_id: Uuid, content: &str) -> Result<(), String> {
     let mut opts = RequestInit::new();
-    opts.method("POST");
-    opts.mode(RequestMode::Cors);
+    opts.set_method("POST");
+    opts.set_mode(RequestMode::Cors);
 
     // Create the request body
     let body = serde_json::json!({
@@ -124,9 +124,11 @@ async fn send_message(conversation_id: Uuid, user_id: Uuid, content: &str) -> Re
         "user_id": user_id.to_string()
     });
 
-    opts.body(Some(&JsValue::from_str(
-        &serde_json::to_string(&body).unwrap(),
-    )));
+    // Convert to JsValue and set as body
+    let body_str = serde_json::to_string(&body).unwrap();
+    let js_value = JsValue::from_str(&body_str);
+    // The set_body method expects a JsValue directly, not an Option<&JsValue>
+    opts.set_body(&js_value);
 
     let url = format!("/api/conversations/{}/messages", conversation_id);
 

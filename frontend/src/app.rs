@@ -10,9 +10,9 @@ use yew::{Callback, Html, UseStateHandle, function_component, html, use_state};
 
 #[function_component(App)]
 pub fn app() -> Html {
-    let conversations = use_state(|| vec![]);
+    let conversations = use_state(Vec::new);
     let selected_conversation = use_state(|| None);
-    let search_query = use_state(|| String::new());
+    let search_query = use_state(String::new);
     let user: UseStateHandle<Option<String>> = use_state(|| None);
 
     let on_search = {
@@ -55,8 +55,8 @@ pub fn app() -> Html {
             conversations_delete.set(
                 conversations_delete
                     .iter()
+                    .filter(|&c| c.id != id_uuid)
                     .cloned()
-                    .filter(|c| c.id != id_uuid)
                     .collect(),
             );
             selected_conversation.set(None);
@@ -89,7 +89,7 @@ pub fn app() -> Html {
     };
 
     let conversations_new = conversations.clone();
-    let start_new_chat = {
+    let _start_new_chat = {
         let selected_conversation = selected_conversation.clone();
         Callback::from(move |_: yew::MouseEvent| {
             let new_conversation = Conversation {

@@ -13,7 +13,7 @@ pub fn chat_list(props: &ChatListProps) -> Html {
     html! {
         <div class="chat-list">
             { for props.conversations.iter().map(|con| {
-                let con_id = con.id.clone();
+                let con_id = con.id;
                 let on_select = props.on_select.clone();
                 let on_delete = props.on_delete.clone();
 
