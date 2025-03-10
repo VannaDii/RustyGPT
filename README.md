@@ -13,17 +13,31 @@ The project follows a clean architecture with clear separation of concerns:
   - **Routes**: Define API endpoints and group related routes
   - **Services**: Implement business logic
 - **Frontend**: Rust-based web frontend using Yew
+  - **Components**: Reusable UI elements including chat input, chat list, chat view, and streaming message handling
 - **Shared**: Common models and utilities used by both frontend and backend
+  - **Models**: Data structures for conversations, messages, users, and streaming functionality
 
 ## Features
 
 - **RESTful API** using **Axum** for high-performance web services
+- **Real-time streaming** with Server-Sent Events (SSE) for message delivery
+- **Interactive chat interface** with real-time message updates
 - **PostgreSQL integration** with stored procedures for secure, efficient database access
 - **OAuth authentication** via Apple and GitHub
 - **AI model integration** using local inference engines
 - **Docker Compose setup** for seamless environment management
 - **Unit-tested architecture** ensuring reliability and maintainability
 - **Configuration-based URLs** for flexible deployment across environments
+
+## Chat & Streaming Functionality
+
+The application features a real-time chat system with streaming message delivery:
+
+1. **Message Sending**: Users can send messages to conversations via the API
+2. **Server-Sent Events**: The backend uses SSE to stream message chunks to connected clients
+3. **Real-time Updates**: The frontend receives and displays message chunks as they arrive
+4. **Streaming UI**: Messages are displayed with typing indicators while streaming
+5. **Conversation Management**: Users can view and interact with multiple conversations
 
 ## Authentication Flow
 
@@ -50,12 +64,15 @@ The application supports OAuth authentication with both GitHub and Apple:
 ### Protected Routes
 
 - `GET /api/conversations`: Get all conversations for the authenticated user
+- `POST /api/conversations/{conversation_id}/messages`: Send a message to a conversation
+- `GET /api/stream/{user_id}`: Connect to the SSE stream for real-time message updates
 
 ## Tech Stack
 
 - **Programming Language:** Rust
 - **Backend Framework:** Axum
 - **Frontend Framework:** Yew
+- **Real-time Communication:** Server-Sent Events (SSE)
 - **Database:** PostgreSQL
 - **Authentication:** OAuth (Apple, GitHub)
 - **Containerization:** Docker Compose
