@@ -15,7 +15,7 @@ For local development, you have two options:
    - Example: `DATABASE_URL=postgres://postgres:postgres@localhost/rusty_gpt`
 
 2. **Offline Mode**: Use a prepared query cache without a database connection at compile time.
-   - First, prepare the query cache: `cargo sqlx prepare`
+   - First, prepare the query cache: `cargo sqlx prepare` (or `cargo sqlx prepare --workspace` for Cargo workspaces)
    - This creates a `.sqlx` directory with the prepared queries
    - Set the `SQLX_OFFLINE=true` environment variable when building
    - Example: `SQLX_OFFLINE=true cargo build`

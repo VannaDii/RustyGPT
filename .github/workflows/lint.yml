@@ -54,6 +54,8 @@ jobs:
 
       - name: Initialize database schema
         run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
           export PGPASSWORD=postgres
           psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/01-init-schema.sql
           psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/02-stored-procedures.sql
@@ -63,7 +65,7 @@ jobs:
         run: |
           cargo install sqlx-cli --no-default-features --features postgres
           export $(grep DATABASE_URL .env)
-          cargo sqlx prepare
+          cargo sqlx prepare --workspace
 
       - name: Clippy check
         env:
