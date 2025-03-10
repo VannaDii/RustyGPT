@@ -163,6 +163,10 @@ Before contributing, please review our:
 4. Run tests to ensure they pass
 5. Submit a pull request
 
+## Documentation
+
+The project documentation is available on our [GitHub Pages site](https://vannadii.github.io/RustyGPT/).
+
 ## Community
 
 - **Issues**: Use GitHub issues to report bugs or request features
