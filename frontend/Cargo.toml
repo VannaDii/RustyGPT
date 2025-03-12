@@ -13,16 +13,22 @@ gloo-storage = "0.3.0"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.40"
 web-sys = { version = "0.3", features = [
-  "HtmlInputElement",
+  "Clipboard",
+  "console",
+  "CssStyleDeclaration",
   "EventSource",
+  "Headers",
+  "HtmlInputElement",
+  "HtmlSelectElement",
+  "HtmlStyleElement",
+  "MediaQueryList",
   "MessageEvent",
+  "Navigator",
   "Request",
   "RequestInit",
   "RequestMode",
   "Response",
-  "Headers",
-  "console",
-  "HtmlSelectElement",
 ] }
-shared = { path = "../shared" }
+js-sys = "0.3"
 i18nrs = { version = "0.1.3", features = ["yew"] }
+shared = { path = "../shared" }

@@ -2,326 +2,207 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer utilities {
-  .font-medium {
-    font-weight: 500;
-  }
+/* Custom styles for markdown content */
+.markdown {
+  @reference text-base-content;
 }
 
-/* ChatGPT-inspired theme variables */
-:root {
-  /* Light theme */
-  --primary: #6b46fe;
-  --primary-focus: #5635d9;
-  --primary-content: #ffffff;
-  --secondary: #10a37f;
-  --secondary-focus: #0d8c6d;
-  --secondary-content: #ffffff;
-  --accent: #1fb2a6;
-  --accent-focus: #1a9085;
-  --accent-content: #ffffff;
-  --base-100: #ffffff;
-  --base-200: #f7f7f8;
-  --base-300: #ececf1;
-  --base-content: #343541;
-  --neutral: #f7f7f8;
-  --neutral-focus: #e5e5e5;
-  --neutral-content: #343541;
-  --user-message-bg: #f7f7f8;
-  --ai-message-bg: #ffffff;
-  --border-color: #e5e5e5;
+.markdown h1 {
+  @reference text-2xl font-bold mb-4 mt-6;
 }
 
-/* Dark theme */
-[data-theme='dark'] {
-  --primary: #8c84fc;
-  --primary-focus: #7b73eb;
-  --primary-content: #ffffff;
-  --secondary: #10a37f;
-  --secondary-focus: #0d8c6d;
-  --secondary-content: #ffffff;
-  --accent: #1fb2a6;
-  --accent-focus: #1a9085;
-  --accent-content: #ffffff;
-  --base-100: #343541;
-  --base-200: #202123;
-  --base-300: #2a2b32;
-  --base-content: #ececf1;
-  --neutral: #343541;
-  --neutral-focus: #404152;
-  --neutral-content: #ececf1;
-  --user-message-bg: #444654;
-  --ai-message-bg: #343541;
-  --border-color: #4a4b53;
+.markdown h2 {
+  @reference text-xl font-bold mb-3 mt-5;
 }
 
-/* ChatGPT-inspired components */
-@layer components {
-  /* Button components */
-  .btn {
-    @apply font-medium py-2 px-4 rounded-lg transition-colors;
-  }
-
-  .btn-primary {
-    background-color: var(--primary);
-    color: var(--primary-content);
-  }
-
-  .btn-primary:hover {
-    background-color: var(--primary-focus);
-  }
-
-  .btn-secondary {
-    background-color: var(--secondary);
-    color: var(--secondary-content);
-  }
-
-  .btn-secondary:hover {
-    background-color: var(--secondary-focus);
-  }
-
-  .btn-accent {
-    background-color: var(--accent);
-    color: var(--accent-content);
-  }
-
-  .btn-accent:hover {
-    background-color: var(--accent-focus);
-  }
-
-  .btn-ghost {
-    background-color: transparent;
-    color: var(--base-content);
-  }
-
-  .btn-ghost:hover {
-    background-color: var(--base-200);
-  }
-
-  .btn-link {
-    color: var(--primary);
-    text-decoration: underline;
-  }
-
-  .btn-outline {
-    background-color: transparent;
-    border: 1px solid var(--border-color);
-  }
-
-  .btn-outline:hover {
-    background-color: var(--base-200);
-  }
-
-  .btn-sm {
-    @apply py-1 px-2 text-sm;
-  }
-
-  .btn-lg {
-    @apply py-3 px-6 text-lg;
-  }
-
-  .btn-circle {
-    @apply rounded-full p-0 w-10 h-10 flex items-center justify-center;
-  }
-
-  /* Chat components */
-  .chat {
-    @apply grid grid-cols-[auto_1fr] gap-x-3 my-4;
-  }
-
-  .chat-start {
-    @apply justify-start;
-  }
-
-  .chat-end {
-    @apply justify-end;
-  }
-
-  .chat-bubble {
-    @apply px-4 py-3 rounded-lg max-w-prose;
-  }
-
-  .chat-start .chat-bubble {
-    background-color: var(--ai-message-bg);
-    color: var(--base-content);
-    border: 1px solid var(--border-color);
-  }
-
-  .chat-end .chat-bubble {
-    background-color: var(--user-message-bg);
-    color: var(--base-content);
-  }
-
-  .chat-avatar {
-    @apply w-8 h-8 rounded-full overflow-hidden;
-  }
-
-  .chat-footer {
-    @apply text-xs opacity-70 mt-1;
-  }
-
-  /* Input components */
-  .chat-input {
-    @apply relative w-full;
-  }
-
-  .chat-input textarea {
-    @apply w-full p-3 rounded-lg border bg-base-100 text-base-content resize-none min-h-[60px] pr-12;
-    border-color: var(--border-color);
-  }
-
-  .chat-input button {
-    @apply absolute right-3 bottom-3 rounded-full w-8 h-8 flex items-center justify-center;
-  }
-
-  /* Sidebar components */
-  .sidebar {
-    @apply bg-base-200 h-screen flex flex-col;
-  }
-
-  .sidebar-header {
-    @apply p-4 border-b;
-    border-color: var(--border-color);
-  }
-
-  .sidebar-content {
-    @apply flex-1 overflow-y-auto p-2;
-  }
-
-  .sidebar-footer {
-    @apply p-4 border-t;
-    border-color: var(--border-color);
-  }
-
-  .conversation-item {
-    @apply p-3 rounded-lg hover:bg-base-300 cursor-pointer flex justify-between items-center;
-  }
-
-  .conversation-item.active {
-    @apply bg-base-300;
-  }
-
-  /* Avatar */
-  .avatar {
-    @apply relative inline-block;
-  }
-
-  .avatar-circle {
-    @apply rounded-full overflow-hidden;
-  }
-
-  /* Code blocks */
-  .code-block {
-    @apply bg-neutral rounded-lg p-4 my-2 overflow-x-auto text-sm font-mono;
-  }
-
-  /* Loading indicators */
-  .loading {
-    @apply inline-block;
-  }
-
-  .loading-dots {
-    @apply flex gap-1;
-  }
-
-  .loading-dots::after {
-    content: '.';
-    animation: dots 1.5s infinite;
-  }
-
-  @keyframes dots {
-    0%,
-    20% {
-      content: '.';
-    }
-    40% {
-      content: '..';
-    }
-    60%,
-    100% {
-      content: '...';
-    }
-  }
-
-  /* Language selector */
-  .language-selector {
-    @apply relative;
-  }
-
-  .language-selector select {
-    @apply appearance-none bg-base-100 border rounded-lg py-1 px-3 pr-8 text-sm;
-    border-color: var(--border-color);
-  }
-
-  .language-selector::after {
-    content: '▼';
-    @apply absolute right-2 top-1/2 transform -translate-y-1/2 text-xs pointer-events-none;
-  }
+.markdown h3 {
+  @reference text-lg font-bold mb-2 mt-4;
 }
 
-/* Base utility classes */
-@layer utilities {
-  .bg-base-100 {
-    background-color: var(--base-100);
-  }
+.markdown p {
+  @reference mb-4;
+}
 
-  .bg-base-200 {
-    background-color: var(--base-200);
-  }
+.markdown ul {
+  @reference list-disc pl-5 mb-4;
+}
 
-  .bg-base-300 {
-    background-color: var(--base-300);
-  }
+.markdown ol {
+  @reference list-decimal pl-5 mb-4;
+}
 
-  .text-base-content {
-    color: var(--base-content);
-  }
+.markdown li {
+  @reference mb-1;
+}
 
-  .bg-primary {
-    background-color: var(--primary);
-  }
+.markdown pre {
+  @reference rounded-lg mb-4 relative;
+}
 
-  .text-primary {
-    color: var(--primary);
-  }
+.markdown code {
+  @reference font-mono text-sm;
+}
 
-  .bg-primary-focus {
-    background-color: var(--primary-focus);
-  }
+.markdown p code {
+  @reference bg-base-300 px-1.5 py-0.5 rounded text-sm;
+}
 
-  .text-primary-content {
-    color: var(--primary-content);
-  }
+.markdown blockquote {
+  @reference border-l-4 border-base-300 pl-4 italic my-4;
+}
 
-  .bg-secondary {
-    background-color: var(--secondary);
-  }
+.markdown table {
+  @reference w-full border-collapse mb-4;
+}
 
-  .text-secondary {
-    color: var(--secondary);
-  }
+.markdown th {
+  @reference border border-base-300 px-4 py-2 bg-base-200;
+}
 
-  .bg-secondary-focus {
-    background-color: var(--secondary-focus);
-  }
+.markdown td {
+  @reference border border-base-300 px-4 py-2;
+}
 
-  .text-secondary-content {
-    color: var(--secondary-content);
-  }
+.markdown hr {
+  @reference my-6 border-base-300;
+}
 
-  .bg-accent {
-    background-color: var(--accent);
-  }
+.markdown a {
+  @reference text-primary hover:underline;
+}
 
-  .text-accent {
-    color: var(--accent);
-  }
+/* Code block copy button */
+.code-block-header {
+  @reference flex justify-between items-center px-4 py-2 bg-neutral-focus text-neutral-content text-xs rounded-t-lg;
+}
 
-  .bg-accent-focus {
-    background-color: var(--accent-focus);
-  }
+.copy-button {
+  @reference p-1 rounded hover:bg-neutral-content/20 transition-colors;
+}
 
-  .text-accent-content {
-    color: var(--accent-content);
-  }
+/* Custom typing animation */
+.typing-dot {
+  @reference inline-block w-1 h-1 rounded-full bg-current mx-0.5 opacity-40;
+}
+
+.typing-dot:nth-child(1) {
+  animation: typing-dot 1.4s infinite 0s;
+}
+
+.typing-dot:nth-child(2) {
+  animation: typing-dot 1.4s infinite 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation: typing-dot 1.4s infinite 0.4s;
+}
+
+/* Message actions */
+.message-actions {
+  @reference opacity-0 transition-opacity group-hover:opacity-100 flex gap-1;
+}
+
+.message-action-button {
+  @reference p-1 rounded hover:bg-base-300 transition-colors text-xs;
+}
+
+/* Auto-expanding textarea */
+.auto-expanding-textarea {
+  @reference resize-none overflow-hidden transition-all duration-200;
+  min-height: 24px;
+  max-height: 200px;
+}
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  @reference w-2;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  @reference bg-base-200;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @reference bg-base-300 rounded-full;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  @reference bg-neutral;
+}
+
+/* Welcome screen */
+.welcome-screen {
+  @reference flex flex-col items-center justify-center h-full text-center p-4;
+}
+
+.welcome-title {
+  @reference text-2xl font-bold mb-2;
+}
+
+.welcome-subtitle {
+  @reference text-base-content/60 mb-8;
+}
+
+.welcome-examples {
+  @reference grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl w-full;
+}
+
+.example-card {
+  @reference p-4 border border-base-300 rounded-lg hover:bg-base-200 transition-colors cursor-pointer;
+}
+
+.example-title {
+  @reference font-medium mb-1;
+}
+
+.example-description {
+  @reference text-sm text-base-content/70;
+}
+
+/* Drawer for mobile */
+.drawer-toggle:checked ~ .drawer-side {
+  @reference grid-cols-[auto_0fr];
+}
+
+.drawer-toggle:checked ~ .drawer-content {
+  @reference grid-cols-[0fr_auto];
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  @reference w-10 h-10 rounded-full flex items-center justify-center hover:bg-base-300 transition-colors;
+}
+
+/* Conversation list item */
+.conversation-item {
+  @reference flex items-center gap-3 p-3 rounded-lg hover:bg-base-300 transition-colors cursor-pointer;
+}
+
+.conversation-item.active {
+  @reference bg-base-300;
+}
+
+.conversation-title {
+  @reference font-medium truncate;
+}
+
+.conversation-preview {
+  @reference text-xs text-base-content/60 truncate;
+}
+
+/* Chat input */
+.chat-input-container {
+  @reference relative;
+}
+
+.chat-input {
+  @reference w-full p-3 pr-12 rounded-lg border border-base-300 bg-base-100 focus:outline-none focus:border-primary transition-colors;
+}
+
+.send-button {
+  @reference absolute right-3 bottom-3 w-8 h-8 flex items-center justify-center rounded-full bg-primary text-primary-content disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
+}
+
+.send-button:not(:disabled):hover {
+  @reference bg-primary-focus;
 }

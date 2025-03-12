@@ -6,14 +6,28 @@
   "sidebar.no_conversations": "No se encontraron conversaciones.",
   "sidebar.start_new": "¡Comienza una nueva!",
   "sidebar.login": "Iniciar sesión / Registrarse",
+  "sidebar.delete_conversation": "Eliminar conversación",
+  "sidebar.empty_conversation": "Aún no hay mensajes",
 
   "chat.select_conversation": "Selecciona una conversación",
   "chat.or_start_new": "o comienza una nueva",
   "chat.typing": "Escribiendo...",
+  "chat.just_now": "Ahora mismo",
 
   "input.placeholder": "Escribe un mensaje...",
   "input.sending": "Enviando...",
+  "input.characters": "caracteres",
+  "input.enter_to_send": "Presiona Enter para enviar, Shift+Enter para nueva línea",
 
   "streaming.connected": "Conectado al servidor de streaming",
-  "streaming.connecting": "Conectando al servidor de streaming..."
+  "streaming.connecting": "Conectando al servidor de streaming...",
+
+  "welcome.title": "Bienvenido a Rusty GPT",
+  "welcome.subtitle": "Una interfaz de chat moderna construida con Rust y Yew",
+  "welcome.example1.title": "Haz una pregunta",
+  "welcome.example1.description": "¿Cómo funciona WebAssembly con Rust?",
+  "welcome.example2.title": "Sé creativo",
+  "welcome.example2.description": "Escribe un poema corto sobre programar en Rust",
+  "welcome.example3.title": "Resuelve un problema",
+  "welcome.example3.description": "Ayúdame a entender async/await en Rust"
 }
