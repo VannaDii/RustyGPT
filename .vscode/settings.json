@@ -3,6 +3,8 @@
     "chrono",
     "CUDA",
     "initdb",
+    "onchange",
+    "onclick",
     "tinroof"
   ],
   "liveServer.settings.multiRootWorkspaceName": "rusty_gpt",

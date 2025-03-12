@@ -1,8 +1,12 @@
+use crate::YewI18n;
 use uuid::Uuid;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{HtmlInputElement, Request, RequestInit, RequestMode, Response};
-use yew::{Callback, Html, Properties, events::SubmitEvent, function_component, html, use_state};
+use yew::{
+    Callback, Html, Properties, events::SubmitEvent, function_component, html, use_context,
+    use_state,
+};
 
 #[derive(Properties, PartialEq)]
 pub struct ChatInputProps {
@@ -89,26 +93,50 @@ pub fn chat_input(props: &ChatInputProps) -> Html {
         })
     };
 
+    // Get i18n context
+    let i18n = use_context::<YewI18n>().expect("No I18n context found");
+
+    // Helper function to get translations
+    let t = |key: &str| i18n.translate(key);
+
     html! {
-        <form class="chat-input" onsubmit={on_submit}>
-            {
-                if let Some(err) = (*error).clone() {
-                    html! { <div class="error">{ err }</div> }
-                } else {
-                    html! {}
+        <div class="chat-input">
+            <form onsubmit={on_submit}>
+                {
+                    if let Some(err) = (*error).clone() {
+                        html! { <div class="text-red-500 text-sm mb-2">{ err }</div> }
+                    } else {
+                        html! {}
+                    }
                 }
-            }
-            <input
-                type="text"
-                value={(*input_value).clone()}
-                oninput={on_input}
-                disabled={*is_sending}
-                placeholder={if *is_sending { "Sending..." } else { "Type a message..." }}
-            />
-            <button type="submit" disabled={*is_sending}>
-                { if *is_sending { "Sending..." } else { "Send" } }
-            </button>
-        </form>
+                <textarea
+                    class="w-full p-3 rounded-lg border border-border-color bg-base-100 text-base-content resize-none min-h-[60px] pr-12"
+                    value={(*input_value).clone()}
+                    oninput={on_input}
+                    disabled={*is_sending}
+                    placeholder={if *is_sending { t("input.sending") } else { t("input.placeholder") }}
+                    rows="1"
+                ></textarea>
+                <button
+                    type="submit"
+                    class="absolute right-3 bottom-3 rounded-full w-8 h-8 flex items-center justify-center"
+                    disabled={*is_sending || input_value.is_empty()}
+                    class={if *is_sending || input_value.is_empty() {
+                        "bg-primary/50 text-primary-content/50"
+                    } else {
+                        "bg-primary text-primary-content"
+                    }}
+                >
+                    {
+                        if *is_sending {
+                            html! { <span class="loading-dots"></span> }
+                        } else {
+                            html! { <i class="fas fa-paper-plane"></i> }
+                        }
+                    }
+                </button>
+            </form>
+        </div>
     }
 }
 

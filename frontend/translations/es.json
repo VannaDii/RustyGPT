@@ -1,0 +1,19 @@
+{
+  "app.title": "Rusty GPT",
+
+  "sidebar.new_chat": "Nueva Conversación",
+  "sidebar.search": "Buscar conversaciones...",
+  "sidebar.no_conversations": "No se encontraron conversaciones.",
+  "sidebar.start_new": "¡Comienza una nueva!",
+  "sidebar.login": "Iniciar sesión / Registrarse",
+
+  "chat.select_conversation": "Selecciona una conversación",
+  "chat.or_start_new": "o comienza una nueva",
+  "chat.typing": "Escribiendo...",
+
+  "input.placeholder": "Escribe un mensaje...",
+  "input.sending": "Enviando...",
+
+  "streaming.connected": "Conectado al servidor de streaming",
+  "streaming.connecting": "Conectando al servidor de streaming..."
+}

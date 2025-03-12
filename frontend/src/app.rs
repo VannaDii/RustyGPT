@@ -1,12 +1,14 @@
+use crate::YewI18n;
 use crate::components::chat_input::ChatInput;
 use crate::components::chat_list::ChatList;
 use crate::components::chat_view::ChatView;
+use crate::components::language_selector::LanguageSelector;
 use crate::models::{Conversation, Message, Timestamp};
 use chrono::Utc;
 use uuid::Uuid;
 use web_sys::HtmlInputElement;
 use yew::TargetCast;
-use yew::{Callback, Html, UseStateHandle, function_component, html, use_state};
+use yew::{Callback, Html, UseStateHandle, function_component, html, use_context, use_state};
 
 #[function_component(App)]
 pub fn app() -> Html {
@@ -106,44 +108,82 @@ pub fn app() -> Html {
         })
     };
 
+    // Get i18n context
+    let i18n = use_context::<YewI18n>().expect("No I18n context found");
+
+    // Helper function to get translations
+    let t = |key: &str| i18n.translate(key);
+
     html! {
         <div class="flex h-screen">
-            <div class="w-2/5 md:w-1/3 lg:w-1/4 xl:w-1/5 bg-base-200 p-4 flex flex-col relative">
-                <input
-                    type="text"
-                    placeholder="Search conversations..."
-                    class="w-full p-3 rounded-lg border border-gray-400 bg-gray-800 text-white"
-                    oninput={on_search.reform(|e: yew::events::InputEvent| -> String {
-                        let input: HtmlInputElement = e.target_dyn_into().unwrap();
-                        input.value()
-                    })}
-                />
-                if filtered_conversations.is_empty() {
-                    <p class="text-gray-400 mt-6 text-center text-lg">{"No conversations found. Start a new one!"}</p>
-                } else {
-                    <ChatList conversations={filtered_conversations} on_select={on_select} on_delete={on_delete} />
-                }
-                <div class="absolute bottom-4 left-4 w-full flex items-center space-x-2 p-4 bg-opacity-80 bg-base-300 rounded-lg">
+            // Sidebar
+            <div class="w-80 hidden md:flex md:flex-col bg-base-200 border-r border-border-color">
+                <div class="p-4 border-b border-border-color">
+                    <button class="btn btn-primary w-full flex items-center justify-center gap-2" onclick={_start_new_chat.clone()}>
+                        <span class="text-lg">{"+"}</span>
+                        <span>{ t("sidebar.new_chat") }</span>
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto">
+                    <div class="p-3">
+                        <input
+                            type="text"
+                            placeholder={ t("sidebar.search") }
+                            class="w-full p-3 rounded-lg border border-border-color bg-base-100 text-base-content"
+                            oninput={on_search.reform(|e: yew::events::InputEvent| -> String {
+                                let input: HtmlInputElement = e.target_dyn_into().unwrap();
+                                input.value()
+                            })}
+                        />
+                    </div>
+
+                    if filtered_conversations.is_empty() {
+                        <div class="flex flex-col items-center justify-center h-40 text-base-content/60">
+                            <p class="text-center">{ t("sidebar.no_conversations") }</p>
+                            <p class="text-center text-sm">{ t("sidebar.start_new") }</p>
+                        </div>
+                    } else {
+                        <ChatList conversations={filtered_conversations} on_select={on_select} on_delete={on_delete} />
+                    }
+                </div>
+
+                <div class="p-4 border-t border-border-color">
+                    <div class="flex items-center justify-between mb-3">
+                        <LanguageSelector />
+                    </div>
                     {
                         if let Some(user) = (*user).clone() {
                             html! {
-                                <div class="flex items-center space-x-3">
-                                    <img src="https://via.placeholder.com/40" class="rounded-full w-10 h-10" />
-                                    <span class="text-white text-lg">{ user }</span>
+                                <div class="flex items-center gap-3">
+                                    <div class="w-10 h-10 rounded-full overflow-hidden">
+                                        <img src="https://via.placeholder.com/40" alt={user.clone()} />
+                                    </div>
+                                    <span class="text-base-content">{ user }</span>
                                 </div>
                             }
                         } else {
                             html! {
-                                <button class="btn btn-primary w-full">{"Login / Sign Up"}</button>
+                                <button class="btn btn-outline w-full">{ t("sidebar.login") }</button>
                             }
                         }
                     }
                 </div>
             </div>
-            <div class="flex-1 flex flex-col bg-base-100">
+
+            // Mobile sidebar toggle
+            <div class="md:hidden absolute top-4 left-4 z-10">
+                <button class="btn btn-circle btn-outline">
+                    <span class="text-xl">{"☰"}</span>
+                </button>
+            </div>
+
+            // Main content
+            <div class="flex-1 flex flex-col bg-base-100 relative">
                 <ChatView conversation={(*selected_conversation).clone()} />
-                <div class="p-4 flex justify-center">
-                    <div class="w-full md:w-3/5">
+
+                <div class="p-4 border-t border-border-color">
+                    <div class="max-w-3xl mx-auto w-full">
                         <ChatInput
                             on_send={on_send}
                             conversation_id={selected_conversation.as_ref().map(|c| c.id)}
