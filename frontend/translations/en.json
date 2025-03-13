@@ -1,33 +1,46 @@
 {
-  "app.title": "Rusty GPT",
-
-  "sidebar.new_chat": "New Chat",
-  "sidebar.search": "Search conversations...",
-  "sidebar.no_conversations": "No conversations found.",
-  "sidebar.start_new": "Start a new one!",
-  "sidebar.login": "Login / Sign Up",
-  "sidebar.delete_conversation": "Delete conversation",
-  "sidebar.empty_conversation": "No messages yet",
-
-  "chat.select_conversation": "Select a conversation",
-  "chat.or_start_new": "or start a new one",
-  "chat.typing": "Typing...",
-  "chat.just_now": "Just now",
-
-  "input.placeholder": "Type a message...",
-  "input.sending": "Sending...",
-  "input.characters": "characters",
-  "input.enter_to_send": "Press Enter to send, Shift+Enter for new line",
-
-  "streaming.connected": "Connected to streaming server",
-  "streaming.connecting": "Connecting to streaming server...",
-
-  "welcome.title": "Welcome to Rusty GPT",
-  "welcome.subtitle": "A modern chat interface built with Rust and Yew",
-  "welcome.example1.title": "Ask a question",
-  "welcome.example1.description": "How does WebAssembly work with Rust?",
-  "welcome.example2.title": "Get creative",
-  "welcome.example2.description": "Write a short poem about programming in Rust",
-  "welcome.example3.title": "Solve a problem",
-  "welcome.example3.description": "Help me understand async/await in Rust"
+  "app": {
+    "title": "Rusty GPT"
+  },
+  "sidebar": {
+    "new_chat": "New Chat",
+    "search": "Search conversations...",
+    "no_conversations": "No conversations found.",
+    "start_new": "Start a new one!",
+    "login": "Login / Sign Up",
+    "delete_conversation": "Delete conversation",
+    "empty_conversation": "No messages yet"
+  },
+  "chat": {
+    "select_conversation": "Select a conversation",
+    "or_start_new": "or start a new one",
+    "typing": "Typing...",
+    "just_now": "Just now"
+  },
+  "input": {
+    "placeholder": "Type a message...",
+    "sending": "Sending...",
+    "characters": "characters",
+    "enter_to_send": "Press Enter to send, Shift+Enter for new line"
+  },
+  "streaming": {
+    "connected": "Connected to streaming server",
+    "connecting": "Connecting to streaming server..."
+  },
+  "welcome": {
+    "title": "Welcome to Rusty GPT",
+    "subtitle": "A modern chat interface built with Rust and Yew",
+    "example1": {
+      "title": "Ask a question",
+      "description": "How does WebAssembly work with Rust?"
+    },
+    "example2": {
+      "title": "Get creative",
+      "description": "Write a short poem about programming in Rust"
+    },
+    "example3": {
+      "title": "Solve a problem",
+      "description": "Help me understand async/await in Rust"
+    }
+  }
 }

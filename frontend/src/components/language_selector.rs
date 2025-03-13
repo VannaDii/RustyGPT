@@ -3,6 +3,9 @@ use std::ops::Deref;
 use yew::use_state;
 use yew::{Callback, function_component, html};
 
+use crate::language;
+use crate::{components::language_selector_button::LanguageSelectorButton, supported_languages};
+
 #[function_component(LanguageSelector)]
 pub fn language_selector() -> yew::Html {
     let (_i18n, set_language) = use_translation();
@@ -16,17 +19,14 @@ pub fn language_selector() -> yew::Html {
         })
     };
 
-    let current_language = language_state.deref();
-    let active_lang_flag = match current_language.as_str() {
-        "en" => "🇺🇸",
-        "es" => "🇪🇸",
-        _ => "🌐",
-    };
-    let active_lang = match current_language.as_str() {
-        "en" => "English",
-        "es" => "Español",
-        _ => "Language",
-    };
+    let lang_code = language_state.deref();
+    let lang_info = language::get_language_info(lang_code.as_str()).unwrap();
+    let active_lang_flag = lang_info.flag;
+    let active_lang = lang_info.native_name;
+    let supported = language::supported_languages();
+    let mut languages: Vec<_> = supported.iter().collect();
+    languages.sort_by(|a, b| a.1.native_name.cmp(&b.1.native_name));
+
     html! {
         <div class="dropdown dropdown-end">
             <label tabindex="0" class="btn btn-ghost btn-sm gap-1 normal-case">
@@ -35,29 +35,17 @@ pub fn language_selector() -> yew::Html {
                 <i class="fas fa-chevron-down text-xs opacity-60"></i>
             </label>
             <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52">
-                <li>
-                    <button
-                        class={if current_language == "en" { "active" } else { "" }}
-                        value="en"
-                        onclick={ {
-                            let on_click = on_click.clone();
-                            move |_| on_click.emit(String::from("en"))
-                        }}>
-                        <span>{"🇺🇸"}</span>
-                        <span>{"English"}</span>
-                    </button>
-                </li>
-                <li>
-                    <button
-                        class={if current_language == "es" { "active" } else { "" }}
-                        onclick={ {
-                            let on_click = on_click.clone();
-                            move |_| on_click.emit(String::from("es"))
-                        }}>
-                        <span>{"🇪🇸"}</span>
-                        <span>{"Español"}</span>
-                    </button>
-                </li>
+            {
+                for languages.into_iter().map(|(_, info)| {
+                    html! {
+                        <LanguageSelectorButton
+                            is_active={info.code == lang_code}
+                            info={info.clone()}
+                            on_click={on_click.clone()}
+                        />
+                    }
+                })
+            }
             </ul>
         </div>
     }

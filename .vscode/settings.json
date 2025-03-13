@@ -2,9 +2,13 @@
   "cSpell.words": [
     "chrono",
     "CUDA",
+    "Deutsch",
+    "Español",
+    "Français",
     "initdb",
     "onchange",
     "onclick",
+    "tabindex",
     "tinroof"
   ],
   "liveServer.settings.multiRootWorkspaceName": "rusty_gpt",

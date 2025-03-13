@@ -1,0 +1,46 @@
+{
+  "app": {
+    "title": "Rusty GPT"
+  },
+  "sidebar": {
+    "new_chat": "Nouvelle conversation",
+    "search": "Rechercher des conversations...",
+    "no_conversations": "Aucune conversation trouvée.",
+    "start_new": "Commencez-en une nouvelle !",
+    "login": "Connexion / Inscription",
+    "delete_conversation": "Supprimer la conversation",
+    "empty_conversation": "Pas encore de messages"
+  },
+  "chat": {
+    "select_conversation": "Sélectionnez une conversation",
+    "or_start_new": "ou commencez-en une nouvelle",
+    "typing": "En train d'écrire...",
+    "just_now": "À l'instant"
+  },
+  "input": {
+    "placeholder": "Tapez un message...",
+    "sending": "Envoi en cours...",
+    "characters": "caractères",
+    "enter_to_send": "Appuyez sur Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne"
+  },
+  "streaming": {
+    "connected": "Connecté au serveur de streaming",
+    "connecting": "Connexion au serveur de streaming..."
+  },
+  "welcome": {
+    "title": "Bienvenue sur Rusty GPT",
+    "subtitle": "Une interface de chat moderne construite avec Rust et Yew",
+    "example1": {
+      "title": "Posez une question",
+      "description": "Comment WebAssembly fonctionne-t-il avec Rust ?"
+    },
+    "example2": {
+      "title": "Soyez créatif",
+      "description": "Écrivez un court poème sur la programmation en Rust"
+    },
+    "example3": {
+      "title": "Résolvez un problème",
+      "description": "Aidez-moi à comprendre async/await en Rust"
+    }
+  }
+}
