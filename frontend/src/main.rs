@@ -3,6 +3,7 @@ mod components;
 mod containers;
 mod language;
 mod models;
+mod pages;
 mod routes;
 mod utils;
 

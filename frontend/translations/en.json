@@ -117,5 +117,27 @@
   "under_construction": {
     "title": "Page Under Construction",
     "description": "This page is currently being built and will be available soon."
+  },
+  "table": {
+    "no_data": "No data available",
+    "empty": "No items to display",
+    "loading": "Loading data...",
+    "search": "Search...",
+    "per_page": "per page",
+    "showing": "Showing",
+    "of": "of",
+    "entries": "entries",
+    "first": "First",
+    "previous": "Previous",
+    "next": "Next",
+    "last": "Last"
+  },
+  "modal": {
+    "close": "Close modal",
+    "save": "Save changes",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "confirmation": "Confirmation",
+    "confirm_message": "Are you sure you want to perform this action?"
   }
 }

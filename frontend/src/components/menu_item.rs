@@ -1,4 +1,5 @@
 use crate::models::sidebar::{BadgeVariant, MenuItem as MenuItemModel};
+use i18nrs::yew::use_translation;
 use web_sys::MouseEvent;
 use yew::{Callback, Html, Properties, classes, function_component, html};
 use yew_icons::{Icon, IconId};
@@ -14,6 +15,7 @@ pub struct MenuItemProps {
 
 #[function_component(MenuItem)]
 pub fn menu_item(props: &MenuItemProps) -> Html {
+    let (i18n, ..) = use_translation();
     let item = &props.item;
     let index = props.index;
     let is_collapsed = props.is_sidebar_collapsed;
@@ -111,7 +113,7 @@ pub fn menu_item(props: &MenuItemProps) -> Html {
                     "transition-opacity",
                     if is_collapsed { "hidden" } else { "" }
                 )}>
-                    {item.i18n_key.clone()}
+                    {i18n.t(&item.i18n_key)}
                 </span>
 
                 {
@@ -200,7 +202,7 @@ pub fn menu_item(props: &MenuItemProps) -> Html {
                                                     if subitem.is_active { "text-primary font-medium" } else { "" }
                                                 )}
                                             >
-                                                <span class="ml-1">{subitem.i18n_key.clone()}</span>
+                                                <span class="ml-1">{i18n.t(&subitem.i18n_key)}</span>
 
                                                 {
                                                     if let Some(badge) = &subitem.badge {

@@ -1,4 +1,5 @@
 use crate::containers::layout::Layout;
+use crate::pages::{DashboardPage, TransactionsPage};
 use wasm_bindgen::prelude::*;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -38,13 +39,13 @@ pub fn switch(routes: Routes) -> Html {
         Routes::Dashboard => {
             log("Route: Dashboard");
             html! { <Layout current_route={routes}>
-                <div>{format!("Content for {:?} page", routes)}</div>
+                <DashboardPage />
             </Layout> }
         }
         Routes::Transactions => {
             log("Route: Transactions");
             html! { <Layout current_route={routes}>
-                <div>{format!("Content for {:?} page", routes)}</div>
+                <TransactionsPage />
             </Layout> }
         }
         Routes::Settings => {
