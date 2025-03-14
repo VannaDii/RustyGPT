@@ -3,7 +3,17 @@
     "title": "Rusty GPT"
   },
   "header": {
-    "logout": "Logout"
+    "logout": "Logout",
+    "profile": "Profile",
+    "settings": "Settings",
+    "new_badge": "New",
+    "notifications": "Notifications",
+    "mark_all_read": "Mark all as read",
+    "view_all_notifications": "View all notifications",
+    "user_notification": "John Doe signed up",
+    "transaction_notification": "New transaction of $199.99",
+    "time_recent": "2 hours ago",
+    "time_earlier": "3 hours ago"
   },
   "sidebar": {
     "new_chat": "New Chat",
@@ -12,7 +22,20 @@
     "start_new": "Start a new one!",
     "login": "Login / Sign Up",
     "delete_conversation": "Delete conversation",
-    "empty_conversation": "No messages yet"
+    "empty_conversation": "No messages yet",
+    "dashboard": "Dashboard",
+    "transactions": "Transactions",
+    "settings": "Settings",
+    "users": "Users",
+    "user_list": "User List",
+    "user_roles": "User Roles",
+    "permissions": "Permissions",
+    "reports": "Reports",
+    "sales_report": "Sales Report",
+    "user_report": "User Report",
+    "performance": "Performance",
+    "collapse": "Collapse Sidebar",
+    "expand": "Expand Sidebar"
   },
   "notifications": {
     "title": "Notifications",
@@ -49,5 +72,50 @@
       "title": "Solve a problem",
       "description": "Help me understand async/await in Rust"
     }
+  },
+  "dashboard": {
+    "total_users": "Total Users",
+    "revenue": "Revenue",
+    "active_users": "Active Users",
+    "conversion_rate": "Conversion Rate",
+    "recent_activity": "Recent Activity",
+    "performance_overview": "Performance Overview",
+    "chart_placeholder": "Chart Placeholder",
+    "chart_description": "(Will be implemented with plotters-canvas)",
+    "type": "Type",
+    "description": "Description",
+    "date": "Date",
+    "page_title": "Dashboard",
+    "content_title": "Dashboard Overview",
+    "users_this_month": "users this month",
+    "increase": "increase",
+    "decrease": "decrease",
+    "initials": "AD"
+  },
+  "theme": {
+    "title": "Theme",
+    "selector": "Theme selector",
+    "dark": "Dark",
+    "light": "Light",
+    "cupcake": "Cupcake",
+    "cyberpunk": "Cyberpunk",
+    "business": "Business"
+  },
+  "transactions": {
+    "id": "ID",
+    "customer": "Customer",
+    "amount": "Amount",
+    "status": "Status",
+    "date": "Date",
+    "actions": "Actions",
+    "view": "View",
+    "edit": "Edit",
+    "status_completed": "Completed",
+    "status_pending": "Pending",
+    "status_failed": "Failed"
+  },
+  "under_construction": {
+    "title": "Page Under Construction",
+    "description": "This page is currently being built and will be available soon."
   }
 }

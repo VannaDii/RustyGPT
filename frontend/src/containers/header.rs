@@ -1,129 +1,121 @@
+use crate::components::theme_switcher::ThemeSwitcher;
 use i18nrs::yew::use_translation;
-use web_sys::window;
-use yew::{Html, classes, function_component, html, use_effect, use_effect_with, use_state};
+use wasm_bindgen::prelude::*;
+use yew::{Html, Properties, classes, function_component, html};
 use yew_icons::{Icon, IconId};
-use yew_router::prelude::*;
-use yewdux::{use_dispatch, use_selector};
 
-use crate::{
-    models::{
-        header::HeaderState,
-        right_sidebar::{RightSidebarAction, RightSidebarBodyType, RightSidebarState},
-    },
-    routes::Routes,
-    utils::local_storage,
-};
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
+}
+
+use crate::routes::Routes;
+
+#[derive(Properties, PartialEq)]
+pub struct HeaderProps {
+    #[prop_or_default]
+    pub current_route: Option<Routes>,
+}
 
 #[function_component(Header)]
-pub fn header() -> Html {
-    let (i18n, ..) = use_translation();
-    let dispatch_right_sidebar = use_dispatch::<RightSidebarState>();
-    let state = use_selector(|header: &HeaderState| header.clone());
+pub fn header(_props: &HeaderProps) -> Html {
+    // Initialize translations
 
-    let theme = use_state(|| local_storage::get("theme"));
-
-    let theme_clone = theme.clone();
-    use_effect(move || {
-        let prefers_dark = window()
-            .unwrap()
-            .match_media("(prefers-color-scheme: dark)")
-            .ok()
-            .flatten()
-            .map(|m| m.matches())
-            .unwrap_or(false);
-        let target_theme = if prefers_dark { "dark" } else { "light" };
-        theme_clone.set(Some(target_theme.to_string()));
-        local_storage::set("theme", target_theme);
-        || {}
-    });
-
-    let HeaderState {
-        page_title,
-        notification_count,
-        ..
-    } = &*state;
-
-    let notification_label = i18n.t("notifications.title");
-    let open_notifications = dispatch_right_sidebar.apply_callback(move |_| {
-        RightSidebarAction::OpenSidebar(
-            RightSidebarBodyType::Notifications,
-            None,
-            notification_label.clone(),
-        )
-    });
-    let logout = |_| local_storage::clear();
-    let logout_label = i18n.t("header.logout");
-    let sun_class_augment = if *theme == Some("dark".to_string()) {
-        "swap-on"
-    } else {
-        "swap-off"
-    };
-    let moon_class_augment = if *theme == Some("light".to_string()) {
-        "swap-on"
-    } else {
-        "swap-off"
-    };
-
-    use_effect_with((), |_| {
-        move || {
-            if let Some(document) = web_sys::window().and_then(|w| w.document()) {
-                if let Ok(Some(element)) = document.query_selector("[data-set-theme='light']") {
-                    let _ = element.set_attribute("data-set-theme", "light");
-                    let _ = element.set_attribute("data-act-class", "ACTIVECLASS");
-                }
-                if let Ok(Some(element)) = document.query_selector("[data-set-theme='dark']") {
-                    let _ = element.set_attribute("data-set-theme", "dark");
-                    let _ = element.set_attribute("data-act-class", "ACTIVECLASS");
-                }
-            }
-        }
-    });
+    let (_i18n, ..) = use_translation();
+    let notification_count = 15; // Example notification count matching DashWind
 
     html! {
       <>
-        <div class="navbar sticky top-0 bg-base-100  z-10 shadow-md ">
+        <div class="navbar sticky top-0 z-10 shadow-sm border-b border-base-200 bg-base-100">
             <div class="flex-1">
-                <label htmlFor="left-sidebar-drawer" class="btn btn-primary drawer-button lg:hidden">
-                <Icon icon_id={IconId::HeroiconsSolidBars3} class="h-5 inline-block w-5"/></label>
-                <h1 class="text-2xl font-semibold ml-2">{page_title}</h1>
-            </div>
-            <div class="flex-none ">
-                <label class="swap ">
-                    <input type="checkbox"/>
-                    <Icon
-                        icon_id={IconId::HeroiconsSolidSun}
-                        class={classes!("fill-current", "w-6", "h-6", sun_class_augment)}/>
-                    <Icon
-                        icon_id={IconId::HeroiconsSolidMoon}
-                        class={classes!("fill-current", "w-6", "h-6", moon_class_augment)}/>
+                <label htmlFor="left-sidebar-drawer" class="btn btn-square btn-ghost drawer-button lg:hidden">
+                    <Icon icon_id={IconId::HeroiconsSolidBars3} class="h-5 w-5"/>
                 </label>
-                <button class="btn btn-ghost ml-4  btn-circle" onclick={open_notifications}>
-                    <div class="indicator">
-                        <Icon icon_id={IconId::HeroiconsSolidBell} class="h-6 w-6"/>
-                        if *notification_count > 0 {
-                            <span class="indicator-item badge badge-secondary badge-sm">{notification_count}</span>
-                        }
-                    </div>
-                </button>
-                <div class="dropdown dropdown-end ml-4">
-                    <label tabIndex={0} class="btn btn-ghost btn-circle avatar">
-                        <div class="w-10 rounded-full">
-                            <Icon icon_id={IconId::HeroiconsSolidUser} class="h-6 w-6"/>
+                {
+                    // Page title could be dynamic based on active route
+                    _props.current_route.as_ref().map_or_else(
+                        || html! { <h1 class="text-2xl font-semibold ml-2">{_i18n.t("sidebar.dashboard")}</h1> },
+                        |route| html! { <h1 class="text-2xl font-semibold ml-2">{format!("{:?}", route)}</h1> }
+                    )
+                }
+            </div>
+            <div class="flex-none flex items-center gap-2">
+                // Theme Switcher
+                <ThemeSwitcher />
+
+                // Notifications dropdown
+                <div class="dropdown dropdown-end">
+                    <label tabIndex={0} class="btn btn-ghost btn-circle">
+                        <div class="indicator">
+                            <Icon icon_id={IconId::HeroiconsSolidBell} class="h-5 w-5"/>
+                            <span class="indicator-item badge badge-primary badge-sm">{notification_count}</span>
                         </div>
                     </label>
-                    <ul tabIndex={0} class="menu menu-compact dropdown-content mt-3 p-2 shadow bg-base-100 rounded-box w-52">
-                        <li class="justify-between">
-                            <Link<Routes> to={Routes::Settings}>
-                            {"Profile Settings"}
-                            <span class="badge">{"New"}</span>
-                            </Link<Routes>>
+                    <div tabIndex={0} class="mt-3 z-[1] card card-compact dropdown-content w-80 bg-base-100 shadow">
+                        <div class="card-body">
+                            <div class="flex justify-between">
+                                <span class="font-bold text-lg">{notification_count} {" "}{_i18n.t("notifications.title")}</span>
+                                <a class="text-info text-sm">{_i18n.t("header.mark_all_read")}</a>
+                            </div>
+                            <div class="divider my-1"></div>
+
+                            // Recent notifications
+                            <div class="flex flex-col gap-3 max-h-96 overflow-y-auto">
+                                // Example notification
+                                <div class="flex gap-3 items-start">
+                                    <div class="avatar">
+                                        <div class="w-10 rounded-full bg-primary text-primary-content flex items-center justify-center">
+                                            <span>{"JD"}</span> // TODO: Add to translations
+                                        </div>
+                                    </div>
+                                    <div class="flex-1">
+                                <p class="text-sm font-medium">{_i18n.t("header.user_notification")}</p>
+                                <p class="text-xs text-base-content/70">{_i18n.t("header.time_recent")}</p>
+                                    </div>
+                                </div>
+
+                                <div class="flex gap-3 items-start">
+                                    <div class="avatar">
+                                        <div class="w-10 rounded-full bg-secondary text-secondary-content flex items-center justify-center">
+                                            <Icon icon_id={IconId::HeroiconsSolidBell} class="h-5 w-5" />
+                                        </div>
+                                    </div>
+                                    <div class="flex-1">
+                                        <p class="text-sm font-medium">{_i18n.t("header.transaction_notification")}</p>
+                                        <p class="text-xs text-base-content/70">{_i18n.t("header.time_earlier")}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card-actions mt-2">
+                                <button class="btn btn-primary btn-sm btn-block">{_i18n.t("header.view_all_notifications")}</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                // User profile dropdown
+                <div class="dropdown dropdown-end">
+                    <label tabIndex={0} class="btn btn-ghost btn-circle avatar">
+                        <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                            <span class="text-primary font-semibold">{"AD"}</span>
+                        </div>
+                    </label>
+                    <ul tabIndex={0} class="menu menu-sm dropdown-content mt-3 p-2 shadow bg-base-100 rounded-box w-52 z-[1]">
+                        <li>
+                            <a class="justify-between">
+                                {_i18n.t("header.profile")}
+                                <span class="badge badge-accent badge-sm">{_i18n.t("header.new_badge")}</span>
+                            </a>
                         </li>
-                        <div class="divider mt-0 mb-0"></div>
-                        <li><a onclick={logout}>{logout_label}</a></li>
+                        <li><a>{_i18n.t("sidebar.settings")}</a></li>
+                        <div class="divider my-1"></div>
+                        <li><a>{_i18n.t("header.logout")}</a></li>
                     </ul>
                 </div>
             </div>
         </div>
-        </>
+      </>
     }
 }

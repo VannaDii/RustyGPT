@@ -35,11 +35,11 @@ web-sys = { version = "0.3", features = [
 yew = { version = "0.21", features = ["csr"] }
 yew-hooks = "0.3.3"
 yew_icons = { version = "0.8.0", features = [
-  "HeroiconsSolidSun",
-  "HeroiconsSolidMoon",
-  "HeroiconsSolidBars3",
-  "HeroiconsSolidBell",
-  "HeroiconsSolidUser",
+  "heroicons_solid",      # Includes all Heroicons solid variants
+  "heroicons_outline",    # Includes all Heroicons outline variants
+  "heroicons_mini_solid", # Includes all Heroicons mini solid variants
+  # These features provide access to all Heroicon icon variants
+  # which allows us to use any Heroicon by ID
 ] }
 yew-router = "0.18.0"
 yewdux = "0.11.0"

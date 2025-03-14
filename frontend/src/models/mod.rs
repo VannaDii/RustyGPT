@@ -1,4 +1,6 @@
-pub(crate) mod app_state;
-pub(crate) mod header;
-pub(crate) mod right_sidebar;
-pub(crate) mod shared;
+pub mod app_state;
+pub mod header;
+pub mod right_sidebar;
+pub mod shared;
+pub mod sidebar;
+pub mod sidebar_store;
