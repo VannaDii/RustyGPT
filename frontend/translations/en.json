@@ -138,6 +138,16 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "confirmation": "Confirmation",
-    "confirm_message": "Are you sure you want to perform this action?"
+    "confirm_message": "Are you sure you want to perform this action?",
+    "details": "Details",
+    "no_transaction_selected": "No transaction selected"
+  },
+  "common": {
+    "page_not_found": "Page Not Found",
+    "back_to_dashboard": "Back to Dashboard",
+    "error_occurred": "An error occurred",
+    "no_data": "No data available",
+    "loading": "Loading...",
+    "status": "Status"
   }
 }

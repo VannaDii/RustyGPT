@@ -193,7 +193,8 @@ pub fn transactions_page() -> Html {
 
     html! {
         <div class="p-4 space-y-6">
-            <h1 class="text-2xl font-bold mb-6">{i18n.t("transactions.id")}</h1>
+            // Page title - using sidebar section name as page name
+            <h1 class="text-2xl font-bold mb-6">{i18n.t("sidebar.transactions")}</h1>
 
             <div class="card bg-base-100 shadow-sm">
                 <div class="card-body">
@@ -260,7 +261,7 @@ pub fn transactions_page() -> Html {
                     } else {
                         html! {
                             <div class="text-center py-4 text-base-content/70">
-                                {i18n.t("table.no_data")}
+                                {i18n.t("modal.no_transaction_selected")}
                             </div>
                         }
                     }

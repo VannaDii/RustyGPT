@@ -1,4 +1,5 @@
 use crate::containers::layout::Layout;
+use crate::pages::DashboardPage;
 use crate::routes::Routes;
 use wasm_bindgen::prelude::*;
 use yew::{Html, function_component, html};
@@ -11,12 +12,12 @@ extern "C" {
 
 #[function_component(App)]
 pub fn app() -> Html {
-    // Initialize app component
+    log("Starting Rusty GPT Application");
 
     html! {
         <div class="bg-base-200 min-h-screen">
             <Layout current_route={Routes::Dashboard}>
-                <div>{"Dashboard Content"}</div>
+                <DashboardPage />
             </Layout>
         </div>
     }
