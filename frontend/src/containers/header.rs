@@ -1,3 +1,4 @@
+use crate::components::language_selector::LanguageSelector;
 use crate::components::theme_switcher::ThemeSwitcher;
 use i18nrs::yew::use_translation;
 use wasm_bindgen::prelude::*;
@@ -22,7 +23,7 @@ pub struct HeaderProps {
 pub fn header(_props: &HeaderProps) -> Html {
     // Initialize translations
 
-    let (_i18n, ..) = use_translation();
+    let (i18n, ..) = use_translation();
     let notification_count = 15; // Example notification count matching DashWind
 
     html! {
@@ -35,12 +36,15 @@ pub fn header(_props: &HeaderProps) -> Html {
                 {
                     // Page title could be dynamic based on active route
                     _props.current_route.as_ref().map_or_else(
-                        || html! { <h1 class="text-2xl font-semibold ml-2">{_i18n.t("sidebar.dashboard")}</h1> },
+                        || html! { <h1 class="text-2xl font-semibold ml-2">{i18n.t("sidebar.dashboard")}</h1> },
                         |route| html! { <h1 class="text-2xl font-semibold ml-2">{format!("{:?}", route)}</h1> }
                     )
                 }
             </div>
             <div class="flex-none flex items-center gap-2">
+                // Language Selector
+                <LanguageSelector />
+
                 // Theme Switcher
                 <ThemeSwitcher />
 
@@ -55,8 +59,8 @@ pub fn header(_props: &HeaderProps) -> Html {
                     <div tabIndex={0} class="mt-3 z-[1] card card-compact dropdown-content w-80 bg-base-100 shadow">
                         <div class="card-body">
                             <div class="flex justify-between">
-                                <span class="font-bold text-lg">{notification_count} {" "}{_i18n.t("notifications.title")}</span>
-                                <a class="text-info text-sm">{_i18n.t("header.mark_all_read")}</a>
+                                <span class="font-bold text-lg">{notification_count} {" "}{i18n.t("notifications.title")}</span>
+                                <a class="text-info text-sm">{i18n.t("header.mark_all_read")}</a>
                             </div>
                             <div class="divider my-1"></div>
 
@@ -70,8 +74,8 @@ pub fn header(_props: &HeaderProps) -> Html {
                                         </div>
                                     </div>
                                     <div class="flex-1">
-                                <p class="text-sm font-medium">{_i18n.t("header.user_notification")}</p>
-                                <p class="text-xs text-base-content/70">{_i18n.t("header.time_recent")}</p>
+                                <p class="text-sm font-medium">{i18n.t("header.user_notification")}</p>
+                                <p class="text-xs text-base-content/70">{i18n.t("header.time_recent")}</p>
                                     </div>
                                 </div>
 
@@ -82,14 +86,14 @@ pub fn header(_props: &HeaderProps) -> Html {
                                         </div>
                                     </div>
                                     <div class="flex-1">
-                                        <p class="text-sm font-medium">{_i18n.t("header.transaction_notification")}</p>
-                                        <p class="text-xs text-base-content/70">{_i18n.t("header.time_earlier")}</p>
+                                        <p class="text-sm font-medium">{i18n.t("header.transaction_notification")}</p>
+                                        <p class="text-xs text-base-content/70">{i18n.t("header.time_earlier")}</p>
                                     </div>
                                 </div>
                             </div>
 
                             <div class="card-actions mt-2">
-                                <button class="btn btn-primary btn-sm btn-block">{_i18n.t("header.view_all_notifications")}</button>
+                                <button class="btn btn-primary btn-sm btn-block">{i18n.t("header.view_all_notifications")}</button>
                             </div>
                         </div>
                     </div>
@@ -105,13 +109,13 @@ pub fn header(_props: &HeaderProps) -> Html {
                     <ul tabIndex={0} class="menu menu-sm dropdown-content mt-3 p-2 shadow bg-base-100 rounded-box w-52 z-[1]">
                         <li>
                             <a class="justify-between">
-                                {_i18n.t("header.profile")}
-                                <span class="badge badge-accent badge-sm">{_i18n.t("header.new_badge")}</span>
+                                {i18n.t("header.profile")}
+                                <span class="badge badge-accent badge-sm">{i18n.t("header.new_badge")}</span>
                             </a>
                         </li>
-                        <li><a>{_i18n.t("sidebar.settings")}</a></li>
+                        <li><a>{i18n.t("sidebar.settings")}</a></li>
                         <div class="divider my-1"></div>
-                        <li><a>{_i18n.t("header.logout")}</a></li>
+                        <li><a>{i18n.t("header.logout")}</a></li>
                     </ul>
                 </div>
             </div>
