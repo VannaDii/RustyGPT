@@ -5,11 +5,13 @@
     "Deutsch",
     "Español",
     "Français",
+    "Heroicons",
     "initdb",
     "onchange",
     "onclick",
     "tabindex",
-    "tinroof"
+    "tinroof",
+    "yewdux"
   ],
   "liveServer.settings.multiRootWorkspaceName": "rusty_gpt",
   "postman.settings.dotenv-detection-notification-visibility": false,
@@ -24,5 +26,7 @@
       "username": "tinroof",
       "password": "rusty"
     }
-  ]
+  ],
+  "editor.defaultFormatter": null,
+  "editor.formatOnSave": true
 }

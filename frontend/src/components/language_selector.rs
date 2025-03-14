@@ -3,8 +3,8 @@ use std::ops::Deref;
 use yew::use_state;
 use yew::{Callback, function_component, html};
 
+use crate::components::language_selector_button::LanguageSelectorButton;
 use crate::language;
-use crate::{components::language_selector_button::LanguageSelectorButton, supported_languages};
 
 #[function_component(LanguageSelector)]
 pub fn language_selector() -> yew::Html {

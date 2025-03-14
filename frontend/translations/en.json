@@ -2,6 +2,9 @@
   "app": {
     "title": "Rusty GPT"
   },
+  "header": {
+    "logout": "Logout"
+  },
   "sidebar": {
     "new_chat": "New Chat",
     "search": "Search conversations...",
@@ -10,6 +13,10 @@
     "login": "Login / Sign Up",
     "delete_conversation": "Delete conversation",
     "empty_conversation": "No messages yet"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "no_notifications": "No notifications"
   },
   "chat": {
     "select_conversation": "Select a conversation",
