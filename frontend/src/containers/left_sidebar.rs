@@ -5,17 +5,12 @@ use i18nrs::yew::use_translation;
 use web_sys::MouseEvent;
 use yew::{Callback, Html, classes, function_component, html, use_effect_with};
 use yew_icons::{Icon, IconId};
-use yew_router::prelude::*;
 use yewdux::prelude::*;
-
-use crate::routes::Routes;
 
 #[function_component(LeftSidebar)]
 pub fn left_sidebar() -> Html {
     let (i18n, ..) = use_translation();
     let (sidebar_state, sidebar_dispatch) = use_store::<SidebarStore>();
-    let navigator = use_navigator();
-    let location = use_location();
 
     // Create menu items
     use_effect_with(sidebar_dispatch.clone(), move |sidebar_dispatch| {
@@ -87,34 +82,12 @@ pub fn left_sidebar() -> Html {
         || {}
     });
 
-    let handle_menu_click = {
-        let navigator = navigator.clone();
-        let sidebar_state = sidebar_state.clone();
-        Callback::from(move |(index, _e): (usize, MouseEvent)| {
-            // Handle main menu items
-            if index < 100 {
-                if let Some(item) = sidebar_state.state.menu_items.get(index) {
-                    if let Some(_url) = &item.url {
-                        web_sys::console::log_1(&"Menu item clicked".into());
-                    }
-                }
-            } else {
-                // Handle submenu items
-                let main_index = index / 100;
-                let sub_index = index % 100;
-
-                if let Some(item) = sidebar_state.state.menu_items.get(main_index) {
-                    if let Some(submenu) = &item.submenu {
-                        if let Some(sub_item) = submenu.get(sub_index) {
-                            if let Some(_url) = &sub_item.url {
-                                web_sys::console::log_1(&"Submenu item clicked".into());
-                            }
-                        }
-                    }
-                }
-            }
-        })
-    };
+    // Menu click handler is logging only - we're letting the browser handle actual navigation
+    let handle_menu_click = Callback::from(move |(index, e): (usize, MouseEvent)| {
+        // Just log the click - don't prevent default
+        e.prevent_default();
+        web_sys::console::log_1(&format!("Menu item {} clicked", index).into());
+    });
 
     let handle_toggle_submenu = {
         let sidebar_dispatch = sidebar_dispatch.clone();

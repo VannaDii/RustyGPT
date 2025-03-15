@@ -1,3 +1,4 @@
+use crate::routes::Routes;
 use std::any::Any;
 use std::rc::Rc;
 use yew_icons::IconId;
@@ -21,6 +22,7 @@ pub struct MenuItem {
     pub i18n_key: String,
     pub icon: Option<IconId>,
     pub url: Option<String>,
+    pub route: Option<Routes>,
     pub badge: Option<String>,
     pub badge_variant: Option<BadgeVariant>,
     pub submenu: Option<Vec<MenuItem>>,
@@ -35,6 +37,7 @@ impl PartialEq for MenuItem {
             && self.i18n_key == other.i18n_key
             && self.icon == other.icon
             && self.url == other.url
+            && self.route == other.route
             && self.badge == other.badge
             && self.badge_variant == other.badge_variant
             && self.submenu == other.submenu
@@ -52,6 +55,7 @@ impl MenuItem {
             i18n_key: i18n_key.into(),
             icon: None,
             url: None,
+            route: None,
             badge: None,
             badge_variant: None,
             submenu: None,
@@ -70,6 +74,12 @@ impl MenuItem {
     /// Set the URL for the menu item
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = Some(url.into());
+        self
+    }
+
+    /// Set the route for the menu item using Yew router
+    pub fn with_route(mut self, route: Routes) -> Self {
+        self.route = Some(route);
         self
     }
 

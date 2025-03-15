@@ -1,8 +1,7 @@
-use crate::containers::layout::Layout;
-use crate::pages::DashboardPage;
 use crate::routes::Routes;
 use wasm_bindgen::prelude::*;
 use yew::{Html, function_component, html};
+use yew_router::prelude::*;
 
 #[wasm_bindgen]
 extern "C" {
@@ -16,9 +15,9 @@ pub fn app() -> Html {
 
     html! {
         <div class="bg-base-200 min-h-screen">
-            <Layout current_route={Routes::Dashboard}>
-                <DashboardPage />
-            </Layout>
+            <BrowserRouter>
+                <Switch<Routes> render={crate::routes::switch} />
+            </BrowserRouter>
         </div>
     }
 }
