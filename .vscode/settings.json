@@ -2,8 +2,16 @@
   "cSpell.words": [
     "chrono",
     "CUDA",
+    "Deutsch",
+    "Español",
+    "Français",
+    "Heroicons",
     "initdb",
-    "tinroof"
+    "onchange",
+    "onclick",
+    "tabindex",
+    "tinroof",
+    "yewdux"
   ],
   "liveServer.settings.multiRootWorkspaceName": "rusty_gpt",
   "postman.settings.dotenv-detection-notification-visibility": false,
@@ -18,5 +26,7 @@
       "username": "tinroof",
       "password": "rusty"
     }
-  ]
+  ],
+  "editor.defaultFormatter": null,
+  "editor.formatOnSave": true
 }

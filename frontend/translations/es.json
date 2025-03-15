@@ -1,0 +1,90 @@
+{
+  "app": {
+    "title": "Rusty GPT"
+  },
+  "sidebar": {
+    "new_chat": "Nueva Conversación",
+    "search": "Buscar conversaciones...",
+    "no_conversations": "No se encontraron conversaciones.",
+    "start_new": "¡Comienza una nueva!",
+    "login": "Iniciar sesión / Registrarse",
+    "delete_conversation": "Eliminar conversación",
+    "empty_conversation": "Aún no hay mensajes",
+    "dashboard": "Panel de Control",
+    "transactions": "Transacciones",
+    "settings": "Configuración",
+    "users": "Usuarios",
+    "user_list": "Lista de Usuarios",
+    "user_roles": "Roles de Usuario",
+    "permissions": "Permisos",
+    "reports": "Informes",
+    "sales_report": "Informe de Ventas",
+    "user_report": "Informe de Usuarios",
+    "performance": "Rendimiento",
+    "collapse": "Colapsar Barra Lateral",
+    "expand": "Expandir Barra Lateral",
+    "leads": "Leads",
+    "analytics": "Analítica",
+    "integration": "Integración",
+    "calendar": "Calendario",
+    "pages": "Páginas",
+    "profile": "Perfil",
+    "register": "Registrarse",
+    "error": "Error",
+    "documentation": "Documentación",
+    "getting_started": "Comenzar",
+    "features": "Características",
+    "components": "Componentes"
+  },
+  "chat": {
+    "select_conversation": "Selecciona una conversación",
+    "or_start_new": "o comienza una nueva",
+    "typing": "Escribiendo...",
+    "just_now": "Ahora mismo"
+  },
+  "input": {
+    "placeholder": "Escribe un mensaje...",
+    "sending": "Enviando...",
+    "characters": "caracteres",
+    "enter_to_send": "Presiona Enter para enviar, Shift+Enter para nueva línea"
+  },
+  "dashboard": {
+    "total_users": "Usuarios Totales",
+    "revenue": "Ingresos",
+    "active_users": "Usuarios Activos",
+    "conversion_rate": "Tasa de Conversión",
+    "recent_activity": "Actividad Reciente",
+    "performance_overview": "Resumen de Rendimiento",
+    "chart_placeholder": "Marcador de Posición de Gráfico",
+    "chart_description": "(Se implementará con plotters-canvas)",
+    "type": "Tipo",
+    "description": "Descripción",
+    "date": "Fecha",
+    "page_title": "Panel de Control",
+    "content_title": "Resumen del Panel",
+    "users_this_month": "usuarios este mes",
+    "increase": "aumento",
+    "decrease": "disminución",
+    "initials": "AD"
+  },
+  "streaming": {
+    "connected": "Conectado al servidor de streaming",
+    "connecting": "Conectando al servidor de streaming..."
+  },
+  "welcome": {
+    "title": "Bienvenido a Rusty GPT",
+    "subtitle": "Una interfaz de chat moderna construida con Rust y Yew",
+    "example1": {
+      "title": "Haz una pregunta",
+      "description": "¿Cómo funciona WebAssembly con Rust?"
+    },
+    "example2": {
+      "title": "Sé creativo",
+      "description": "Escribe un poema corto sobre programar en Rust"
+    },
+    "example3": {
+      "title": "Resuelve un problema",
+      "description": "Ayúdame a entender async/await en Rust"
+    }
+  }
+}

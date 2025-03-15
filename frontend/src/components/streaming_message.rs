@@ -1,8 +1,11 @@
+use crate::YewI18n;
 use shared::models::MessageChunk;
 use uuid::Uuid;
 use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::{EventSource, MessageEvent};
-use yew::{Callback, Html, Properties, function_component, html, use_effect, use_state};
+use yew::{
+    Callback, Html, Properties, function_component, html, use_context, use_effect, use_state,
+};
 
 #[derive(Properties, PartialEq)]
 pub struct StreamingMessageProps {
@@ -71,15 +74,31 @@ pub fn streaming_message(props: &StreamingMessageProps) -> Html {
         });
     }
 
+    // Get i18n context
+    let i18n = use_context::<YewI18n>().expect("No I18n context found");
+
+    // Helper function to get translations
+    let t = |key: &str| i18n.translate(key);
+
     html! {
         <div class="streaming-status">
             {
                 if let Some(err) = (*error).clone() {
-                    html! { <div class="error">{ err }</div> }
+                    html! {
+                        <div class="p-2 bg-red-100 text-red-800 rounded-lg text-sm mb-4">
+                            { err }
+                        </div>
+                    }
                 } else if *connected {
-                    html! { <div class="connected">{ "Connected to streaming server" }</div> }
+                    html! {
+                        <div class="hidden">{ t("streaming.connected") }</div>
+                    }
                 } else {
-                    html! { <div class="connecting">{ "Connecting to streaming server..." }</div> }
+                    html! {
+                        <div class="p-2 bg-yellow-100 text-yellow-800 rounded-lg text-sm mb-4">
+                            { t("streaming.connecting") }
+                        </div>
+                    }
                 }
             }
         </div>

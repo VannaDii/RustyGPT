@@ -15,20 +15,27 @@ The project follows a clean architecture with clear separation of concerns:
   - **Routes**: Define API endpoints and group related routes
   - **Services**: Implement business logic
 - **Frontend**: Rust-based web frontend using Yew
-  - **Components**: Reusable UI elements including chat input, chat list, chat view, and streaming message handling
+  - **Components**: Reusable UI elements following atomic design principles
+  - **State Management**: Yewdux for global state with optimized performance
+  - **Layout**: DaisyUI admin dashboard with responsive design
+  - **Accessibility**: WCAG 2.2 AA compliant components
 - **Shared**: Common models and utilities used by both frontend and backend
   - **Models**: Data structures for conversations, messages, users, and streaming functionality
 
 ## Features
 
 - **RESTful API** using **Axum** for high-performance web services
+- **Modern Admin Dashboard** using DaisyUI and Yew with responsive design
+- **Component-driven UI** following atomic design principles
+- **Optimized WebAssembly** with sub-1MB initial payload
 - **Real-time streaming** with Server-Sent Events (SSE) for message delivery
-- **Interactive chat interface** with real-time message updates
+- **Interactive interface** with real-time updates
 - **PostgreSQL integration** with stored procedures for secure, efficient database access
-- **OAuth authentication** via Apple and GitHub
+- **OAuth authentication** via GitHub (with Apple support planned)
 - **AI model integration** using local inference engines
 - **Docker Compose setup** for seamless environment management
 - **Unit-tested architecture** ensuring reliability and maintainability
+- **Accessibility compliance** with WCAG 2.2 AA standards
 - **Configuration-based URLs** for flexible deployment across environments
 
 ## Chat & Streaming Functionality
@@ -74,11 +81,15 @@ The application supports OAuth authentication with both GitHub and Apple:
 - **Programming Language:** Rust
 - **Backend Framework:** Axum
 - **Frontend Framework:** Yew
+- **UI Components:** DaisyUI and Tailwind CSS
+- **State Management:** Yewdux
+- **Data Visualization:** plotters-canvas
 - **Real-time Communication:** Server-Sent Events (SSE)
 - **Database:** PostgreSQL
-- **Authentication:** OAuth (Apple, GitHub)
+- **Authentication:** OAuth (GitHub, future Apple support)
 - **Containerization:** Docker Compose
-- **Testing:** Unit tests for API and database interactions
+- **Testing:** Unit tests for both backend and frontend
+- **Bundler:** Trunk with wasm-opt
 - **AI Models:** Local inference, no external API dependencies
 
 ## Environment Variables
@@ -173,6 +184,13 @@ Before contributing, please review our:
 ## Documentation
 
 The project documentation is available on our [GitHub Pages site](https://vannadii.github.io/RustyGPT/).
+
+We provide detailed documentation for the frontend rewrite:
+
+- [Frontend Architecture](docs/frontend-architecture.md) - Overview of the frontend architecture and implementation plan
+- [Component Guidelines](docs/component-guidelines.md) - Standards for component development
+- [State Management](docs/state-management.md) - Details of the Yewdux implementation
+- [Frontend Development Guide](docs/frontend-development.md) - Guide for developers working on the frontend
 
 ## Community
 
