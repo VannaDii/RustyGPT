@@ -93,7 +93,7 @@ jobs:
           touch docs/index.html
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           enablement: true
