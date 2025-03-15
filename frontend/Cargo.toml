@@ -4,23 +4,43 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-uuid = { version = "1", features = ["serde", "v4", "js"] }
 chrono = { version = "0.4", features = ["serde"] }
-yew = { version = "0.21", features = ["csr"] }
+gloo-storage = "0.3.0"
+i18nrs = { version = "0.1.3", features = ["yew"] }
+js-sys = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-gloo-storage = "0.3.0"
+uuid = { version = "1", features = ["serde", "v4", "js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.40"
 web-sys = { version = "0.3", features = [
-  "HtmlInputElement",
+  "Clipboard",
+  "console",
+  "CssStyleDeclaration",
   "EventSource",
+  "Headers",
+  "HtmlInputElement",
+  "HtmlSelectElement",
+  "HtmlStyleElement",
+  "MediaQueryList",
   "MessageEvent",
+  "Navigator",
   "Request",
   "RequestInit",
   "RequestMode",
   "Response",
-  "Headers",
-  "console",
+  "ScrollToOptions",
+  "Window",
 ] }
+yew = { version = "0.21", features = ["csr"] }
+yew-hooks = "0.3.3"
+yew_icons = { version = "0.8.0", features = [
+  "heroicons_solid",      # Includes all Heroicons solid variants
+  "heroicons_outline",    # Includes all Heroicons outline variants
+  "heroicons_mini_solid", # Includes all Heroicons mini solid variants
+  # These features provide access to all Heroicon icon variants
+  # which allows us to use any Heroicon by ID
+] }
+yew-router = "0.18.0"
+yewdux = "0.11.0"
 shared = { path = "../shared" }
