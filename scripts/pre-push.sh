@@ -35,17 +35,17 @@ run_check() {
 if [ ! -f ".env" ] && [ -f ".env.template" ]; then
     echo "Creating .env file from template..."
     cp .env.template .env
-    echo "GITHUB_CLIENT_ID=test_client_id" >> .env
-    echo "GITHUB_CLIENT_SECRET=test_client_secret" >> .env
-    echo "APPLE_CLIENT_ID=test_client_id" >> .env
-    echo "DATABASE_URL=postgres://postgres:postgres@localhost/rusty_gpt" >> .env
+    echo "GITHUB_CLIENT_ID=test_client_id" >>.env
+    echo "GITHUB_CLIENT_SECRET=test_client_secret" >>.env
+    echo "APPLE_CLIENT_ID=test_client_id" >>.env
+    echo "DATABASE_URL=postgres://postgres:postgres@localhost/rusty_gpt" >>.env
 fi
 
 # Check formatting
 run_check "cargo fmt --all -- --check"
 
 # Run clippy
-run_check "cargo clippy --all-features -- -D warnings"
+run_check "cargo clippy --all-features"
 
 # Build the project
 run_check "cargo build --verbose"

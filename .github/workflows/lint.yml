@@ -108,5 +108,3 @@ jobs:
           cargo generate-lockfile
           cargo audit --json || true
           echo "Security audit completed. Check the output for any vulnerabilities."
-          echo "Note: Currently there's a vulnerability in the 'rsa' crate (RUSTSEC-2023-0071) and"
-          echo "unmaintained packages 'paste' and 'proc-macro-error' that should be addressed."
