@@ -33,6 +33,8 @@ INSTALL_PATH="/usr/local/bin"
 
 # New function to execute a command and return only the first line of output.
 first_line_only() {
+  echo "Executing command: \"$@\""
+  echo "(which one? $(which $1))"
   "$@" | head -n 1
 }
 

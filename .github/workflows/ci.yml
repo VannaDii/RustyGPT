@@ -36,14 +36,13 @@ jobs:
       - name: Install Cargo Tools
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo binstall trunk -y
-          cargo binstall wasm-bindgen-cli -y
-          cargo binstall sqlx-cli -y
+          cargo binstall trunk wasm-bindgen-cli wasm-opt sqlx-cli -y
 
       - name: Install tailwindcss and extra
         run: |
           echo "Installing with PATH=$PATH"
           ./scripts/install-tailwindcss.sh
+          echo "Executing `trunk tools show`"
           trunk tools show
 
       - name: Cache dependencies
