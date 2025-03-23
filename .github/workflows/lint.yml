@@ -66,8 +66,13 @@ jobs:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2.0.0
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+
+      - name: Audit check
+        uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
