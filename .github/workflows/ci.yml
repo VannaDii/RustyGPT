@@ -62,7 +62,7 @@ jobs:
         working-directory: frontend
         run: |
           echo "Building with PATH=$PATH"
-          trunk build --release
+          trunk build --release --verbose
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

@@ -60,7 +60,7 @@ jobs:
         working-directory: frontend
         run: |
           echo "Building with PATH=$PATH"
-          trunk build --release
+          trunk build --release --verbose
 
       - name: Generate changelog
         id: changelog
