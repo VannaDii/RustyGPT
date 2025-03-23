@@ -29,34 +29,53 @@ else
 fi
 
 # Set installation path
-INSTALL_PATH="/usr/local/bin"
+INSTALL_PATH="/usr/local/cargo/bin"
 
-# Install base tailwindcss
-BASE_ASSET="tailwindcss-${OS_TYPE}-${ARCH}"
+# New function to execute a command and return only the first line of output.
+first_line_only() {
+  "$@" | head -n 1
+}
 
-echo "Fetching latest tailwind-cli release version..."
-BASE_RELEASE_VERSION=$(curl -s https://api.github.com/repos/tailwindlabs/tailwindcss/releases/latest | jq -r '.tag_name')
-echo "Latest tailwind-cli version: ${BASE_RELEASE_VERSION}"
+install_tailwindcss() {
+  echo "Installing tailwindcss..."
 
-echo "Installing tailwind-cli: ${BASE_RELEASE_VERSION} - ${BASE_ASSET}"
-BASE_URL="https://github.com/tailwindlabs/tailwindcss/releases/download/${BASE_RELEASE_VERSION}/${BASE_ASSET}"
-echo "Downloading tailwindcss from ${BASE_URL}"
-curl -sLO "${BASE_URL}"
-mv "${BASE_ASSET}" "$INSTALL_PATH/tailwindcss"
-chmod +x "$INSTALL_PATH/tailwindcss"
-$INSTALL_PATH/tailwindcss --help
+  # Install base tailwindcss
+  BASE_ASSET="tailwindcss-${OS_TYPE}-${ARCH}"
 
-# Install tailwindcss-extra
-EXTRA_ASSET="tailwindcss-extra-${OS_TYPE}-${ARCH}"
+  echo "Fetching latest tailwind-cli release version..."
+  BASE_RELEASE_VERSION=$(curl -s https://api.github.com/repos/tailwindlabs/tailwindcss/releases/latest | jq -r '.tag_name')
+  echo "Latest tailwind-cli version: ${BASE_RELEASE_VERSION}"
 
-echo "Fetching latest tailwind-cli-extra release version..."
-EXTRA_RELEASE_VERSION=$(curl -s https://api.github.com/repos/dobicinaitis/tailwind-cli-extra/releases/latest | jq -r '.tag_name')
-echo "Latest tailwind-cli-extra version: ${EXTRA_RELEASE_VERSION}"
+  echo "Installing tailwind-cli: ${BASE_RELEASE_VERSION} - ${BASE_ASSET}"
+  BASE_URL="https://github.com/tailwindlabs/tailwindcss/releases/download/${BASE_RELEASE_VERSION}/${BASE_ASSET}"
+  echo "Downloading tailwindcss from ${BASE_URL}"
+  curl -sLO "${BASE_URL}"
+  mv "${BASE_ASSET}" "$INSTALL_PATH/tailwindcss"
+  chmod +x "$INSTALL_PATH/tailwindcss"
 
-echo "Installing tailwind-cli-extra: ${EXTRA_RELEASE_VERSION} - ${EXTRA_ASSET}"
-EXTRA_URL="https://github.com/dobicinaitis/tailwind-cli-extra/releases/download/${EXTRA_RELEASE_VERSION}/${EXTRA_ASSET}"
-echo "Downloading tailwindcss-extra from ${EXTRA_URL}"
-curl -sLO "${EXTRA_URL}"
-mv "${EXTRA_ASSET}" "$INSTALL_PATH/tailwindcss-extra"
-chmod +x "$INSTALL_PATH/tailwindcss-extra"
-$INSTALL_PATH/tailwindcss-extra --help
+  # Only return the first line of the output from tailwindcss --help
+  first_line_only "$INSTALL_PATH/tailwindcss" --help
+}
+
+install_tailwindcss_extra() {
+  echo "Installing tailwindcss-extra..."
+
+  # Install tailwindcss-extra
+  EXTRA_ASSET="tailwindcss-extra-${OS_TYPE}-${ARCH}"
+
+  echo "Fetching latest tailwind-cli-extra release version..."
+  EXTRA_RELEASE_VERSION=$(curl -s https://api.github.com/repos/dobicinaitis/tailwind-cli-extra/releases/latest | jq -r '.tag_name')
+  echo "Latest tailwind-cli-extra version: ${EXTRA_RELEASE_VERSION}"
+
+  echo "Installing tailwind-cli-extra: ${EXTRA_RELEASE_VERSION} - ${EXTRA_ASSET}"
+  EXTRA_URL="https://github.com/dobicinaitis/tailwind-cli-extra/releases/download/${EXTRA_RELEASE_VERSION}/${EXTRA_ASSET}"
+  echo "Downloading tailwindcss-extra from ${EXTRA_URL}"
+  curl -sLO "${EXTRA_URL}"
+  mv "${EXTRA_ASSET}" "$INSTALL_PATH/tailwindcss-extra"
+  chmod +x "$INSTALL_PATH/tailwindcss-extra"
+
+  # Only return the first line of the output from tailwindcss-extra --help
+  first_line_only "$INSTALL_PATH/tailwindcss-extra" --help
+}
+
+install_tailwindcss_extra
