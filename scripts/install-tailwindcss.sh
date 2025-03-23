@@ -28,6 +28,9 @@ else
   exit 1
 fi
 
+# Set installation path
+INSTALL_PATH="/usr/local/bin"
+
 # Install base tailwindcss
 BASE_ASSET="tailwindcss-${OS_TYPE}-${ARCH}"
 
@@ -39,9 +42,9 @@ echo "Installing tailwind-cli: ${BASE_RELEASE_VERSION} - ${BASE_ASSET}"
 BASE_URL="https://github.com/tailwindlabs/tailwindcss/releases/download/${BASE_RELEASE_VERSION}/${BASE_ASSET}"
 echo "Downloading tailwindcss from ${BASE_URL}"
 curl -sLO "${BASE_URL}"
-mv "${BASE_ASSET}" "/usr/local/cargo/bin/tailwindcss"
-chmod +x "/usr/local/cargo/bin/tailwindcss"
-/usr/local/cargo/bin/tailwindcss --help
+mv "${BASE_ASSET}" "$INSTALL_PATH/tailwindcss"
+chmod +x "$INSTALL_PATH/tailwindcss"
+$INSTALL_PATH/tailwindcss --help
 
 # Install tailwindcss-extra
 EXTRA_ASSET="tailwindcss-extra-${OS_TYPE}-${ARCH}"
@@ -54,6 +57,6 @@ echo "Installing tailwind-cli-extra: ${EXTRA_RELEASE_VERSION} - ${EXTRA_ASSET}"
 EXTRA_URL="https://github.com/dobicinaitis/tailwind-cli-extra/releases/download/${EXTRA_RELEASE_VERSION}/${EXTRA_ASSET}"
 echo "Downloading tailwindcss-extra from ${EXTRA_URL}"
 curl -sLO "${EXTRA_URL}"
-mv "${EXTRA_ASSET}" "/usr/local/cargo/bin/tailwindcss-extra"
-chmod +x "/usr/local/cargo/bin/tailwindcss-extra"
-/usr/local/cargo/bin/tailwindcss-extra --help
+mv "${EXTRA_ASSET}" "$INSTALL_PATH/tailwindcss-extra"
+chmod +x "$INSTALL_PATH/tailwindcss-extra"
+$INSTALL_PATH/tailwindcss-extra --help
