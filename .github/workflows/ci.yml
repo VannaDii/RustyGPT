@@ -46,7 +46,7 @@ jobs:
       - name: Install tailwindcss and extra
         working-directory: ${{ github.workspace }}
         env:
-          PATH: /usr/local/cargo/bin:${{ env.PATH }}
+          PATH: /usr/local/cargo/bin:usr/local/bin:${{ env.PATH }}
         run: |
           ./scripts/install-tailwindcss.sh
           trunk tools show
@@ -67,7 +67,7 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          PATH: /usr/local/cargo/bin:${{ env.PATH }}
+          PATH: /usr/local/cargo/bin:usr/local/bin:${{ env.PATH }}
         run: |
           trunk build --release
 
