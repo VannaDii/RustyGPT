@@ -41,7 +41,7 @@ jobs:
 
       - name: Install tailwindcss and extra
         working-directory: ${{ github.workspace }}
-        run: ../scripts/install-tailwindcss-extra.sh
+        run: ./scripts/install-tailwindcss.sh
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
