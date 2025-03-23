@@ -72,7 +72,14 @@ jobs:
       - name: Generate lockfile
         run: cargo generate-lockfile
 
+      - name: Get security ignore list
+        id: secignore
+        run: |
+          ignore_values=$(grep -v '^\s*#' .secignore | tr '\n' ',' | sed 's/,$//')
+          echo "ignore=$ignore_values" >> $GITHUB_OUTPUT
+
       - name: Audit check
         uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: ${{ steps.secignore.outputs.ignore }}
