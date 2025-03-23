@@ -29,7 +29,7 @@ else
 fi
 
 # Set installation path
-INSTALL_PATH="/usr/local/cargo/bin"
+INSTALL_PATH="/usr/local/bin"
 
 # Install base tailwindcss
 BASE_ASSET="tailwindcss-${OS_TYPE}-${ARCH}"

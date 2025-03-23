@@ -44,10 +44,9 @@ jobs:
           cargo binstall sqlx-cli -y
 
       - name: Install tailwindcss and extra
-        working-directory: ${{ github.workspace }}
-        env:
-          PATH: /usr/local/cargo/bin:usr/local/bin:${{ env.PATH }}
         run: |
+          export PATH=/usr/local/cargo/bin:/usr/local/bin:${PATH}
+          echo "Installing with PATH=$PATH"
           ./scripts/install-tailwindcss.sh
           trunk tools show
 
@@ -66,9 +65,9 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          PATH: /usr/local/cargo/bin:usr/local/bin:${{ env.PATH }}
         run: |
+          export PATH=/usr/local/cargo/bin:/usr/local/bin:${PATH}
+          echo "Building with PATH=$PATH"
           trunk build --release
 
       - name: Upload build artifacts
