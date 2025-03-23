@@ -29,7 +29,7 @@ else
 fi
 
 # Set installation path
-INSTALL_PATH="/usr/local/cargo/bin"
+INSTALL_PATH="/usr/local/bin"
 
 # New function to execute a command and return only the first line of output.
 first_line_only() {
@@ -54,7 +54,7 @@ install_tailwindcss() {
   chmod +x "$INSTALL_PATH/tailwindcss"
 
   # Only return the first line of the output from tailwindcss --help
-  first_line_only "$INSTALL_PATH/tailwindcss" --help
+  first_line_only "tailwindcss" --help
 }
 
 install_tailwindcss_extra() {
@@ -75,7 +75,7 @@ install_tailwindcss_extra() {
   chmod +x "$INSTALL_PATH/tailwindcss-extra"
 
   # Only return the first line of the output from tailwindcss-extra --help
-  first_line_only "$INSTALL_PATH/tailwindcss-extra" --help
+  first_line_only "tailwindcss-extra" --help
 }
 
 install_tailwindcss_extra
