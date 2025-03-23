@@ -7,29 +7,19 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
   checks: write
+  contents: read
+  issues: write
   pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: true
 
 jobs:
   clippy:
     name: Lint
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:latest
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: rusty_gpt
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-
 
     steps:
       - uses: actions/checkout@v4
@@ -47,29 +37,12 @@ jobs:
       - name: Create .env file
         run: |
           cp .env.template .env
-          echo "GITHUB_CLIENT_ID=test_client_id" >> .env
-          echo "GITHUB_CLIENT_SECRET=test_client_secret" >> .env
-          echo "APPLE_CLIENT_ID=test_client_id" >> .env
-          echo "DATABASE_URL=postgres://postgres:postgres@localhost/rusty_gpt" >> .env
 
-      - name: Initialize database schema
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-          export PGPASSWORD=postgres
-          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/01-init-schema.sql
-          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/02-stored-procedures.sql
-          psql -h localhost -U postgres -d rusty_gpt -f .data/postgres-init/03-seed-data.sql
-
-      - name: Install SQLx CLI and prepare query cache
+      - name: Install SQLx CLI
         run: |
           cargo install sqlx-cli --no-default-features --features postgres
-          export $(grep DATABASE_URL .env)
-          cargo sqlx prepare --workspace
 
       - name: Clippy check
-        env:
-          SQLX_OFFLINE: true
         run: |
           cargo clippy --all-features -- -D warnings
 
@@ -94,17 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup override set stable
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-
-      - name: Run security audit
-        run: |
-          cargo generate-lockfile
-          cargo audit --json || true
-          echo "Security audit completed. Check the output for any vulnerabilities."

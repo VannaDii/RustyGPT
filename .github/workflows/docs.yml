@@ -18,22 +18,12 @@ concurrency:
   group: 'pages'
   cancel-in-progress: true
 
+env:
+  SQLX_OFFLINE: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:14
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        # Set health checks to wait until postgres has started
-        options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-
 
     steps:
       - uses: actions/checkout@v4
@@ -61,24 +51,9 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Initialize database
+      - name: Create .env file
         run: |
-          # Set DATABASE_URL environment variable
-          echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres" >> $GITHUB_ENV
-
-          # Initialize database schema
-          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -f ./.data/postgres-init/01-init-schema.sql
-
-          # Initialize stored procedures
-          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -f ./.data/postgres-init/02-stored-procedures.sql
-
-          # Initialize seed data if needed
-          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -f ./.data/postgres-init/03-seed-data.sql
-
-      - name: Prepare SQLx query cache
-        run: |
-          # Prepare the SQLx query cache
-          cargo sqlx prepare --workspace
+          cp .env.template .env
 
       - name: Generate documentation
         run: |
