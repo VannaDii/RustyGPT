@@ -23,6 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Add Cargo bin to PATH
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
       - name: Install Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal
@@ -35,13 +38,9 @@ jobs:
           cargo install trunk wasm-bindgen-cli
           cargo install sqlx-cli --no-default-features --features native-tls,postgres
 
-      - name: Install tailwindcss
+      - name: Install tailwindcss and extra
         run: |
-          curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-linux-x64
-          sudo mv tailwindcss-linux-x64 /usr/local/bin/tailwindcss
-          chmod +x /usr/local/bin/tailwindcss
-          tailwindcss --help
-          trunk tools show
+          ./scripts/install-tailwindcss-extra.sh
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
