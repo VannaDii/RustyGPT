@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT register_oauth_user(NULL, $1, NULL)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "register_oauth_user",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b47cdd9e81c95cd7df5c39968eb07051904e394e6ba6f874c8f055bb9762745c"
+}
