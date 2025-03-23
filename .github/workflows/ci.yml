@@ -42,7 +42,7 @@ jobs:
         run: |
           echo "Installing with PATH=$PATH"
           ./scripts/install-tailwindcss.sh
-          echo "Executing `trunk tools show`"
+          echo "Executing \"trunk tools show\""
           trunk tools show
 
       - name: Cache dependencies
