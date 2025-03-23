@@ -24,21 +24,22 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: rust:latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Cargo Binstall
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup override set stable
-          rustup component add rustfmt clippy rust-docs
-          rustup target add wasm32-unknown-unknown
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
       - name: Install Cargo Tools
         run: |
-          cargo install trunk wasm-bindgen-cli
-          cargo install sqlx-cli --no-default-features --features native-tls,postgres
+          rustup target add wasm32-unknown-unknown
+          cargo binstall trunk -y
+          cargo binstall wasm-bindgen-cli -y
+          cargo binstall sqlx-cli -y
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2

@@ -19,6 +19,8 @@ env:
 jobs:
   clippy:
     name: Lint
+    container:
+      image: rust:latest
     runs-on: ubuntu-latest
 
     steps:
@@ -26,9 +28,6 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup override set stable
-          rustup component add clippy
           rustup target add wasm32-unknown-unknown
 
       - name: Cache dependencies
@@ -38,9 +37,16 @@ jobs:
         run: |
           cp .env.template .env
 
-      - name: Install SQLx CLI
+      - name: Install Cargo Binstall
         run: |
-          cargo install sqlx-cli --no-default-features --features postgres
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+      - name: Install Cargo Tools
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo binstall trunk -y
+          cargo binstall wasm-bindgen-cli -y
+          cargo binstall sqlx-cli -y
 
       - name: Clippy check
         run: |
@@ -48,15 +54,11 @@ jobs:
 
   rustfmt:
     name: Format
+    container:
+      image: rust:latest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup override set stable
-          rustup component add rustfmt
 
       - name: Check formatting
         run: |
@@ -64,6 +66,8 @@ jobs:
 
   audit:
     name: Security audit
+    container:
+      image: rust:latest
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
