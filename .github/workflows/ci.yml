@@ -18,6 +18,8 @@ env:
 jobs:
   build:
     name: Build and Test
+    container:
+      image: rust:latest
     runs-on: ubuntu-latest
 
     steps:
@@ -26,21 +28,15 @@ jobs:
       - name: Add Cargo bin to PATH
         run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup override set stable
-          rustup component add rustfmt clippy
-          rustup target add wasm32-unknown-unknown
-
       - name: Install Cargo Tools
         run: |
+          rustup target add wasm32-unknown-unknown
           cargo install trunk wasm-bindgen-cli
           cargo install sqlx-cli --no-default-features --features native-tls,postgres
 
       - name: Install tailwindcss and extra
-        run: |
-          ./scripts/install-tailwindcss-extra.sh
+        working-directory: ${{ github.workspace }}   # switch to repository root
+        run: ./scripts/install-tailwindcss-extra.sh
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
