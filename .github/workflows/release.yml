@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Add Cargo bin to PATH
-        run: echo "/usr/local/cargo/bin" >> $PATH
+        run: echo "/usr/local/cargo/bin" >> $GITHUB_PATH
 
       - name: Install jq
         run: |
@@ -46,6 +46,8 @@ jobs:
 
       - name: Install tailwindcss and extra
         working-directory: ${{ github.workspace }}
+        env:
+          PATH: /usr/local/cargo/bin:${{ env.PATH }}
         run: |
           ./scripts/install-tailwindcss.sh
           trunk tools show
@@ -62,6 +64,8 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          PATH: /usr/local/cargo/bin:${{ env.PATH }}
         run: |
           trunk build --release
 
