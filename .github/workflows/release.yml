@@ -26,11 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add Cargo bin to PATH
-        run: |
-          echo "/usr/local/bin" >> $GITHUB_PATH
-          echo "/usr/local/cargo/bin" >> $GITHUB_PATH
-
       - name: Install jq
         run: |
           apt-get update && apt-get install -y jq
