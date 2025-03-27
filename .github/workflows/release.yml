@@ -67,7 +67,8 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: |
-          TRUNK_DIR=${{ env.CARGO_HOME }}/.cargo/bin
+          echo "Trunk might be at $(which trunk)"
+          TRUNK_DIR=${{ env.CARGO_HOME }}/bin
           TRUNK_DIR=$(realpath $TRUNK_DIR)
           echo "Running trunk from $TRUNK_DIR"
           $TRUNK_DIR/trunk build --release
