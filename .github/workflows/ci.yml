@@ -70,7 +70,11 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        run: trunk build --release
+        run: |
+          TRUNK_DIR=${{ env.CARGO_HOME }}/.cargo/bin
+          TRUNK_DIR=$(realpath $TRUNK_DIR)
+          echo "Running trunk from $TRUNK_DIR"
+          $TRUNK_DIR/trunk build --release
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
