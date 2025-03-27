@@ -8,16 +8,16 @@ extern "C" {
     fn log(s: &str);
 }
 
-/// Dashboard page component
-#[function_component(DashboardPage)]
-pub fn dashboard_page() -> Html {
+/// SettingsPage page component
+#[function_component(RolesPage)]
+pub fn roles_page() -> Html {
     let (_i18n, _) = use_translation();
 
     html! {
         <div class="p-4 space-y-6">
-            <h1 class="text-2xl font-bold">{ "Dashboard" }</h1>
-            <p>{ "This is the dashboard page." }</p>
-            <p>{ "You can view your stats and other information here." }</p>
+            <h1 class="text-2xl font-bold">{ "User Roles Page" }</h1>
+            <p>{ "This is the user roles page." }</p>
+            <p>{ "You can edit user roles and permissions here." }</p>
         </div>
     }
 }
