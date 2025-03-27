@@ -27,25 +27,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install jq
+      - name: Prep OS
         run: |
           apt-get update && apt-get install -y jq
-
-      - name: Install Cargo Binstall
-        run: |
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-
-      - name: Install Cargo Tools
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo binstall trunk wasm-bindgen-cli wasm-opt sqlx-cli -y
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
 
       - name: Create .env file
         run: |
           cp .env.template .env
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Cargo Tools
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          rustup target add wasm32-unknown-unknown
+          cargo binstall trunk wasm-bindgen-cli wasm-opt sqlx-cli -y
 
       - name: Build
         run: cargo build --release
@@ -54,7 +51,7 @@ jobs:
         working-directory: frontend
         run: |
           echo "Building with PATH=$PATH"
-          trunk build --release --verbose
+          trunk build --release
 
       - name: Generate changelog
         id: changelog

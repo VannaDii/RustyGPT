@@ -15,6 +15,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
+  LANG: en_US.UTF-8
 
 jobs:
   clippy:
@@ -26,25 +27,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        run: |
-          rustup target add wasm32-unknown-unknown
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
       - name: Create .env file
         run: |
           cp .env.template .env
 
-      - name: Install Cargo Binstall
-        run: |
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
 
-      - name: Install Rust & Cargo Tools
+      - name: Install Cargo Tools
         run: |
           rustup target add wasm32-unknown-unknown
           rustup component add clippy
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           cargo binstall trunk wasm-bindgen-cli sqlx-cli -y
 
       - name: Clippy check
@@ -59,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust & Cargo Tools
+      - name: Install Cargo Tools
         run: |
           rustup target add wasm32-unknown-unknown
           rustup component add rustfmt
