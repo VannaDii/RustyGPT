@@ -21,12 +21,14 @@ concurrency:
 env:
   SQLX_OFFLINE: true
   LANG: en_US.UTF-8
+  CARGO_HOME: ${{ github.workspace }}/.cargo
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build Documentation
     container:
       image: rust:latest
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +36,20 @@ jobs:
       - name: Create .env file
         run: |
           cp .env.template .env
+
+      - name: Cache Cargo registries and git checkouts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/registry
+            ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache Cargo installed binaries
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -43,10 +59,7 @@ jobs:
       - name: Install Cargo Tools
         run: |
           rustup target add wasm32-unknown-unknown
-          # Install tools in parallel
-          cargo install --locked --jobs "$(nproc)" wasm-bindgen-cli &
-          cargo install --locked --jobs "$(nproc)" sqlx-cli --no-default-features --features native-tls,postgres &
-          wait
+          cargo install --locked --jobs "$(nproc)" wasm-bindgen-cli sqlx-cli
 
       - name: Generate documentation
         run: |
