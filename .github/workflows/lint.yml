@@ -33,12 +33,14 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - name: Install Cargo Tools
         run: |
           rustup target add wasm32-unknown-unknown
           rustup component add clippy
-          cargo install sqlx-cli
+          cargo install --locked --jobs "$(nproc)" sqlx-cli
 
       - name: Clippy check
         run: |

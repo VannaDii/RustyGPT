@@ -79,7 +79,7 @@ else
     echo "To install cargo-audit: cargo install cargo-audit"
 fi
 
-echo "All pre-push checks passed!"
+echo "All checks passed!"
 # Return to the original directory
 cd "$CURRENT_DIR"
 exit 0
