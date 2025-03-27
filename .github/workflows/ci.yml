@@ -15,7 +15,6 @@ env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
   LANG: en_US.UTF-8
-  CARGO_HOME: ${{ github.workspace }}/.cargo
 
 jobs:
   build:
@@ -31,23 +30,20 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.CARGO_HOME }}/.cargo/registry
-            ${{ env.CARGO_HOME }}/.cargo/git
+            /usr/local/cargo/bin
+            /usr/local/cargo/git
+            /usr/local/cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache Cargo installed binaries
         uses: actions/cache@v3
         with:
-          path: ${{ env.CARGO_HOME }}/.cargo/bin
+          path: /usr/local/cargo/bin
           key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
-
-      - name: Add Cargo bin to PATH
-        run: echo "PATH=$PATH:${{ env.CARGO_HOME }}/bin" >> $GITHUB_ENV
 
       - name: Prep OS
         run: |
           apt-get update && apt-get install -y jq
-
 
       - name: Create .env file
         run: cp .env.template .env
@@ -70,12 +66,7 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        run: |
-          echo "Trunk might be at $(which trunk)"
-          TRUNK_DIR=${{ env.CARGO_HOME }}/bin
-          TRUNK_DIR=$(realpath $TRUNK_DIR)
-          echo "Running trunk from $TRUNK_DIR"
-          $TRUNK_DIR/trunk build --release
+        run: trunk build --release
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

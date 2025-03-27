@@ -32,18 +32,16 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/registry
-            ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/git
+            /usr/local/cargo/bin
+            /usr/local/cargo/git
+            /usr/local/cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache Cargo installed binaries
         uses: actions/cache@v3
         with:
-          path: ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/bin
+          path: /usr/local/cargo/bin
           key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
-
-      - name: Add Cargo bin to PATH
-        run: echo "PATH=$PATH:${{ env.CARGO_HOME }}/bin" >> $GITHUB_ENV
 
       - name: Prep OS
         run: apt-get update && apt-get install -y jq
