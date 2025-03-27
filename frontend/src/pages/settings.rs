@@ -16,8 +16,8 @@ pub fn settings_page() -> Html {
     html! {
         <div class="p-4 space-y-6">
             <h1 class="text-2xl font-bold">{ "Settings Page" }</h1>
-            <p>{ "This is the profile page." }</p>
-            <p>{ "You can edit your profile here." }</p>
+            <p>{ "This is the settings page." }</p>
+            <p>{ "You can adjust system settings here." }</p>
         </div>
     }
 }
