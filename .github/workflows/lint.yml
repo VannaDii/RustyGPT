@@ -43,6 +43,9 @@ jobs:
           rustup component add clippy
           cargo install --locked --jobs "$(nproc)" sqlx-cli
 
+      - name: Add Cargo bin to PATH
+        run: echo "PATH=$PATH:${{ env.CARGO_HOME }}/.cargo/bin" >> $GITHUB_ENV
+
       - name: Clippy check
         run: cargo clippy --all-features -- -D warnings
 
