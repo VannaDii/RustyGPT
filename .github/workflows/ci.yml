@@ -42,7 +42,7 @@ jobs:
           key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
 
       - name: Add Cargo bin to PATH
-        run: echo "PATH=$PATH:${{ env.CARGO_HOME }}/.cargo/bin" >> $GITHUB_ENV
+        run: echo "PATH=$PATH:${{ env.CARGO_HOME }}/bin" >> $GITHUB_ENV
 
       - name: Prep OS
         run: |
