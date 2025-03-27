@@ -38,7 +38,7 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           rustup component add clippy
-          cargo install sqlx-cli -y
+          cargo install sqlx-cli
 
       - name: Clippy check
         run: |
