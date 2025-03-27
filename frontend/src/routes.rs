@@ -1,4 +1,4 @@
-use crate::{containers::layout::Layout, pages::DashboardPage};
+use crate::{containers::layout::Layout, pages::*};
 use wasm_bindgen::prelude::*;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -63,7 +63,7 @@ pub fn switch(route: MainRoute) -> Html {
             html! { <Switch<AdminRoute> render={switch_admin} /> }
         }
         MainRoute::NotFound => {
-            html! {<Layout current_route={AppRoute::Main(route)}><h1>{"Not Found"}</h1></Layout>}
+            html! {<Layout current_route={AppRoute::Main(route)}><ErrorPage /></Layout>}
         }
     }
 }
@@ -73,16 +73,16 @@ fn switch_admin(route: AdminRoute) -> Html {
     log(std::format!("Switching to admin route: {:?}", route).as_str());
     match route {
         AdminRoute::Profile => {
-            html! {<Layout current_route={AppRoute::Admin(route)}><h1>{"Profile"}</h1></Layout>}
+            html! {<Layout current_route={AppRoute::Admin(route)}><ProfilePage /></Layout>}
         }
         AdminRoute::System => {
-            html! {<Layout current_route={AppRoute::Admin(route)}><h1>{"System Settings"}</h1></Layout>}
+            html! {<Layout current_route={AppRoute::Admin(route)}><SettingsPage /></Layout>}
         }
         AdminRoute::Users => {
-            html! {<Layout current_route={AppRoute::Admin(route)}><h1>{"User Management"}</h1></Layout>}
+            html! {<Layout current_route={AppRoute::Admin(route)}><UsersPage /></Layout>}
         }
         AdminRoute::UserRoles => {
-            html! {<Layout current_route={AppRoute::Admin(route)}><h1>{"User Role Management"}</h1></Layout>}
+            html! {<Layout current_route={AppRoute::Admin(route)}><RolesPage /></Layout>}
         }
         AdminRoute::NotFound => html! {<Redirect<MainRoute> to={MainRoute::NotFound}/>},
     }
