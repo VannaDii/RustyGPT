@@ -40,10 +40,7 @@ jobs:
       - name: Install Cargo Tools
         run: |
           rustup target add wasm32-unknown-unknown
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-          cargo binstall trunk wasm-bindgen-cli wasm-opt sqlx-cli -y
-          TRUNK_DIR=$(dirname $(which trunk))
-          echo $TRUNK_DIR >> $GITHUB_PATH
+          cargo install trunk wasm-bindgen-cli wasm-opt sqlx-cli
 
       - name: Build
         run: cargo build
