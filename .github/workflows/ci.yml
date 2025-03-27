@@ -36,11 +36,18 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - name: Install Cargo Tools
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install trunk wasm-bindgen-cli wasm-opt sqlx-cli
+          # Install tools in parallel without version pinning
+          cargo install --locked --jobs "$(nproc)" trunk &
+          cargo install --locked --jobs "$(nproc)" wasm-bindgen-cli &
+          cargo install --locked --jobs "$(nproc)" wasm-opt &
+          cargo install --locked --jobs "$(nproc)" sqlx-cli --no-default-features --features native-tls,postgres &
+          wait
 
       - name: Build
         run: cargo build
