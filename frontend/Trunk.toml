@@ -37,7 +37,5 @@ create_nonce = false
 # Optionally perform a cargo clean.
 cargo = false
 
-[[hooks]]
-stage = "build"
-command = "sh"
-command_arguments = ["-c", "tailwindcss -i src/styles/main.css -o $TRUNK_STAGING_DIR/main.css"]
+[tools]
+tailwindcss = "2.0.7"

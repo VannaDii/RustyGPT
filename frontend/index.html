@@ -5,23 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RustyGPT</title>
     <link data-trunk rel="copy-dir" href="./src/public" />
-    <!-- Inter font -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <!-- Tailwind CSS -->
-    <link data-trunk rel="tailwind-css" data-target-path="styles" href="./src/styles/main.css" />
-    <!-- DaisyUI -->
+    <link data-trunk rel="tailwind-css-extra" data-target-path="styles" href="./src/styles/main.css" />
     <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.19/dist/full.css" rel="stylesheet" type="text/css" />
-    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" />
-    <!-- Markdown & Syntax Highlighting -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css"
-    />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
     <script>
       // Automatically apply system theme
       if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -29,31 +18,6 @@
       } else {
         document.documentElement.setAttribute('data-theme', 'light');
       }
-
-      // Initialize highlight.js when the page loads
-      document.addEventListener('DOMContentLoaded', () => {
-        // Function to highlight code blocks
-        const highlightCode = () => {
-          document.querySelectorAll('pre code').forEach((block) => {
-            hljs.highlightBlock(block);
-          });
-        };
-
-        // Initial highlighting
-        highlightCode();
-
-        // Set up a MutationObserver to detect when new code blocks are added
-        const observer = new MutationObserver((mutations) => {
-          mutations.forEach((mutation) => {
-            if (mutation.addedNodes.length) {
-              highlightCode();
-            }
-          });
-        });
-
-        // Start observing the document body for changes
-        observer.observe(document.body, { childList: true, subtree: true });
-      });
     </script>
   </head>
   <body class="bg-base-100 text-base-content font-sans">

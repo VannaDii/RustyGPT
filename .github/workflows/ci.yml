@@ -14,47 +14,45 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
+  LANG: en_US.UTF-8
 
 jobs:
   build:
     name: Build and Test
+    container:
+      image: rust:latest
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Prep OS
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup override set stable
-          rustup component add rustfmt clippy
-          rustup target add wasm32-unknown-unknown
-
-      - name: Install trunk
-        uses: jetli/trunk-action@v0.5.0
-        with:
-          version: 'latest'
-
-      - name: Install wasm-bindgen-cli
-        run: |
-          cargo install wasm-bindgen-cli
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
+          apt-get update && apt-get install -y jq
 
       - name: Create .env file
         run: |
           cp .env.template .env
 
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Cargo Tools
+        run: |
+          rustup target add wasm32-unknown-unknown
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall trunk wasm-bindgen-cli wasm-opt sqlx-cli -y
+
       - name: Build
-        run: cargo build --verbose
+        run: cargo build
 
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test
 
       - name: Build frontend
+        working-directory: frontend
         run: |
-          cd frontend
+          echo "Building with PATH=$PATH"
           trunk build --release
 
       - name: Upload build artifacts
