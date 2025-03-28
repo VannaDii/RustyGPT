@@ -133,3 +133,361 @@ fn find_file(dir: &Path, filename: &str) -> Result<Option<PathBuf>> {
 
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_fs::prelude::*;
+    use assert_fs::TempDir;
+
+    #[test]
+    fn test_scan_file_with_static_keys() -> Result<()> {
+        // Create a temporary directory and file
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.child("test_file.rs");
+        file_path.write_str(
+            r#"
+            fn some_function() {
+                i18n.t("common.button.submit");
+                i18n.t("common.button.cancel");
+                let x = 5; // Some other code
+                i18n.t("common.error.required");
+            }
+        "#,
+        )?;
+
+        // Create regex patterns
+        let static_key_pattern = Regex::new(r#"i18n\.t\("([^"]+)"\)"#)?;
+        let translate_pattern = Regex::new(r#"i18n\.translate\("([^"]+)"\)"#)?;
+        let dynamic_key_pattern = Regex::new(r#"i18n\.t\(&format!\("([^"]+)", .+\)\)"#)?;
+
+        // Test scan_file
+        let mut keys = HashSet::new();
+        scan_file(
+            file_path.path(),
+            &mut keys,
+            &static_key_pattern,
+            &translate_pattern,
+            &dynamic_key_pattern,
+        )?;
+
+        // Verify results
+        assert_eq!(keys.len(), 3);
+        assert!(keys.contains("common.button.submit"));
+        assert!(keys.contains("common.button.cancel"));
+        assert!(keys.contains("common.error.required"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_file_with_translate_keys() -> Result<()> {
+        // Create a temporary directory and file
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.child("test_file.rs");
+        file_path.write_str(
+            r#"
+            fn some_function() {
+                i18n.translate("profile.title");
+                i18n.translate("profile.description");
+            }
+        "#,
+        )?;
+
+        // Create regex patterns
+        let static_key_pattern = Regex::new(r#"i18n\.t\("([^"]+)"\)"#)?;
+        let translate_pattern = Regex::new(r#"i18n\.translate\("([^"]+)"\)"#)?;
+        let dynamic_key_pattern = Regex::new(r#"i18n\.t\(&format!\("([^"]+)", .+\)\)"#)?;
+
+        // Test scan_file
+        let mut keys = HashSet::new();
+        scan_file(
+            file_path.path(),
+            &mut keys,
+            &static_key_pattern,
+            &translate_pattern,
+            &dynamic_key_pattern,
+        )?;
+
+        // Verify results
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains("profile.title"));
+        assert!(keys.contains("profile.description"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_file_with_dynamic_keys() -> Result<()> {
+        // Create a temporary directory and file
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.child("test_file.rs");
+        file_path.write_str(
+            r#"
+            fn some_function() {
+                i18n.t(&format!("user.greeting", name));
+                i18n.t(&format!("{}.title", route_name));
+                i18n.t(&format!("{}.icon", route_name));
+                i18n.t(&format!("custom.pattern.{}.value", id));
+            }
+        "#,
+        )?;
+
+        // Create regex patterns
+        let static_key_pattern = Regex::new(r#"i18n\.t\("([^"]+)"\)"#)?;
+        let translate_pattern = Regex::new(r#"i18n\.translate\("([^"]+)"\)"#)?;
+        let dynamic_key_pattern = Regex::new(r#"i18n\.t\(&format!\("([^"]+)", .+\)\)"#)?;
+
+        // Test scan_file
+        let mut keys = HashSet::new();
+        scan_file(
+            file_path.path(),
+            &mut keys,
+            &static_key_pattern,
+            &translate_pattern,
+            &dynamic_key_pattern,
+        )?;
+
+        // Verify results - dynamic keys are not added directly by scan_file
+        assert_eq!(keys.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_file_with_mixed_keys() -> Result<()> {
+        // Create a temporary directory and file
+        let temp_dir = TempDir::new()?;
+        let file_path = temp_dir.child("test_file.rs");
+        file_path.write_str(
+            r#"
+            fn some_function() {
+                i18n.t("static.key");
+                i18n.translate("translate.key");
+                i18n.t(&format!("{}.title", route_name));
+                let x = "not a translation key";
+            }
+        "#,
+        )?;
+
+        // Create regex patterns
+        let static_key_pattern = Regex::new(r#"i18n\.t\("([^"]+)"\)"#)?;
+        let translate_pattern = Regex::new(r#"i18n\.translate\("([^"]+)"\)"#)?;
+        let dynamic_key_pattern = Regex::new(r#"i18n\.t\(&format!\("([^"]+)", .+\)\)"#)?;
+
+        // Test scan_file
+        let mut keys = HashSet::new();
+        scan_file(
+            file_path.path(),
+            &mut keys,
+            &static_key_pattern,
+            &translate_pattern,
+            &dynamic_key_pattern,
+        )?;
+
+        // Verify results
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains("static.key"));
+        assert!(keys.contains("translate.key"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_find_file() -> Result<()> {
+        // Create a temporary directory structure
+        let temp_dir = TempDir::new()?;
+
+        // Create a nested directory structure
+        let subdir = temp_dir.child("subdir");
+        subdir.create_dir_all()?;
+
+        // Create some files
+        let file1 = temp_dir.child("file1.txt");
+        file1.write_str("content1")?;
+
+        let file2 = subdir.child("file2.txt");
+        file2.write_str("content2")?;
+
+        let target_file = subdir.child("routes.rs");
+        target_file.write_str("enum AdminRoute {}")?;
+
+        // Test finding a file that exists in a subdirectory
+        let result = find_file(temp_dir.path(), "routes.rs")?;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), target_file.path());
+
+        // Test finding a file that doesn't exist
+        let result = find_file(temp_dir.path(), "nonexistent.rs")?;
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_handle_dynamic_route_keys() -> Result<()> {
+        // Create a temporary directory
+        let temp_dir = TempDir::new()?;
+
+        // Create a routes.rs file with AdminRoute enum
+        let routes_file = temp_dir.child("routes.rs");
+        routes_file.write_str(
+            r#"
+            enum AdminRoute {
+                #[at("/admin")]
+                Dashboard,
+
+                #[at("/admin/users")]
+                Users,
+
+                #[at("/admin/settings")]
+                Settings,
+            }
+        "#,
+        )?;
+
+        // Test handle_dynamic_route_keys
+        let mut keys = HashSet::new();
+        handle_dynamic_route_keys(&mut keys, temp_dir.path())?;
+
+        // Verify results
+        assert_eq!(keys.len(), 6);
+        assert!(keys.contains("admin.routes.title"));
+        assert!(keys.contains("admin.routes.icon"));
+        assert!(keys.contains("admin.routes.users.title"));
+        assert!(keys.contains("admin.routes.users.icon"));
+        assert!(keys.contains("admin.routes.settings.title"));
+        assert!(keys.contains("admin.routes.settings.icon"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_handle_dynamic_route_keys_no_routes_file() -> Result<()> {
+        // Create a temporary directory without a routes.rs file
+        let temp_dir = TempDir::new()?;
+
+        // Test handle_dynamic_route_keys
+        let mut keys = HashSet::new();
+        handle_dynamic_route_keys(&mut keys, temp_dir.path())?;
+
+        // Verify results - no keys should be added
+        assert_eq!(keys.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_handle_dynamic_route_keys_invalid_routes_file() -> Result<()> {
+        // Create a temporary directory
+        let temp_dir = TempDir::new()?;
+
+        // Create a routes.rs file without AdminRoute enum
+        let routes_file = temp_dir.child("routes.rs");
+        routes_file.write_str(
+            r#"
+            // No AdminRoute enum here
+            struct SomethingElse {}
+        "#,
+        )?;
+
+        // Test handle_dynamic_route_keys
+        let mut keys = HashSet::new();
+        handle_dynamic_route_keys(&mut keys, temp_dir.path())?;
+
+        // Verify results - no keys should be added
+        assert_eq!(keys.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_codebase() -> Result<()> {
+        // Create a temporary directory structure
+        let temp_dir = TempDir::new()?;
+
+        // Create a file with static keys
+        let file1 = temp_dir.child("file1.rs");
+        file1.write_str(
+            r#"
+            fn some_function() {
+                i18n.t("common.button.submit");
+                i18n.t("common.button.cancel");
+            }
+        "#,
+        )?;
+
+        // Create a file with translate keys
+        let file2 = temp_dir.child("file2.rs");
+        file2.write_str(
+            r#"
+            fn another_function() {
+                i18n.translate("profile.title");
+            }
+        "#,
+        )?;
+
+        // Create a routes.rs file for dynamic keys
+        let routes_file = temp_dir.child("routes.rs");
+        routes_file.write_str(
+            r#"
+            enum AdminRoute {
+                #[at("/admin")]
+                Dashboard,
+
+                #[at("/admin/users")]
+                Users,
+            }
+        "#,
+        )?;
+
+        // Test scan_codebase
+        let keys = scan_codebase(temp_dir.path())?;
+
+        // Verify results
+        assert_eq!(keys.len(), 7);
+        assert!(keys.contains("common.button.submit"));
+        assert!(keys.contains("common.button.cancel"));
+        assert!(keys.contains("profile.title"));
+        assert!(keys.contains("admin.routes.title"));
+        assert!(keys.contains("admin.routes.icon"));
+        assert!(keys.contains("admin.routes.users.title"));
+        assert!(keys.contains("admin.routes.users.icon"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_codebase_with_non_rs_files() -> Result<()> {
+        // Create a temporary directory structure
+        let temp_dir = TempDir::new()?;
+
+        // Create a .rs file with keys
+        let rs_file = temp_dir.child("file.rs");
+        rs_file.write_str(
+            r#"
+            fn some_function() {
+                i18n.t("key.in.rs.file");
+            }
+        "#,
+        )?;
+
+        // Create a .txt file with keys that should be ignored
+        let txt_file = temp_dir.child("file.txt");
+        txt_file.write_str(
+            r#"
+            i18n.t("key.in.txt.file");
+        "#,
+        )?;
+
+        // Test scan_codebase
+        let keys = scan_codebase(temp_dir.path())?;
+
+        // Verify results - only keys from .rs files should be included
+        assert_eq!(keys.len(), 1);
+        assert!(keys.contains("key.in.rs.file"));
+        assert!(!keys.contains("key.in.txt.file"));
+
+        Ok(())
+    }
+}
