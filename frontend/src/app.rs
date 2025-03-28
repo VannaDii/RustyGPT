@@ -12,10 +12,8 @@ extern "C" {
 #[function_component(App)]
 pub fn app() -> Html {
     html! {
-        <div class="bg-base-200 min-h-screen">
-            <BrowserRouter>
-                <Switch<MainRoute> render={crate::routes::switch} />
-            </BrowserRouter>
-        </div>
+        <BrowserRouter>
+            <Switch<MainRoute> render={crate::routes::switch} />
+        </BrowserRouter>
     }
 }

@@ -1,5 +1,5 @@
 use crate::{containers::layout::Layout, pages::*};
-use strum::EnumIter;
+use strum::{EnumIter, IntoEnumIterator};
 use wasm_bindgen::prelude::*;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -53,6 +53,18 @@ impl Default for AppRoute {
     }
 }
 
+impl From<AdminRoute> for AppRoute {
+    fn from(route: AdminRoute) -> Self {
+        AppRoute::Admin(route)
+    }
+}
+
+impl From<MainRoute> for AppRoute {
+    fn from(route: MainRoute) -> Self {
+        AppRoute::Main(route)
+    }
+}
+
 /// Switch function for the main routes.
 pub fn switch(route: MainRoute) -> Html {
     log(std::format!("Switching to main route: {:?}", route).as_str());
@@ -72,18 +84,29 @@ pub fn switch(route: MainRoute) -> Html {
 /// Switch function for the admin routes.
 fn switch_admin(route: AdminRoute) -> Html {
     log(std::format!("Switching to admin route: {:?}", route).as_str());
+    let header_routes = AdminRoute::iter()
+        .filter(|route| {
+            // Filter out the error routes
+            route != &AdminRoute::NotFound
+        })
+        .map(AppRoute::Admin)
+        .collect::<Vec<_>>();
     match route {
         AdminRoute::Profile => {
-            html! {<Layout current_route={AppRoute::Admin(route)}><ProfilePage /></Layout>}
+            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)}>
+            <ProfilePage /></Layout>}
         }
         AdminRoute::System => {
-            html! {<Layout current_route={AppRoute::Admin(route)}><SettingsPage /></Layout>}
+            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)}>
+            <SettingsPage /></Layout>}
         }
         AdminRoute::Users => {
-            html! {<Layout current_route={AppRoute::Admin(route)}><UsersPage /></Layout>}
+            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)}>
+            <UsersPage /></Layout>}
         }
         AdminRoute::UserRoles => {
-            html! {<Layout current_route={AppRoute::Admin(route)}><RolesPage /></Layout>}
+            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)}>
+            <RolesPage /></Layout>}
         }
         AdminRoute::NotFound => html! {<Redirect<MainRoute> to={MainRoute::NotFound}/>},
     }
