@@ -3,11 +3,11 @@
 # Pre-push hook to run the same commands as CI
 # This ensures that your code will pass CI checks before being pushed to GitHub
 
-echo "Running pre-push checks..."
+echo "Running pre-commit checks..."
 
 # Save current directory
 CURRENT_DIR=$(pwd)
-SQLX_OFFLINE=true
+export SQLX_OFFLINE=true
 
 # Check if we're in the project root, if not navigate to it
 if [ ! -f "Cargo.toml" ]; then
@@ -46,7 +46,7 @@ fi
 run_check "cargo fmt --all -- --check"
 
 # Run clippy
-run_check "SQLX_OFFLINE=true cargo clippy --all-features -- -D warnings"
+run_check "cargo clippy --all-features -- -D warnings"
 
 # Build the project
 run_check "cargo build"
