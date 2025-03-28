@@ -6,7 +6,27 @@
     "home": "Dashboard"
   },
   "admin": {
-    "profile": "Profile"
+    "profile": "Profile",
+    "routes": {
+      "icon": "user",
+      "title": "Profile",
+      "system": {
+        "icon": "gear",
+        "title": "System"
+      },
+      "users": {
+        "icon": "users",
+        "title": "Users"
+      },
+      "roles": {
+        "icon": "id-card",
+        "title": "Roles"
+      },
+      "404": {
+        "icon": "bomb",
+        "title": "Error 404"
+      }
+    }
   },
   "header": {
     "logout": "Logout",

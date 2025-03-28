@@ -1,4 +1,5 @@
 use crate::{containers::layout::Layout, pages::*};
+use strum::EnumIter;
 use wasm_bindgen::prelude::*;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -10,7 +11,7 @@ extern "C" {
 }
 
 /// The main routes
-#[derive(Debug, Clone, PartialEq, Routable)]
+#[derive(Debug, Clone, PartialEq, Routable, EnumIter)]
 pub enum MainRoute {
     #[at("/")]
     Home,
@@ -24,7 +25,7 @@ pub enum MainRoute {
 }
 
 /// The admin routes.
-#[derive(Debug, Clone, PartialEq, Routable)]
+#[derive(Debug, Clone, PartialEq, Routable, EnumIter)]
 pub enum AdminRoute {
     #[at("/admin")]
     Profile,
@@ -32,7 +33,7 @@ pub enum AdminRoute {
     System,
     #[at("/admin/users")]
     Users,
-    #[at("/admin/users/roles")]
+    #[at("/admin/roles")]
     UserRoles,
     #[not_found]
     #[at("/admin/404")]
