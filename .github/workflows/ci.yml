@@ -14,7 +14,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
+  LC_ALL: en_US.UTF-8
   LANG: en_US.UTF-8
+  LANGUAGE: en_US
 
 jobs:
   build:
@@ -26,13 +28,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Cargo registries and git checkouts
+        uses: actions/cache@v3
+        with:
+          path: |
+            /usr/local/cargo/git
+            /usr/local/cargo/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache Cargo installed binaries
+        uses: actions/cache@v3
+        with:
+          path: /usr/local/cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
+
       - name: Prep OS
         run: |
           apt-get update && apt-get install -y jq
 
       - name: Create .env file
-        run: |
-          cp .env.template .env
+        run: cp .env.template .env
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -42,12 +57,7 @@ jobs:
       - name: Install Cargo Tools
         run: |
           rustup target add wasm32-unknown-unknown
-          # Install tools in parallel without version pinning
-          cargo install --locked --jobs "$(nproc)" trunk &
-          cargo install --locked --jobs "$(nproc)" wasm-bindgen-cli &
-          cargo install --locked --jobs "$(nproc)" wasm-opt &
-          cargo install --locked --jobs "$(nproc)" sqlx-cli --no-default-features --features native-tls,postgres &
-          wait
+          cargo install --locked --jobs "$(nproc)" trunk wasm-bindgen-cli wasm-opt sqlx-cli
 
       - name: Build
         run: cargo build
@@ -57,9 +67,7 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        run: |
-          echo "Building with PATH=$PATH"
-          trunk build --release
+        run: trunk build --release
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
