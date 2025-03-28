@@ -7,7 +7,7 @@ echo "Running pre-push checks..."
 
 # Save current directory
 CURRENT_DIR=$(pwd)
-SQLX_OFFLINE=true
+export SQLX_OFFLINE=true
 
 # Check if we're in the project root, if not navigate to it
 if [ ! -f "Cargo.toml" ]; then
