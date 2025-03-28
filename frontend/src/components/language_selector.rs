@@ -22,18 +22,15 @@ pub fn language_selector() -> yew::Html {
     let lang_code = language_state.deref();
     let lang_info = language::get_language_info(lang_code.as_str()).unwrap();
     let active_lang_flag = lang_info.flag;
-    let active_lang = lang_info.native_name;
     let supported = language::supported_languages();
     let mut languages: Vec<_> = supported.iter().collect();
     languages.sort_by(|a, b| a.1.native_name.cmp(b.1.native_name));
 
     html! {
         <div class="dropdown dropdown-end">
-            <label tabindex="0" class="btn btn-ghost btn-sm gap-1 normal-case">
+            <div tabindex="0" role="button" class="btn btn-ghost btn-circle mb-1">
                 <span>{active_lang_flag}</span>
-                <span class="hidden md:inline">{active_lang}</span>
-                <i class="fas fa-chevron-down text-xs opacity-60"></i>
-            </label>
+            </div>
             <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52">
             {
                 for languages.into_iter().map(|(_, info)| {

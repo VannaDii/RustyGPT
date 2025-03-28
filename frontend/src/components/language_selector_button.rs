@@ -16,12 +16,15 @@ pub fn language_selector(props: &LanguageSelectorButtonProps) -> Html {
     let on_click = props.on_click.clone();
     html! {
         <li>
-            <button
+            <a
                 class={if props.is_active { "active" } else { "" }}
-                onclick={move |_| on_click.emit(code.clone())}>
+                onclick={move |event: yew::MouseEvent| {
+                    event.prevent_default();
+                    on_click.emit(code.clone());
+                }}>
                 <span>{props.info.flag}</span>
                 <span>{props.info.native_name}</span>
-            </button>
+            </a>
         </li>
     }
 }

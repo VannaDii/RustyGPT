@@ -1,3 +1,4 @@
+pub(crate) mod header_nav_item;
 pub(crate) mod language_selector;
 pub(crate) mod language_selector_button;
 pub(crate) mod loading;

@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Rusty GPT"
+    "title": "RustyGPT"
   },
   "main": {
     "home": "Dashboard"
@@ -21,10 +21,6 @@
       "roles": {
         "icon": "id-card",
         "title": "Roles"
-      },
-      "404": {
-        "icon": "bomb",
-        "title": "Error 404"
       }
     }
   },
