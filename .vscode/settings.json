@@ -1,14 +1,18 @@
 {
   "cSpell.words": [
+    "bindgen",
     "chrono",
     "CUDA",
     "Deutsch",
     "Español",
     "Français",
+    "gloo",
+    "Heroicon",
     "Heroicons",
     "initdb",
     "onchange",
     "onclick",
+    "serde",
     "tabindex",
     "tinroof",
     "yewdux"
