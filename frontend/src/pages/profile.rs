@@ -17,7 +17,7 @@ pub fn profile_page() -> Html {
         <div class="p-4 space-y-6">
             <h1 class="text-2xl font-bold">{ "Profile Page" }</h1>
             <p>{ "This is the profile page." }</p>
-            <p>{ "You can edit your profile here." }</p>
+            <p>{ "You can adjust your profile here." }</p>
         </div>
     }
 }

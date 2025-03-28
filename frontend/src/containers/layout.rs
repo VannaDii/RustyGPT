@@ -16,6 +16,8 @@ pub struct LayoutProps {
     pub children: Children,
     #[prop_or_default]
     pub current_route: Option<AppRoute>,
+    #[prop_or_default]
+    pub header_routes: Option<Vec<AppRoute>>,
 }
 
 #[function_component(Layout)]
@@ -33,11 +35,13 @@ pub fn layout(props: &LayoutProps) -> Html {
         }
         || {}
     });
+    let header_routes = props.header_routes.clone();
 
     html! {
+    <>
+        <Header {header_routes} current_route={props.current_route.clone()} />
         <div class="min-h-screen bg-base-100 drawer lg:drawer-open">
             <div class="drawer-content flex flex-col">
-                <Header current_route={props.current_route.clone()} />
                 <main class={classes!(
                     "flex-grow",
                     "p-4",
@@ -56,5 +60,6 @@ pub fn layout(props: &LayoutProps) -> Html {
                 </footer>
             </div>
         </div>
+    </>
     }
 }

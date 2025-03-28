@@ -11,32 +11,36 @@ pub fn user_dropdown() -> Html {
 
     let settings_button = {
         let navigator = navigator.clone();
-        let onclick = Callback::from(move |_| navigator.push(&AdminRoute::Profile));
+        let onclick = Callback::from(move |event: yew::MouseEvent| {
+            event.prevent_default();
+            navigator.push(&AdminRoute::Profile)
+        });
         html! {
-            <li><button {onclick}>{i18n.t("sidebar.settings")}</button></li>
+            <li><a {onclick}>{i18n.t("sidebar.settings")}</a></li>
         }
     };
 
     let logout_button = {
         let navigator = navigator.clone();
-        let onclick = Callback::from(move |_| navigator.push(&MainRoute::Home));
+        let onclick = Callback::from(move |event: yew::MouseEvent| {
+            event.prevent_default();
+            navigator.push(&MainRoute::Home);
+        });
         html! {
-            <li><button {onclick}>{i18n.t("header.logout")}</button></li>
+            <li><a {onclick}>{i18n.t("header.logout")}</a></li>
         }
     };
 
     html! {
-      <div class="dropdown dropdown-end">
-          <label tabIndex={0} class="btn btn-ghost btn-circle avatar">
-              <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <span class="text-primary font-semibold">{"AD"}</span>
-              </div>
-          </label>
-          <ul tabIndex={0} class="menu menu-sm dropdown-content mt-3 p-2 shadow bg-base-100 rounded-box w-52 z-[1]">
-              {settings_button}
-              <div class="divider my-1"></div>
-              {logout_button}
-          </ul>
-      </div>
+        <div class="dropdown dropdown-end">
+            <div tabindex="0" role="button" class="btn btn-ghost btn-circle mb-1">
+                <i class="fa-solid fa-user text-lg"></i>
+            </div>
+            <ul tabIndex={0} class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52">
+                {settings_button}
+                <div class="divider my-0"></div>
+                {logout_button}
+            </ul>
+        </div>
     }
 }

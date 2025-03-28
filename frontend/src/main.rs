@@ -74,7 +74,8 @@ fn main() {
             .unwrap()
             .document()
             .unwrap()
-            .get_element_by_id("app")
+            .get_elements_by_tag_name("body")
+            .item(0)
             .unwrap(),
     )
     .render();
