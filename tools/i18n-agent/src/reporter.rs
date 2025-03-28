@@ -306,146 +306,33 @@ fn generate_json_report(audit_result: &AuditResult, output_dir: &Path) -> Result
 fn generate_html_report(audit_result: &AuditResult, output_dir: &Path) -> Result<()> {
     let report_path = output_dir.join("translation_report.html");
 
+    // Create a basic HTML report with summary information
     let mut html = String::new();
 
-    // HTML header
-    html.push_str(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Translation Audit Report</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 20px;
-            color: #333;
-        }
-        h1, h2, h3 {
-            color: #2c3e50;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .summary {
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-        }
-        th, td {
-            padding: 12px 15px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        tr:hover {
-            background-color: #f5f5f5;
-        }
-        .progress-bar {
-            height: 20px;
-            background-color: #e9ecef;
-            border-radius: 5px;
-            overflow: hidden;
-        }
-        .progress {
-            height: 100%;
-            background-color: #4caf50;
-            text-align: center;
-            color: white;
-            line-height: 20px;
-        }
-        .warning {
-            color: #856404;
-            background-color: #fff3cd;
-            padding: 10px;
-            border-radius: 5px;
-            margin-bottom: 10px;
-        }
-        .keys-list {
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            padding: 10px;
-            border-radius: 5px;
-            background-color: #f8f9fa;
-        }
-        .keys-list ul {
-            padding-left: 20px;
-        }
-        .tab {
-            overflow: hidden;
-            border: 1px solid #ccc;
-            background-color: #f1f1f1;
-            border-radius: 5px 5px 0 0;
-        }
-        .tab button {
-            background-color: inherit;
-            float: left;
-            border: none;
-            outline: none;
-            cursor: pointer;
-            padding: 14px 16px;
-            transition: 0.3s;
-        }
-        .tab button:hover {
-            background-color: #ddd;
-        }
-        .tab button.active {
-            background-color: #ccc;
-        }
-        .tabcontent {
-            display: none;
-            padding: 6px 12px;
-            border: 1px solid #ccc;
-            border-top: none;
-            border-radius: 0 0 5px 5px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Translation Audit Report</h1>
-"#,
-    );
+    // Add HTML header
+    html.push_str("<!DOCTYPE html>\n<html>\n<head>\n");
+    html.push_str("<title>Translation Audit Report</title>\n");
+    html.push_str("<style>\n");
+    html.push_str("body { font-family: Arial, sans-serif; margin: 20px; }\n");
+    html.push_str("table { border-collapse: collapse; width: 100%; }\n");
+    html.push_str("th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }\n");
+    html.push_str("th { background-color: #f2f2f2; }\n");
+    html.push_str("</style>\n");
+    html.push_str("</head>\n<body>\n");
 
-    // Summary section
-    html.push_str(
-        r#"<div class="summary">
-            <h2>Summary</h2>
-            <p>Total unique keys in codebase: "#,
-    );
+    // Add report title
+    html.push_str("<h1>Translation Audit Report</h1>\n");
+
+    // Add summary section
+    html.push_str("<h2>Summary</h2>\n");
+    html.push_str("<p>Total unique keys in codebase: ");
     html.push_str(&audit_result.keys_in_use.len().to_string());
     html.push_str("</p>\n");
 
-    // Files table
-    html.push_str(
-        r#"<h2>Translation Files</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>File</th>
-                    <th>Total Keys</th>
-                    <th>Used Keys</th>
-                    <th>Unused Keys</th>
-                    <th>Missing Translations</th>
-                    <th>Coverage</th>
-                </tr>
-            </thead>
-            <tbody>
-"#,
-    );
+    // Add translation files table
+    html.push_str("<h2>Translation Files</h2>\n");
+    html.push_str("<table>\n");
+    html.push_str("<tr><th>File</th><th>Total Keys</th><th>Used Keys</th><th>Unused Keys</th><th>Missing Translations</th><th>Coverage</th></tr>\n");
 
     for (lang_code, data) in &audit_result.translations {
         let is_reference = lang_code == &audit_result.reference_language;
@@ -454,142 +341,355 @@ fn generate_html_report(audit_result: &AuditResult, output_dir: &Path) -> Result
         let used_keys = total_keys - unused_keys;
 
         let missing = if is_reference {
-            HashSet::new()
+            0
         } else {
-            get_missing_translations(audit_result, lang_code)
+            get_missing_translations(audit_result, lang_code).len()
         };
 
         let coverage = calculate_coverage(audit_result, lang_code);
 
-        html.push_str("<tr>\n");
+        html.push_str("<tr>");
         html.push_str(&format!(
-            "<td>{}.json {}</td>\n",
+            "<td>{}.json {}</td>",
             lang_code,
             if is_reference { "(reference)" } else { "" }
         ));
-        html.push_str(&format!("<td>{}</td>\n", total_keys));
-        html.push_str(&format!("<td>{}</td>\n", used_keys));
-        html.push_str(&format!("<td>{}</td>\n", unused_keys));
-        html.push_str(&format!("<td>{}</td>\n", missing.len()));
-
-        // Coverage with progress bar
-        html.push_str("<td>\n");
-        html.push_str("<div class=\"progress-bar\">\n");
-        html.push_str(&format!(
-            "<div class=\"progress\" style=\"width: {}%;\">{:.1}%</div>\n",
-            coverage, coverage
-        ));
-        html.push_str("</div>\n");
-        html.push_str("</td>\n");
-
+        html.push_str(&format!("<td>{}</td>", total_keys));
+        html.push_str(&format!("<td>{}</td>", used_keys));
+        html.push_str(&format!("<td>{}</td>", unused_keys));
+        html.push_str(&format!("<td>{}</td>", missing));
+        html.push_str(&format!("<td>{:.1}%</td>", coverage));
         html.push_str("</tr>\n");
     }
 
-    html.push_str("</tbody></table>\n");
+    html.push_str("</table>\n");
 
-    // Tabs for detailed information
-    html.push_str(r#"<div class="tab">
-            <button class="tablinks" onclick="openTab(event, 'UnusedKeys')" id="defaultOpen">Unused Keys</button>
-            <button class="tablinks" onclick="openTab(event, 'MissingTranslations')">Missing Translations</button>
-        </div>
-"#);
+    // Close HTML tags
+    html.push_str("</body>\n</html>");
 
-    // Unused keys tab
-    html.push_str(
-        r#"<div id="UnusedKeys" class="tabcontent">
-            <h3>Unused Keys by File</h3>
-"#,
-    );
-
-    for (lang_code, data) in &audit_result.translations {
-        html.push_str(&format!(
-            "<h4>{}.json ({} unused keys)</h4>\n",
-            lang_code,
-            data.unused_keys.len()
-        ));
-
-        if !data.unused_keys.is_empty() {
-            html.push_str("<div class=\"keys-list\">\n<ul>\n");
-
-            let mut sorted_keys: Vec<_> = data.unused_keys.iter().collect();
-            sorted_keys.sort();
-
-            for key in sorted_keys {
-                html.push_str(&format!("<li>{}</li>\n", key));
-            }
-
-            html.push_str("</ul>\n</div>\n");
-        } else {
-            html.push_str("<p>No unused keys found.</p>\n");
-        }
-    }
-
-    html.push_str("</div>\n");
-
-    // Missing translations tab
-    html.push_str(
-        r#"<div id="MissingTranslations" class="tabcontent">
-            <h3>Missing Translations by File</h3>
-"#,
-    );
-
-    for lang_code in audit_result.translations.keys() {
-        if lang_code == &audit_result.reference_language {
-            continue;
-        }
-
-        let missing = get_missing_translations(audit_result, lang_code);
-        html.push_str(&format!(
-            "<h4>{}.json ({} missing translations)</h4>\n",
-            lang_code,
-            missing.len()
-        ));
-
-        if !missing.is_empty() {
-            html.push_str("<div class=\"keys-list\">\n<ul>\n");
-
-            let mut sorted_keys: Vec<_> = missing.iter().collect();
-            sorted_keys.sort();
-
-            for key in sorted_keys {
-                html.push_str(&format!("<li>{}</li>\n", key));
-            }
-
-            html.push_str("</ul>\n</div>\n");
-        } else {
-            html.push_str("<p>No missing translations found.</p>\n");
-        }
-    }
-
-    html.push_str("</div>\n");
-
-    // JavaScript for tabs
-    html.push_str(
-        r#"<script>
-        function openTab(evt, tabName) {
-            var i, tabcontent, tablinks;
-            tabcontent = document.getElementsByClassName("tabcontent");
-            for (i = 0; i < tabcontent.length; i++) {
-                tabcontent[i].style.display = "none";
-            }
-            tablinks = document.getElementsByClassName("tablinks");
-            for (i = 0; i < tablinks.length; i++) {
-                tablinks[i].className = tablinks[i].className.replace(" active", "");
-            }
-            document.getElementById(tabName).style.display = "block";
-            evt.currentTarget.className += " active";
-        }
-
-        // Get the element with id="defaultOpen" and click on it
-        document.getElementById("defaultOpen").click();
-    </script>
-    </div>
-</body>
-</html>"#,
-    );
-
+    // Write the HTML to file
     fs::write(&report_path, html)?;
     println!("HTML report generated: {:?}", report_path);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_fs::TempDir;
+    use serde_json::json;
+    use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
+
+    use crate::analyzer::{AuditResult, TranslationData};
+
+    #[test]
+    fn test_generate_text_report() -> Result<()> {
+        // Create a temporary directory for output
+        let temp_dir = TempDir::new()?;
+
+        // Create a mock AuditResult
+        let mut keys_in_use = HashSet::new();
+        keys_in_use.insert("common.button.submit".to_string());
+        keys_in_use.insert("common.button.cancel".to_string());
+        keys_in_use.insert("profile.title".to_string());
+
+        let mut translations = HashMap::new();
+
+        // English (reference) translation data
+        let en_content = json!({
+            "common": {
+                "button": {
+                    "submit": "Submit",
+                    "cancel": "Cancel"
+                }
+            },
+            "profile": {
+                "title": "Profile"
+            }
+        });
+
+        let mut en_all_keys = HashSet::new();
+        en_all_keys.insert("common.button.submit".to_string());
+        en_all_keys.insert("common.button.cancel".to_string());
+        en_all_keys.insert("profile.title".to_string());
+
+        let en_data = TranslationData {
+            file_path: PathBuf::from("en.json"),
+            all_keys: en_all_keys,
+            unused_keys: HashSet::new(),
+            content: en_content,
+        };
+        translations.insert("en".to_string(), en_data);
+
+        // Spanish translation data (missing cancel button)
+        let es_content = json!({
+            "common": {
+                "button": {
+                    "submit": "Enviar"
+                }
+            },
+            "profile": {
+                "title": "Perfil"
+            }
+        });
+
+        let mut es_all_keys = HashSet::new();
+        es_all_keys.insert("common.button.submit".to_string());
+        es_all_keys.insert("profile.title".to_string());
+
+        let es_data = TranslationData {
+            file_path: PathBuf::from("es.json"),
+            all_keys: es_all_keys,
+            unused_keys: HashSet::new(),
+            content: es_content,
+        };
+        translations.insert("es".to_string(), es_data);
+
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test generate_text_report
+        generate_text_report(&audit_result, temp_dir.path())?;
+
+        // Verify report file was created
+        let report_path = temp_dir.path().join("translation_report.txt");
+        assert!(report_path.exists());
+
+        // Check content of report
+        let report_content = fs::read_to_string(&report_path)?;
+
+        // Verify report contains expected sections
+        assert!(report_content.contains("Translation Audit Report"));
+        assert!(report_content.contains("Translation Files:"));
+        assert!(report_content.contains("Keys in Use:"));
+        assert!(report_content.contains("Unused Keys:"));
+        assert!(report_content.contains("Missing Translations:"));
+
+        // Verify report contains language-specific information
+        assert!(report_content.contains("en.json"));
+        assert!(report_content.contains("es.json"));
+        assert!(report_content.contains("missing translations"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_json_report() -> Result<()> {
+        // Create a temporary directory for output
+        let temp_dir = TempDir::new()?;
+
+        // Create a mock AuditResult (similar to test_generate_text_report)
+        let mut keys_in_use = HashSet::new();
+        keys_in_use.insert("common.button.submit".to_string());
+        keys_in_use.insert("common.button.cancel".to_string());
+        keys_in_use.insert("profile.title".to_string());
+
+        let mut translations = HashMap::new();
+
+        // English (reference) translation data
+        let en_content = json!({
+            "common": {
+                "button": {
+                    "submit": "Submit",
+                    "cancel": "Cancel"
+                }
+            },
+            "profile": {
+                "title": "Profile"
+            }
+        });
+
+        let mut en_all_keys = HashSet::new();
+        en_all_keys.insert("common.button.submit".to_string());
+        en_all_keys.insert("common.button.cancel".to_string());
+        en_all_keys.insert("profile.title".to_string());
+
+        let en_data = TranslationData {
+            file_path: PathBuf::from("en.json"),
+            all_keys: en_all_keys,
+            unused_keys: HashSet::new(),
+            content: en_content,
+        };
+        translations.insert("en".to_string(), en_data);
+
+        // Spanish translation data (missing cancel button)
+        let es_content = json!({
+            "common": {
+                "button": {
+                    "submit": "Enviar"
+                }
+            },
+            "profile": {
+                "title": "Perfil"
+            }
+        });
+
+        let mut es_all_keys = HashSet::new();
+        es_all_keys.insert("common.button.submit".to_string());
+        es_all_keys.insert("profile.title".to_string());
+
+        let es_data = TranslationData {
+            file_path: PathBuf::from("es.json"),
+            all_keys: es_all_keys,
+            unused_keys: HashSet::new(),
+            content: es_content,
+        };
+        translations.insert("es".to_string(), es_data);
+
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test generate_json_report
+        generate_json_report(&audit_result, temp_dir.path())?;
+
+        // Verify report file was created
+        let report_path = temp_dir.path().join("translation_report.json");
+        assert!(report_path.exists());
+
+        // Check content of report
+        let report_content = fs::read_to_string(&report_path)?;
+        let report_json: serde_json::Value = serde_json::from_str(&report_content)?;
+
+        // Verify report structure
+        assert!(report_json.is_object());
+        assert!(report_json.as_object().unwrap().contains_key("summary"));
+        assert!(report_json.as_object().unwrap().contains_key("files"));
+
+        // Verify summary information
+        let summary = &report_json["summary"];
+        assert_eq!(summary["total_keys_in_use"], 3);
+
+        // Verify files information
+        let files = &report_json["files"];
+        assert!(files.as_object().unwrap().contains_key("en.json"));
+        assert!(files.as_object().unwrap().contains_key("es.json"));
+
+        // Verify English file details
+        let en_file = &files["en.json"];
+        assert_eq!(en_file["total_keys"], 3);
+        assert_eq!(en_file["used_keys"], 3);
+        assert_eq!(en_file["unused_keys_count"], 0);
+        assert_eq!(en_file["missing_translations_count"], 0);
+        assert_eq!(en_file["coverage_percentage"], "100.0");
+        assert_eq!(en_file["is_reference"], true);
+
+        // Verify Spanish file details
+        let es_file = &files["es.json"];
+        assert_eq!(es_file["total_keys"], 2);
+        assert_eq!(es_file["used_keys"], 2);
+        assert_eq!(es_file["unused_keys_count"], 0);
+        assert_eq!(es_file["missing_translations_count"], 1);
+        assert_eq!(es_file["coverage_percentage"], "66.7");
+        assert_eq!(es_file["is_reference"], false);
+
+        // Verify missing translations
+        let missing_translations = &es_file["missing_translations"].as_array().unwrap();
+        assert_eq!(missing_translations.len(), 1);
+        assert_eq!(missing_translations[0], "common.button.cancel");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_html_report() -> Result<()> {
+        // Create a temporary directory for output
+        let temp_dir = TempDir::new()?;
+
+        // Create a mock AuditResult (similar to previous tests)
+        let mut keys_in_use = HashSet::new();
+        keys_in_use.insert("common.button.submit".to_string());
+        keys_in_use.insert("common.button.cancel".to_string());
+        keys_in_use.insert("profile.title".to_string());
+
+        let mut translations = HashMap::new();
+
+        // English (reference) translation data
+        let en_content = json!({
+            "common": {
+                "button": {
+                    "submit": "Submit",
+                    "cancel": "Cancel"
+                }
+            },
+            "profile": {
+                "title": "Profile"
+            }
+        });
+
+        let mut en_all_keys = HashSet::new();
+        en_all_keys.insert("common.button.submit".to_string());
+        en_all_keys.insert("common.button.cancel".to_string());
+        en_all_keys.insert("profile.title".to_string());
+
+        let en_data = TranslationData {
+            file_path: PathBuf::from("en.json"),
+            all_keys: en_all_keys,
+            unused_keys: HashSet::new(),
+            content: en_content,
+        };
+        translations.insert("en".to_string(), en_data);
+
+        // Spanish translation data (missing cancel button)
+        let es_content = json!({
+            "common": {
+                "button": {
+                    "submit": "Enviar"
+                }
+            },
+            "profile": {
+                "title": "Perfil"
+            }
+        });
+
+        let mut es_all_keys = HashSet::new();
+        es_all_keys.insert("common.button.submit".to_string());
+        es_all_keys.insert("profile.title".to_string());
+
+        let es_data = TranslationData {
+            file_path: PathBuf::from("es.json"),
+            all_keys: es_all_keys,
+            unused_keys: HashSet::new(),
+            content: es_content,
+        };
+        translations.insert("es".to_string(), es_data);
+
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test generate_html_report
+        generate_html_report(&audit_result, temp_dir.path())?;
+
+        // Verify report file was created
+        let report_path = temp_dir.path().join("translation_report.html");
+        assert!(report_path.exists());
+
+        // Check content of report
+        let report_content = fs::read_to_string(&report_path)?;
+
+        // Verify report contains expected sections
+        assert!(report_content.contains("<!DOCTYPE html>"));
+        assert!(report_content.contains("<title>Translation Audit Report</title>"));
+        assert!(report_content.contains("<h1>Translation Audit Report</h1>"));
+        assert!(report_content.contains("<h2>Summary</h2>"));
+        assert!(report_content.contains("<h2>Translation Files</h2>"));
+        assert!(report_content.contains("<table>"));
+
+        // Verify report contains language-specific information
+        assert!(report_content.contains("en.json"));
+        assert!(report_content.contains("es.json"));
+        assert!(report_content.contains("(reference)"));
+
+        Ok(())
+    }
 }
