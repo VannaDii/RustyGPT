@@ -15,8 +15,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
+  LC_ALL: en_US.UTF-8
   LANG: en_US.UTF-8
-  CARGO_HOME: ${{ github.workspace }}/.cargo
+  LANGUAGE: en_US
 
 jobs:
   clippy:
@@ -43,9 +44,6 @@ jobs:
           rustup component add clippy
           cargo install --locked --jobs "$(nproc)" sqlx-cli
 
-      - name: Add Cargo bin to PATH
-        run: echo "PATH=$PATH:${{ env.CARGO_HOME }}/.cargo/bin" >> $GITHUB_ENV
-
       - name: Clippy check
         run: cargo clippy --all-features -- -D warnings
 
@@ -62,9 +60,15 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/registry
-            ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/git
+            /usr/local/cargo/git
+            /usr/local/cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache Cargo installed binaries
+        uses: actions/cache@v3
+        with:
+          path: /usr/local/cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
 
       - name: Install Cargo Tools
         run: |

@@ -13,8 +13,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
+  LC_ALL: en_US.UTF-8
   LANG: en_US.UTF-8
-  CARGO_HOME: ${{ github.workspace }}/.cargo
+  LANGUAGE: en_US
 
 jobs:
   build:
@@ -32,7 +33,6 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            /usr/local/cargo/bin
             /usr/local/cargo/git
             /usr/local/cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}

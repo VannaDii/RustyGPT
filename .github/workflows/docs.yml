@@ -19,9 +19,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  CARGO_TERM_COLOR: always
   SQLX_OFFLINE: true
+  LC_ALL: en_US.UTF-8
   LANG: en_US.UTF-8
-  CARGO_HOME: ${{ github.workspace }}/.cargo
+  LANGUAGE: en_US
 
 jobs:
   build:
@@ -41,18 +43,15 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/registry
-            ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/git
+            /usr/local/cargo/git
+            /usr/local/cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache Cargo installed binaries
         uses: actions/cache@v3
         with:
-          path: ${{ env.CARGO_HOME != '' && env.CARGO_HOME || github.workspace }}/.cargo/bin
+          path: /usr/local/cargo/bin
           key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
-
-      - name: Add Cargo bin to PATH
-        run: echo "PATH=$PATH:${{ env.CARGO_HOME }}/.cargo/bin" >> $GITHUB_ENV
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
