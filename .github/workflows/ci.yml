@@ -17,7 +17,8 @@ env:
   LC_ALL: en_US.UTF-8
   LANG: en_US.UTF-8
   LANGUAGE: en_US
-  CARGO_HOME: ${{ github.workspace }}/.cargo # Set CARGO_HOME to a .cargo folder in the workspace
+  CARGO_HOME: ${{ github.workspace }}/.cargo
+  CARGO_INSTALL_ROOT: ${{ github.workspace }}/.cargo/bin
 
 jobs:
   build:
