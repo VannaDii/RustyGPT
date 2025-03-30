@@ -1,18 +1,17 @@
-use crate::services::oauth_service::handle_github_oauth;
+use crate::{app_state::AppState, services::oauth_service::handle_github_oauth};
 use axum::{
     Router,
-    extract::{Extension, Json, Query},
+    extract::{Json, Query, State},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use http::StatusCode;
 use shared::models::oauth::{OAuthCallback, OAuthInitResponse, OAuthRequest};
-use sqlx::PgPool;
-use std::env;
+use std::{env, sync::Arc};
 
 // Handler for initiating GitHub OAuth flow
 #[axum::debug_handler]
-async fn github_oauth_init() -> Json<OAuthInitResponse> {
+pub async fn github_oauth_init() -> Json<OAuthInitResponse> {
     // In a real implementation, this would generate a proper OAuth URL with state
     let github_client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
     let redirect_uri = env::var("GITHUB_REDIRECT_URI").unwrap_or_default();
@@ -28,11 +27,11 @@ async fn github_oauth_init() -> Json<OAuthInitResponse> {
 
 // Handler for GitHub OAuth callback
 #[axum::debug_handler]
-async fn github_oauth_callback(
+pub async fn github_oauth_callback(
     Query(params): Query<OAuthCallback>,
-    Extension(pool): Extension<PgPool>,
+    State(state): State<Arc<AppState>>,
 ) -> Response {
-    match handle_github_oauth(&pool, params.code).await {
+    match handle_github_oauth(&state.pool, params.code).await {
         Ok(user_id) => {
             // In a real app, you would set a cookie or return a JWT token
             // For now, redirect to a success page with the user ID
@@ -44,11 +43,11 @@ async fn github_oauth_callback(
 
 // Handler for manual GitHub OAuth (for testing with direct auth code)
 #[axum::debug_handler]
-async fn github_oauth_manual(
-    Extension(pool): Extension<PgPool>,
+pub async fn github_oauth_manual(
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<OAuthRequest>,
 ) -> Response {
-    match handle_github_oauth(&pool, payload.auth_code).await {
+    match handle_github_oauth(&state.pool, payload.auth_code).await {
         Ok(user_id) => (
             StatusCode::OK,
             format!("GitHub OAuth successful, user_id: {}", user_id),
@@ -59,9 +58,9 @@ async fn github_oauth_manual(
 }
 
 // Function to register the GitHub OAuth routes
-pub fn github_auth_routes() -> Router {
+pub fn github_auth_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/oauth/github", get(github_oauth_init))
-        .route("/api/oauth/github/callback", get(github_oauth_callback))
-        .route("/api/oauth/github/manual", post(github_oauth_manual))
+        .route("/oauth/github", get(github_oauth_init))
+        .route("/oauth/github/callback", get(github_oauth_callback))
+        .route("/oauth/github/manual", post(github_oauth_manual))
 }

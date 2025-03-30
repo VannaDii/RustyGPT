@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     Router,
     extract::{Extension, Json, Path},
@@ -11,7 +13,10 @@ use shared::models::{Conversation, Message, Timestamp};
 use tokio::spawn;
 use uuid::Uuid;
 
-use crate::handlers::streaming::{SharedState, stream_partial_response};
+use crate::{
+    app_state::AppState,
+    handlers::streaming::{SharedState, stream_partial_response},
+};
 
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
@@ -113,11 +118,11 @@ pub async fn send_message(
 }
 
 // Function to register the conversation routes
-pub fn conversation_routes() -> Router {
+pub fn conversation_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/conversations", get(get_conversations))
+        .route("/conversations", get(get_conversations))
         .route(
-            "/api/conversations/{conversation_id}/messages",
+            "/conversations/{conversation_id}/messages",
             post(send_message),
         )
 }

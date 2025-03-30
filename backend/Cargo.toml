@@ -4,29 +4,37 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = { version = "0.8.1", features = ["macros"] }
+axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
-futures-util = "0.3.30"
-http = "1.2.0"
+futures-util = "0.3"
+http = "1"
 hyper = { version = "1", features = ["client", "http1", "full"] }
-oauth2 = "5.0.0"
-reqwest = "0.12.12"
-hyper-rustls = { version = "0.27.5", features = ["http1", "webpki-roots"] }
+hyper-rustls = { version = "0.27", features = ["http1", "webpki-roots"] }
+oauth2 = "5"
+regex = { version = "1", features = ["unicode"] }
+reqwest = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.8.3", features = [
+sqlx = { version = "0.8", features = [
   "postgres",
   "macros",
   "runtime-tokio",
   "uuid",
 ] }
 tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1.15"
-tower = "0.5.2"
-tower-http = { version = "0.6.2", features = ["cors", "fs"] }
-tower-service = "0.3.3"
+tokio-stream = "0.1"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+  "fmt",
+  "json",
+] }
+tower-service = "0.3"
 uuid = { version = "1", features = ["serde", "v4", "js"] }
 shared = { path = "../shared" }
+
 
 [dev-dependencies]
 axum-test = "17.2.0"

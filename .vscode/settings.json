@@ -13,6 +13,7 @@
     "onchange",
     "onclick",
     "serde",
+    "sqlx",
     "tabindex",
     "tinroof",
     "yewdux"
