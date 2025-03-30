@@ -111,11 +111,11 @@ struct Cli {
 
     /// Comma-separated list of prefix colors for the commands.
     /// Supported colors: black, red, green, yellow, blue, magenta, cyan, white.
-    #[arg(short = 'c', long = "prefix-colors")]
+    #[arg(short = 'p', long = "prefix-colors")]
     prefix_colors: Option<String>,
 
     /// Optional working directory to apply to all commands.
-    #[arg(short, long)]
+    #[arg(short = 'd', long)]
     cwd: Option<PathBuf>,
 }
 
@@ -306,5 +306,162 @@ async fn main() {
     // Wait for all tasks to complete.
     for handle in handles {
         let _ = handle.await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_task_derive_base_name_with_working_dir() {
+        let task = Task {
+            name: None,
+            command: "cargo".to_string(),
+            args: vec!["run".to_string()],
+            working_dir: Some(PathBuf::from("/tmp/test_project")),
+        };
+
+        assert_eq!(task.derive_base_name(), "test_project:cargo");
+    }
+
+    #[test]
+    fn test_task_derive_base_name_without_working_dir() {
+        let task = Task {
+            name: None,
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            working_dir: None,
+        };
+
+        assert_eq!(task.derive_base_name(), "echo");
+    }
+
+    #[test]
+    fn test_task_derive_base_name_with_invalid_working_dir() {
+        let task = Task {
+            name: None,
+            command: "echo".to_string(),
+            args: vec!["hello".to_string()],
+            working_dir: Some(PathBuf::from("/")), // Root directory has no filename
+        };
+
+        assert_eq!(task.derive_base_name(), "echo");
+    }
+
+    #[test]
+    fn test_parse_color() {
+        assert_eq!(parse_color("black"), Color::Black);
+        assert_eq!(parse_color("red"), Color::Red);
+        assert_eq!(parse_color("green"), Color::Green);
+        assert_eq!(parse_color("yellow"), Color::Yellow);
+        assert_eq!(parse_color("blue"), Color::Blue);
+        assert_eq!(parse_color("magenta"), Color::Magenta);
+        assert_eq!(parse_color("cyan"), Color::Cyan);
+        assert_eq!(parse_color("white"), Color::White);
+
+        // Test case insensitivity
+        assert_eq!(parse_color("RED"), Color::Red);
+        assert_eq!(parse_color("Green"), Color::Green);
+
+        // Test invalid colors default to white
+        assert_eq!(parse_color("invalid"), Color::White);
+        assert_eq!(parse_color(""), Color::White);
+    }
+
+    #[test]
+    fn test_parse_command_simple() {
+        let cmd = parse_command("echo hello", None);
+
+        assert_eq!(cmd.name, None);
+        assert_eq!(cmd.command, "echo");
+        assert_eq!(cmd.args, vec!["hello"]);
+        assert_eq!(cmd.working_dir, None);
+    }
+
+    #[test]
+    fn test_parse_command_with_name() {
+        let cmd = parse_command("mytask:echo hello", None);
+
+        assert_eq!(cmd.name, Some("mytask".to_string()));
+        assert_eq!(cmd.command, "echo");
+        assert_eq!(cmd.args, vec!["hello"]);
+        assert_eq!(cmd.working_dir, None);
+    }
+
+    #[test]
+    fn test_parse_command_with_working_dir() {
+        let cmd = parse_command("task@/tmp/dir:echo hello", None);
+
+        assert_eq!(cmd.name, Some("task".to_string()));
+        assert_eq!(cmd.command, "echo");
+        assert_eq!(cmd.args, vec!["hello"]);
+        assert_eq!(cmd.working_dir, Some(PathBuf::from("/tmp/dir")));
+    }
+
+    #[test]
+    fn test_parse_command_with_empty_name() {
+        let cmd = parse_command(":echo hello", None);
+
+        assert_eq!(cmd.name, None);
+        assert_eq!(cmd.command, "echo");
+        assert_eq!(cmd.args, vec!["hello"]);
+        assert_eq!(cmd.working_dir, None);
+    }
+
+    #[test]
+    fn test_parse_command_with_default_cwd() {
+        let default_cwd = Some(PathBuf::from("/default/path"));
+        let cmd = parse_command("echo hello", default_cwd.clone());
+
+        assert_eq!(cmd.name, None);
+        assert_eq!(cmd.command, "echo");
+        assert_eq!(cmd.args, vec!["hello"]);
+        assert_eq!(cmd.working_dir, default_cwd);
+    }
+
+    #[test]
+    fn test_parse_command_with_quoted_args() {
+        let cmd = parse_command("echo \"hello world\" 'single quotes'", None);
+
+        assert_eq!(cmd.name, None);
+        assert_eq!(cmd.command, "echo");
+        assert_eq!(cmd.args, vec!["hello world", "single quotes"]);
+        assert_eq!(cmd.working_dir, None);
+    }
+
+    #[test]
+    fn test_parse_command_with_name_working_dir_and_default_cwd() {
+        let default_cwd = Some(PathBuf::from("/default/path"));
+        let cmd = parse_command("task@/custom/path:echo hello", default_cwd);
+
+        assert_eq!(cmd.name, Some("task".to_string()));
+        assert_eq!(cmd.command, "echo");
+        assert_eq!(cmd.args, vec!["hello"]);
+        assert_eq!(cmd.working_dir, Some(PathBuf::from("/custom/path")));
+    }
+
+    #[test]
+    #[should_panic(expected = "No command provided")]
+    fn test_parse_command_empty() {
+        parse_command("", None);
+    }
+
+    #[test]
+    #[should_panic(expected = "No command provided")]
+    fn test_parse_command_only_whitespace() {
+        parse_command("   ", None);
+    }
+
+    #[test]
+    fn test_icon_for_color() {
+        // Test a few basic colors
+        assert_eq!(icon_for_color(Color::Blue), "🔵");
+        assert_eq!(icon_for_color(Color::Red), "🔺");
+        assert_eq!(icon_for_color(Color::Green), "🟢");
+
+        // Test fallback for non-specific colors (using an arbitrary value)
+        assert_eq!(icon_for_color(Color::BrightBlack), "⬜");
     }
 }

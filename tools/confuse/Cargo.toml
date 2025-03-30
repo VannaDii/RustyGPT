@@ -9,3 +9,10 @@ colored = "3"
 shlex = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["full"] }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.0"
+tempfile = "3.8"
+mockall = "0.11"
+serial_test = "2.0"
