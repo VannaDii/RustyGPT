@@ -29,6 +29,13 @@ jobs:
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
+      - name: Verify rustup directories
+        run: |
+          echo "CARGO_HOME: $CARGO_HOME"
+          echo "RUSTUP_HOME: $RUSTUP_HOME"
+          echo "Toolchains:"
+          ls -la "$RUSTUP_HOME/toolchains"
+
       - name: Cache Cargo registries and git checkouts
         uses: actions/cache@v4
         with:
