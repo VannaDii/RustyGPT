@@ -1,90 +1,36 @@
 {
   "app": {
-    "title": "Rusty GPT"
+    "title": "RustyGPT"
+  },
+  "admin": {
+    "routes": {
+      "icon": "user",
+      "title": "Profil",
+      "system": {
+        "icon": "gear",
+        "title": "System"
+      },
+      "users": {
+        "icon": "users",
+        "title": "Benutzer"
+      },
+      "roles": {
+        "icon": "id-card",
+        "title": "Rollen"
+      },
+      "404": {
+        "icon": "exclamation-triangle",
+        "title": "Nicht Gefunden"
+      }
+    }
+  },
+  "header": {
+    "logout": "Abmelden"
   },
   "sidebar": {
-    "new_chat": "Neuer Chat",
-    "search": "Konversationen durchsuchen...",
-    "no_conversations": "Keine Konversationen gefunden.",
-    "start_new": "Beginnen Sie eine neue!",
-    "login": "Anmelden / Registrieren",
-    "delete_conversation": "Konversation löschen",
-    "empty_conversation": "Noch keine Nachrichten",
-    "dashboard": "Dashboard",
-    "transactions": "Transaktionen",
-    "settings": "Einstellungen",
-    "users": "Benutzer",
-    "user_list": "Benutzerliste",
-    "user_roles": "Benutzerrollen",
-    "permissions": "Berechtigungen",
-    "reports": "Berichte",
-    "sales_report": "Verkaufsbericht",
-    "user_report": "Benutzerbericht",
-    "performance": "Leistung",
-    "collapse": "Seitenleiste einklappen",
-    "expand": "Seitenleiste ausklappen",
-    "leads": "Leads",
-    "analytics": "Analytik",
-    "integration": "Integration",
-    "calendar": "Kalender",
-    "pages": "Seiten",
-    "profile": "Profil",
-    "register": "Registrieren",
-    "error": "Fehler",
-    "documentation": "Dokumentation",
-    "getting_started": "Erste Schritte",
-    "features": "Funktionen",
-    "components": "Komponenten"
+    "settings": "Einstellungen"
   },
-  "chat": {
-    "select_conversation": "Wählen Sie eine Konversation",
-    "or_start_new": "oder starten Sie eine neue",
-    "typing": "Schreibt...",
-    "just_now": "Gerade eben"
-  },
-  "input": {
-    "placeholder": "Nachricht eingeben...",
-    "sending": "Senden...",
-    "characters": "Zeichen",
-    "enter_to_send": "Drücken Sie Enter zum Senden, Umschalt+Enter für eine neue Zeile"
-  },
-  "dashboard": {
-    "total_users": "Gesamtbenutzer",
-    "revenue": "Umsatz",
-    "active_users": "Aktive Benutzer",
-    "conversion_rate": "Konversionsrate",
-    "recent_activity": "Neueste Aktivitäten",
-    "performance_overview": "Leistungsübersicht",
-    "chart_placeholder": "Diagramm-Platzhalter",
-    "chart_description": "(Wird mit plotters-canvas implementiert)",
-    "type": "Typ",
-    "description": "Beschreibung",
-    "date": "Datum",
-    "page_title": "Dashboard",
-    "content_title": "Dashboard-Übersicht",
-    "users_this_month": "Benutzer diesen Monat",
-    "increase": "Steigerung",
-    "decrease": "Abnahme",
-    "initials": "AD"
-  },
-  "streaming": {
-    "connected": "Mit Streaming-Server verbunden",
-    "connecting": "Verbindung zum Streaming-Server wird hergestellt..."
-  },
-  "welcome": {
-    "title": "Willkommen bei Rusty GPT",
-    "subtitle": "Eine moderne Chat-Oberfläche, entwickelt mit Rust und Yew",
-    "example1": {
-      "title": "Stellen Sie eine Frage",
-      "description": "Wie funktioniert WebAssembly mit Rust?"
-    },
-    "example2": {
-      "title": "Werden Sie kreativ",
-      "description": "Schreiben Sie ein kurzes Gedicht über das Programmieren in Rust"
-    },
-    "example3": {
-      "title": "Lösen Sie ein Problem",
-      "description": "Helfen Sie mir, async/await in Rust zu verstehen"
-    }
+  "theme": {
+    "selector": "Theme-Auswahl"
   }
 }

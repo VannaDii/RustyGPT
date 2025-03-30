@@ -5,23 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RustyGPT</title>
     <link data-trunk rel="copy-dir" href="./src/public" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link data-trunk rel="tailwind-css-extra" data-target-path="styles" href="./src/styles/main.css" />
-    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.19/dist/full.css" rel="stylesheet" type="text/css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
+      integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer" />
     <script>
-      // Automatically apply system theme
-      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      } else {
-        document.documentElement.setAttribute('data-theme', 'light');
+      /**
+       * Prevents the FART problem (https://css-tricks.com/flash-of-inaccurate-color-theme-fart/)
+       */
+      function preventFart() {
+        const theme = localStorage.getItem('theme');
+
+        const element = document.documentElement;
+
+        if (theme === null) {
+          element.setAttribute('data-theme', 'dark');
+        } else {
+          element.setAttribute('data-theme', theme);
+        }
       }
+
+      preventFart();
     </script>
   </head>
-  <body class="bg-base-100 text-base-content font-sans">
-    <!-- App will be rendered here -->
-    <div id="app"></div>
-  </body>
+  <body></body>
 </html>

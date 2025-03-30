@@ -124,25 +124,31 @@ APPLE_TOKEN_URL=https://appleid.apple.com/auth/token
 
 2. **Install Dependencies**
 
-   - Ensure you have Rust installed ([Rustup](https://rustup.rs/))
-   - Install Docker and Docker Compose
+   - Ensure you have [Rust installed](https://rustup.rs)
+   - Ensure you have [Just installed](https://just.systems)
+   - Install [Docker and Docker Compose](https://docs.docker.com/compose/install/)
    - Configure environment variables (create a `.env` file based on `.env.template`)
      - `cp .env.template .env`
 
-3. **Install Git Hooks**
+3. **Install Tools**
 
    ```sh
-   # Install Git hooks to run CI checks before pushing
-   ./scripts/install-hooks.sh
+   just install
    ```
 
-4. **Run with Docker Compose**
+4. **Run with Live Reloading**
+
+   ```sh
+   just dev
+   ```
+
+5. **Run with Docker Compose**
 
    ```sh
    docker-compose up --build
    ```
 
-5. **Run Backend Only**
+6. **Run Backend Only**
 
    ```sh
    cd backend
@@ -151,16 +157,16 @@ APPLE_TOKEN_URL=https://appleid.apple.com/auth/token
 
    The server will start on `http://localhost:8080`
 
-6. **Run Frontend Only**
+7. **Run Frontend Only**
 
    ```sh
    cd frontend
    trunk serve
    ```
 
-7. **Run Tests**
+8. **Run Tests**
    ```sh
-   cargo test
+   just test
    ```
 
 ## Contributing

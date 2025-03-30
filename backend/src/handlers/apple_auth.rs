@@ -1,18 +1,17 @@
-use crate::services::oauth_service::handle_apple_oauth;
+use crate::{app_state::AppState, services::oauth_service::handle_apple_oauth};
 use axum::{
     Router,
-    extract::{Extension, Json, Query},
+    extract::{Json, Query, State},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use http::StatusCode;
 use shared::models::oauth::{OAuthCallback, OAuthInitResponse, OAuthRequest};
-use sqlx::PgPool;
-use std::env;
+use std::{env, sync::Arc};
 
 // Handler for initiating Apple OAuth flow
 #[axum::debug_handler]
-async fn apple_oauth_init() -> Json<OAuthInitResponse> {
+pub async fn apple_oauth_init() -> Json<OAuthInitResponse> {
     // In a real implementation, this would generate a proper OAuth URL with state
     let apple_client_id = env::var("APPLE_CLIENT_ID").unwrap_or_default();
     let redirect_uri = env::var("APPLE_REDIRECT_URI").unwrap_or_default();
@@ -28,11 +27,11 @@ async fn apple_oauth_init() -> Json<OAuthInitResponse> {
 
 // Handler for Apple OAuth callback
 #[axum::debug_handler]
-async fn apple_oauth_callback(
+pub async fn apple_oauth_callback(
     Query(params): Query<OAuthCallback>,
-    Extension(pool): Extension<PgPool>,
+    State(state): State<Arc<AppState>>,
 ) -> Response {
-    match handle_apple_oauth(&pool, params.code).await {
+    match handle_apple_oauth(&state.pool, params.code).await {
         Ok(user_id) => {
             // In a real app, you would set a cookie or return a JWT token
             // For now, redirect to a success page with the user ID
@@ -44,11 +43,11 @@ async fn apple_oauth_callback(
 
 // Handler for manual Apple OAuth (for testing with direct auth code)
 #[axum::debug_handler]
-async fn apple_oauth_manual(
-    Extension(pool): Extension<PgPool>,
+pub async fn apple_oauth_manual(
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<OAuthRequest>,
 ) -> Response {
-    match handle_apple_oauth(&pool, payload.auth_code).await {
+    match handle_apple_oauth(&state.pool, payload.auth_code).await {
         Ok(user_id) => (
             StatusCode::OK,
             format!("Apple OAuth successful, user_id: {}", user_id),
@@ -59,9 +58,9 @@ async fn apple_oauth_manual(
 }
 
 // Function to register the Apple OAuth routes
-pub fn apple_auth_routes() -> Router {
+pub fn apple_auth_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/oauth/apple", get(apple_oauth_init))
-        .route("/api/oauth/apple/callback", get(apple_oauth_callback))
-        .route("/api/oauth/apple/manual", post(apple_oauth_manual))
+        .route("/oauth/apple", get(apple_oauth_init))
+        .route("/oauth/apple/callback", get(apple_oauth_callback))
+        .route("/oauth/apple/manual", post(apple_oauth_manual))
 }

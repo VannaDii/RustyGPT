@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT init_setup($1, $2, $3) AS success",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "success",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5b00bdf41b7d2abe55c3b26c931757f4d632c900971840d56ed4e76c1ce3ec7a"
+}

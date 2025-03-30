@@ -17,34 +17,32 @@ env:
   LC_ALL: en_US.UTF-8
   LANG: en_US.UTF-8
   LANGUAGE: en_US
+  CARGO_HOME: ${{ github.workspace }}/.cargo
 
 jobs:
   build:
     name: Build and Test
-    container:
-      image: rust:latest
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+      - name: Add Cargo bin to PATH
+        run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Cache Cargo registries and git checkouts
+      - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/cargo/git
-            /usr/local/cargo/registry
+            /usr/local/cargo
+            /usr/local/rustup
+            ${{ env.CARGO_HOME }}/bin
+            ${{ env.CARGO_HOME }}/git
+            ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache Cargo installed binaries
-        uses: actions/cache@v4
-        with:
-          path: /usr/local/cargo/bin
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
 
       - name: Prep OS
         run: |
-          apt-get update && apt-get install -y jq
+          sudo apt-get update && sudo apt-get install -y jq
 
       - name: Create .env file
         run: cp .env.template .env
@@ -56,8 +54,20 @@ jobs:
 
       - name: Install Cargo Tools
         run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install --locked --jobs "$(nproc)" trunk wasm-bindgen-cli wasm-opt sqlx-cli
+          if rustup target list --installed | grep -F "wasm32-unknown-unknown" >/dev/null; then
+            echo "Target wasm32-unknown-unknown already installed"
+          else
+            rustup target add wasm32-unknown-unknown
+          fi
+          if ! cargo install-update --version >/dev/null 2>&1; then
+            cargo install cargo-update
+          else
+            echo "cargo-update already installed"
+          fi
+          cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
+          if ! command -v trunk >/dev/null; then
+            cargo install trunk --locked
+          fi
 
       - name: Build
         run: cargo build
