@@ -18,7 +18,6 @@ env:
   LANG: en_US.UTF-8
   LANGUAGE: en_US
   CARGO_HOME: ${{ github.workspace }}/.cargo
-  CARGO_INSTALL_ROOT: ${{ github.workspace }}/.cargo/bin
 
 jobs:
   build:
