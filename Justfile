@@ -1,12 +1,27 @@
 # Default recipe (runs when you just run "just" with no arguments)
 default: build
 
+install:
+    @echo "Installing Rust components and targets..."
+    rustup component add clippy rustfmt
+    rustup target add wasm32-unknown-unknown
+
+    @echo "Installing cargo tools..."
+    cargo install sqlx-cli trunk cargo-audit wasm-opt wasm-bindgen-cli cargo-llvm-cov
+
+    @if ! command -v jq >/dev/null 2>&1; then \
+        echo "jq not found. Please install jq (e.g. via 'brew install jq' on macOS, or 'apt-get install jq' on Linux)"; \
+    fi
+
+    @echo "Installing git hooks..."
+    ./scripts/install-hooks.sh
+
+    @echo "Installation complete!"
+
 # Recipe to start both frontend and backend watchers concurrently
 dev:
     just confuse-build
-    (cd frontend && trunk watch) &
-    (cd backend && cargo watch -x run) &
-    wait
+    cargo run --manifest-path tools/confuse/Cargo.toml -- "backend@./backend:cargo watch -x run" "frontend@./frontend:trunk watch"
 
 # Standard checks for both frontend and backend
 check:
@@ -32,6 +47,10 @@ test:
     just confuse-test
     just frontend-test
     just backend-test
+
+# Run all tests and generate coverage report
+coverage:
+    cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html
 
 # Build the frontend
 frontend-build:
