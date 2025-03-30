@@ -16,11 +16,11 @@ struct Cli {
     command: Commands,
 
     /// Source directory to scan
-    #[arg(short, long, default_value = "frontend/src")]
+    #[arg(short, long, default_value = "../../frontend/src")]
     src: PathBuf,
 
     /// Translations directory
-    #[arg(short, long, default_value = "frontend/translations")]
+    #[arg(short, long, default_value = "../../frontend/translations")]
     trans: PathBuf,
 
     /// Output directory for reports and templates

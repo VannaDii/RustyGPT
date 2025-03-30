@@ -33,11 +33,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
+            /usr/local/cargo
+            /usr/local/rustup
             ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
             ${{ env.CARGO_HOME }}/registry
-            /usr/local/rustup
-            /usr/local/cargo
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Prep OS
@@ -65,6 +65,9 @@ jobs:
             echo "cargo-update already installed"
           fi
           cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
+          if ! command -v trunk >/dev/null; then
+            cargo install trunk --locked
+          fi
 
       - name: Build
         run: cargo build
