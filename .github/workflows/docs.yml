@@ -40,7 +40,7 @@ jobs:
           cp .env.template .env
 
       - name: Cache Cargo registries and git checkouts
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             /usr/local/cargo/git
@@ -48,7 +48,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache Cargo installed binaries
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: /usr/local/cargo/bin
           key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
