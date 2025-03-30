@@ -57,7 +57,11 @@ jobs:
 
       - name: Install Cargo Tools
         run: |
-          rustup target add wasm32-unknown-unknown
+          if rustup target list --installed | grep -F "wasm32-unknown-unknown" >/dev/null; then
+            echo "Target wasm32-unknown-unknown already installed"
+          else
+            rustup target add wasm32-unknown-unknown
+          fi
           if ! cargo install-update --version >/dev/null 2>&1; then
             cargo install cargo-update
           else
