@@ -49,10 +49,6 @@ jobs:
         with:
           cache-on-failure: true
 
-      - name: Prep OS
-        run: |
-          sudo apt-get update && sudo apt-get install -y jq
-
       - name: Create .env file
         run: cp .env.template .env
 
@@ -101,10 +97,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-
-      - name: Prep OS
-        run: |
-          sudo apt-get update && sudo apt-get install -y jq
 
       - name: Create .env file
         run: cp .env.template .env
@@ -157,10 +149,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-
-      - name: Prep OS
-        run: |
-          sudo apt-get update && sudo apt-get install -y jq
 
       - name: Create .env file
         run: cp .env.template .env
