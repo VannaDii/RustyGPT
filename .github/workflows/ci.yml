@@ -17,12 +17,12 @@ env:
   LC_ALL: en_US.UTF-8
   LANG: en_US.UTF-8
   LANGUAGE: en_US
+  CARGO_HOME: ${{ github.workspace }}/.cargo # Set CARGO_HOME to a .cargo folder in the workspace
+  PATH: ${{ github.workspace }}/.cargo/bin:$PATH # Add .cargo/bin to PATH
 
 jobs:
   build:
     name: Build and Test
-    container:
-      image: rust:latest
     runs-on: ubuntu-latest
 
     steps:
@@ -32,14 +32,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/cargo/git
-            /usr/local/cargo/registry
+            ${{ env.CARGO_HOME }}/git
+            ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache Cargo installed binaries
         uses: actions/cache@v4
         with:
-          path: /usr/local/cargo/bin
+          path: ${{ env.CARGO_HOME }}/bin
           key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
 
       - name: Prep OS
