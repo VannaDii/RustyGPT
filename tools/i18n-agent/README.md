@@ -114,7 +114,7 @@ cargo run -- merge --lang es --src path/to/your/source --trans path/to/translati
 The tool includes comprehensive tests located alongside the source files. To run the tests:
 
 ```bash
-cargo test
+just i18n-test
 ```
 
 Contributions are welcome. Please open an issue or submit a pull request for any feature, bug fix, or improvement.

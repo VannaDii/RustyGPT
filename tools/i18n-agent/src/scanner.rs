@@ -36,7 +36,7 @@ pub fn scan_codebase(src_dir: &Path) -> Result<HashSet<String>> {
 }
 
 /// Scans a single file for translation key usage
-fn scan_file(
+pub fn scan_file(
     file_path: &Path,
     keys: &mut HashSet<String>,
     static_key_pattern: &Regex,
@@ -82,7 +82,7 @@ fn scan_file(
 }
 
 /// Special handling for dynamic keys in header_nav_item.rs that are based on routes
-fn handle_dynamic_route_keys(keys: &mut HashSet<String>, src_dir: &Path) -> Result<()> {
+pub fn handle_dynamic_route_keys(keys: &mut HashSet<String>, src_dir: &Path) -> Result<()> {
     // Find the routes.rs file
     let routes_file = find_file(src_dir, "routes.rs")?;
     if routes_file.is_none() {
@@ -120,7 +120,7 @@ fn handle_dynamic_route_keys(keys: &mut HashSet<String>, src_dir: &Path) -> Resu
 }
 
 /// Helper function to find a file by name in a directory (recursively)
-fn find_file(dir: &Path, filename: &str) -> Result<Option<PathBuf>> {
+pub fn find_file(dir: &Path, filename: &str) -> Result<Option<PathBuf>> {
     for entry in WalkDir::new(dir)
         .into_iter()
         .filter_map(|e| e.ok())

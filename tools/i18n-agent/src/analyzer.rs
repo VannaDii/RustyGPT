@@ -76,7 +76,7 @@ pub fn audit_translations(trans_dir: &Path, keys_in_use: &HashSet<String>) -> Re
 }
 
 /// Extracts all keys from a JSON object with their full path using an iterative approach
-fn extract_keys_from_json(json: &Value, initial_prefix: &str) -> HashSet<String> {
+pub fn extract_keys_from_json(json: &Value, initial_prefix: &str) -> HashSet<String> {
     let mut keys = HashSet::new();
     let mut stack = Vec::new();
 
