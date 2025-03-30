@@ -33,14 +33,28 @@ jobs:
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Create .env file
-        run: |
-          cp .env.template .env
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/cargo
+            /usr/local/rustup
+            ${{ env.CARGO_HOME }}/bin
+            ${{ env.CARGO_HOME }}/git
+            ${{ env.CARGO_HOME }}/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+
+      - name: Prep OS
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Create .env file
+        run: cp .env.template .env
 
       - name: Install Cargo Tools
         run: |
@@ -72,19 +86,28 @@ jobs:
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Cache Cargo registries and git checkouts
+      - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
+            /usr/local/cargo
+            /usr/local/rustup
+            ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
             ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Cache Cargo installed binaries
-        uses: actions/cache@v4
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          path: ${{ env.CARGO_HOME }}/bin
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
+          cache-on-failure: true
+
+      - name: Prep OS
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Create .env file
+        run: cp .env.template .env
 
       - name: Install Cargo Tools
         run: |
@@ -92,6 +115,15 @@ jobs:
             echo "Target wasm32-unknown-unknown already installed"
           else
             rustup target add wasm32-unknown-unknown
+          fi
+          if ! cargo install-update --version >/dev/null 2>&1; then
+            cargo install cargo-update
+          else
+            echo "cargo-update already installed"
+          fi
+          cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
+          if ! command -v trunk >/dev/null; then
+            cargo install trunk --locked
           fi
           rustup component add rustfmt
 
@@ -107,19 +139,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Cargo registries and git checkouts
+      - name: Add Cargo bin to PATH
+        run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.CARGO_HOME }}/registry
+            /usr/local/cargo
+            /usr/local/rustup
+            ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
+            ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Cache Cargo installed binaries
-        uses: actions/cache@v4
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          path: ${{ env.CARGO_HOME }}/bin
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
+          cache-on-failure: true
+
+      - name: Prep OS
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Create .env file
+        run: cp .env.template .env
+
+      - name: Install Cargo Tools
+        run: |
+          if rustup target list --installed | grep -F "wasm32-unknown-unknown" >/dev/null; then
+            echo "Target wasm32-unknown-unknown already installed"
+          else
+            rustup target add wasm32-unknown-unknown
+          fi
+          if ! cargo install-update --version >/dev/null 2>&1; then
+            cargo install cargo-update
+          else
+            echo "cargo-update already installed"
+          fi
+          cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
+          if ! command -v trunk >/dev/null; then
+            cargo install trunk --locked
+          fi
 
       - name: Generate lockfile
         run: cargo generate-lockfile

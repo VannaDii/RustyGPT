@@ -39,28 +39,28 @@ jobs:
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Create .env file
-        run: |
-          cp .env.template .env
-
-      - name: Cache Cargo registries and git checkouts
+      - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
+            /usr/local/cargo
+            /usr/local/rustup
+            ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
             ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache Cargo installed binaries
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CARGO_HOME }}/bin
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+
+      - name: Prep OS
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Create .env file
+        run: cp .env.template .env
 
       - name: Install Cargo Tools
         run: |
@@ -74,7 +74,10 @@ jobs:
           else
             echo "cargo-update already installed"
           fi
-          cargo install-update -a wasm-bindgen-cli sqlx-cli cargo-llvm-cov cargo-audit
+          cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
+          if ! command -v trunk >/dev/null; then
+            cargo install trunk --locked
+          fi
 
       - name: Generate documentation
         run: |

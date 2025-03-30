@@ -30,33 +30,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Cache Cargo registries and git checkouts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.CARGO_HOME }}/git
-            ${{ env.CARGO_HOME }}/registry
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache Cargo installed binaries
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CARGO_HOME }}/bin
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
-
-      - name: Prep OS
-        run: apt-get update && apt-get install -y jq
-
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Create .env file
-        run: cp .env.template .env
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/cargo
+            /usr/local/rustup
+            ${{ env.CARGO_HOME }}/bin
+            ${{ env.CARGO_HOME }}/git
+            ${{ env.CARGO_HOME }}/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+
+      - name: Prep OS
+        run: apt-get update && apt-get install -y jq
+
+      - name: Create .env file
+        run: cp .env.template .env
 
       - name: Install Cargo Tools
         run: |
@@ -71,18 +68,16 @@ jobs:
             echo "cargo-update already installed"
           fi
           cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
+          if ! command -v trunk >/dev/null; then
+            cargo install trunk --locked
+          fi
 
       - name: Build
         run: cargo build --release
 
       - name: Build frontend
         working-directory: frontend
-        run: |
-          echo "Trunk might be at $(which trunk)"
-          TRUNK_DIR=${{ env.CARGO_HOME }}/bin
-          TRUNK_DIR=$(realpath $TRUNK_DIR)
-          echo "Running trunk from $TRUNK_DIR"
-          $TRUNK_DIR/trunk build --release
+        run: trunk build --release
 
       - name: Generate changelog
         id: changelog
