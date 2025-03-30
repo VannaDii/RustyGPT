@@ -45,7 +45,7 @@ jobs:
 
       - name: Prep OS
         run: |
-          apt-get update && apt-get install -y jq
+          sudo apt-get update && sudo apt-get install -y jq
 
       - name: Create .env file
         run: cp .env.template .env
