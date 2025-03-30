@@ -63,7 +63,7 @@ jobs:
           else
             echo "cargo-update already installed"
           fi
-          cargo install-update -a --no-confirm trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
+          cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
 
       - name: Build
         run: cargo build
