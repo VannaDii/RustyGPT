@@ -36,19 +36,16 @@ jobs:
           echo "Toolchains:"
           ls -la "$RUSTUP_HOME/toolchains"
 
-      - name: Cache Cargo registries and git checkouts
+      - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
+            ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
             ${{ env.CARGO_HOME }}/registry
+            /usr/local/rustup
+            /usr/local/cargo
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache Cargo installed binaries
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CARGO_HOME }}/bin
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
 
       - name: Prep OS
         run: |
