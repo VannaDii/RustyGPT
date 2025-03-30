@@ -16,6 +16,7 @@ env:
   LC_ALL: en_US.UTF-8
   LANG: en_US.UTF-8
   LANGUAGE: en_US
+  CARGO_HOME: ${{ github.workspace }}/.cargo
 
 jobs:
   build:
@@ -33,18 +34,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/cargo/git
-            /usr/local/cargo/registry
+            ${{ env.CARGO_HOME }}/git
+            ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache Cargo installed binaries
         uses: actions/cache@v4
         with:
-          path: /usr/local/cargo/bin
+          path: ${{ env.CARGO_HOME }}/bin
           key: ${{ runner.os }}-cargo-bin-${{ hashFiles('.github/workflows/*.yml') }}
 
       - name: Prep OS
         run: apt-get update && apt-get install -y jq
+
+      - name: Add Cargo bin to PATH
+        run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
       - name: Create .env file
         run: cp .env.template .env
@@ -56,8 +60,17 @@ jobs:
 
       - name: Install Cargo Tools
         run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install --locked --jobs "$(nproc)" trunk wasm-bindgen-cli wasm-opt sqlx-cli
+          if rustup target list --installed | grep -F "wasm32-unknown-unknown" >/dev/null; then
+            echo "Target wasm32-unknown-unknown already installed"
+          else
+            rustup target add wasm32-unknown-unknown
+          fi
+          if ! cargo install-update --version >/dev/null 2>&1; then
+            cargo install cargo-update
+          else
+            echo "cargo-update already installed"
+          fi
+          cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
 
       - name: Build
         run: cargo build --release
