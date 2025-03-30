@@ -18,7 +18,6 @@ env:
   LANG: en_US.UTF-8
   LANGUAGE: en_US
   CARGO_HOME: ${{ github.workspace }}/.cargo # Set CARGO_HOME to a .cargo folder in the workspace
-  PATH: ${{ github.workspace }}/.cargo/bin:$PATH # Add .cargo/bin to PATH
 
 jobs:
   build:
@@ -27,6 +26,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Add Cargo bin to PATH
+        run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
       - name: Cache Cargo registries and git checkouts
         uses: actions/cache@v4
