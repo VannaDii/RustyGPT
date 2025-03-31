@@ -20,6 +20,7 @@
     "Perfil",
     "Profil",
     "rustup",
+    "rustygpt",
     "serde",
     "shlex",
     "Soumettre",
@@ -29,6 +30,7 @@
     "tinroof",
     "usado",
     "Usuarios",
+    "utoipa",
     "walkdir",
     "yewdux"
   ],

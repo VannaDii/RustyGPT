@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
-gloo-storage = "0.3.0"
+gloo-storage = "0.3"
+gloo-timers = "0.3"
 i18nrs = { version = "0.1.3", features = ["yew"] }
 js-sys = "0.3"
 regex = { version = "1.8", features = ["unicode"] }

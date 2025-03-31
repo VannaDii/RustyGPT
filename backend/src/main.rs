@@ -21,12 +21,15 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 
 mod app_state;
 mod handlers;
+mod openapi;
 mod routes;
 mod services;
 mod tracer;
 
 #[cfg(test)]
 mod main_test;
+
+use routes::openapi::openapi_routes;
 
 // Middleware to check if a user is authenticated
 #[instrument(skip(next))]
@@ -85,13 +88,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let frontend_path = PathBuf::from("../frontend/dist");
     let static_files_service = ServeDir::new(frontend_path).append_index_html_on_directories(true);
 
-    // Register tracing and streaming routes BEFORE the fallback route.
     let app = Router::new()
         .layer(cors)
         .layer(tracer::create_trace_layer())
-        .nest("/api", api_router) // API routes
+        .nest("/api", api_router)
+        .merge(openapi_routes()) // OpenAPI routes defined in routes/openapi.rs
         .fallback_service(static_files_service)
-        .with_state(state);
+        .with_state(Arc::clone(&state));
 
     // Start the server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));

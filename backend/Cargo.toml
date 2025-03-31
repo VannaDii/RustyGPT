@@ -34,7 +34,19 @@ tracing-subscriber = { version = "0.3", features = [
 tower-service = "0.3"
 uuid = { version = "1", features = ["serde", "v4", "js"] }
 shared = { path = "../shared" }
-
+utoipa = { version = "5", features = [
+  "macros",
+  "yaml",
+  "axum_extras",
+  "debug",
+  "chrono",
+  "time",
+  "decimal_float",
+  "uuid",
+  "url",
+  "openapi_extensions",
+] }
+utoipa-axum = "0.2"
 
 [dev-dependencies]
 axum-test = "17.2.0"

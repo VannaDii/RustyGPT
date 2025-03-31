@@ -111,3 +111,7 @@ confuse-check:
     cd tools/confuse && cargo check
     cd tools/confuse && cargo clippy --all-features -- -D warnings
     cd tools/confuse && cargo fmt --all -- --check
+
+# Helper recipes for when you tinker too hard
+nuke-port-zombies:
+    sudo lsof -t -i :8080 | xargs kill -9
