@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::{Message, Timestamp};
 
 /// Represents a conversation between multiple users.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct Conversation {
     /// The title of the conversation.
     pub title: String,
@@ -20,6 +21,17 @@ pub struct Conversation {
 
     /// Timestamp of the last message in the conversation.
     pub last_updated: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct SendMessageRequest {
+    pub content: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct SendMessageResponse {
+    pub message_id: String,
 }
 
 #[cfg(test)]

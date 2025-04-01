@@ -6,10 +6,22 @@ use axum::{
     routing::{get, post},
 };
 use http::StatusCode;
-use shared::models::oauth::{OAuthCallback, OAuthInitResponse, OAuthRequest};
+use shared::models::{
+    ErrorResponse,
+    oauth::{OAuthCallback, OAuthInitResponse, OAuthRequest},
+};
 use std::{env, sync::Arc};
 
 // Handler for initiating Apple OAuth flow
+#[utoipa::path(
+    get,
+    path = "/oauth/apple",
+    responses(
+        (status = 200, description = "Authorization URL retrieved", body = OAuthInitResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Auth"
+)]
 #[axum::debug_handler]
 pub async fn apple_oauth_init() -> Json<OAuthInitResponse> {
     // In a real implementation, this would generate a proper OAuth URL with state
@@ -26,6 +38,15 @@ pub async fn apple_oauth_init() -> Json<OAuthInitResponse> {
 }
 
 // Handler for Apple OAuth callback
+#[utoipa::path(
+    get,
+    path = "/oauth/apple/callback",
+    responses(
+        (status = 302, description = "Authorization URL retrieved"),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Auth"
+)]
 #[axum::debug_handler]
 pub async fn apple_oauth_callback(
     Query(params): Query<OAuthCallback>,
@@ -42,6 +63,15 @@ pub async fn apple_oauth_callback(
 }
 
 // Handler for manual Apple OAuth (for testing with direct auth code)
+#[utoipa::path(
+    post,
+    path = "/oauth/apple/manual",
+    responses(
+        (status = 200, description = "Authorization URL retrieved", body = String),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Auth"
+)]
 #[axum::debug_handler]
 pub async fn apple_oauth_manual(
     State(state): State<Arc<AppState>>,

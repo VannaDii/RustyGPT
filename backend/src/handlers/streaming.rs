@@ -47,6 +47,7 @@ pub async fn stream_partial_response(
             let message_chunk = MessageChunk {
                 conversation_id,
                 message_id,
+                content_type: "text".to_string(),
                 content: chunk,
                 is_final,
             };

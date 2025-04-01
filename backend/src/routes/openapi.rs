@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use crate::{app_state::AppState, openapi::ApiDoc};
-use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
 use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 async fn openapi_yaml() -> impl IntoResponse {
     match ApiDoc::openapi().to_yaml() {
@@ -14,12 +15,8 @@ async fn openapi_yaml() -> impl IntoResponse {
     }
 }
 
-async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
-    Json(ApiDoc::openapi())
-}
-
 pub fn openapi_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/openapi/rustygpt.json", get(openapi_json))
+        .merge(SwaggerUi::new("/swagger-ui").url("/openapi/rustygpt.json", ApiDoc::openapi()))
         .route("/openapi/rustygpt.yaml", get(openapi_yaml))
 }

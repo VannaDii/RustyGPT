@@ -15,6 +15,15 @@ use shared::models::{ErrorResponse, SetupRequest, SetupResponse};
 use tracing::{info, instrument};
 
 // Handler for checking if the system is setup
+#[utoipa::path(
+    get,
+    path = "/setup",
+    responses(
+        (status = 200, description = "Setup status retrieved successfully", body = SetupResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Setup"
+)]
 #[instrument(skip(state))]
 pub async fn get_setup(State(state): State<Arc<AppState>>) -> Response {
     info!("Received setup check request");
@@ -38,6 +47,17 @@ pub async fn get_setup(State(state): State<Arc<AppState>>) -> Response {
 }
 
 // Handler for configuring the system the first time
+#[utoipa::path(
+    post,
+    path = "/setup",
+    request_body = SetupRequest,
+    responses(
+        (status = 200, description = "Setup completed successfully"),
+        (status = 400, description = "Setup rejected by database", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Setup"
+)]
 #[instrument(skip(state))]
 pub async fn post_setup(
     State(state): State<Arc<AppState>>,

@@ -18,6 +18,7 @@ use tower_http::{
 };
 use tracing::{info, instrument, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use utoipa::OpenApi;
 
 mod app_state;
 mod handlers;
@@ -57,7 +58,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .init();
 
-    info!("Starting server with verbose logging...");
+    info!("Starting server...");
+
+    // Write OpenAPI spec to disk
+    let openapi = openapi::ApiDoc::openapi();
+    std::fs::write("../docs/rustygpt.yaml", openapi.to_yaml()?)?;
+    info!("OpenAPI spec written to docs/rustygpt.yaml");
 
     // Set up database connection pool
     let database_url = env::var("DATABASE_URL")
