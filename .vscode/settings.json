@@ -19,6 +19,7 @@
     "onclick",
     "Perfil",
     "Profil",
+    "reqwest",
     "rustup",
     "rustygpt",
     "serde",

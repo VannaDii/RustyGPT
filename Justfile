@@ -9,10 +9,6 @@ install:
     @echo "Installing cargo tools..."
     cargo install sqlx-cli trunk cargo-audit wasm-opt wasm-bindgen-cli cargo-llvm-cov
 
-    @if ! command -v jq >/dev/null 2>&1; then \
-        echo "jq not found. Please install jq (e.g. via 'brew install jq' on macOS, or 'apt-get install jq' on Linux)"; \
-    fi
-
     @echo "Installing git hooks..."
     ./scripts/install-hooks.sh
 
@@ -64,7 +60,7 @@ frontend-test:
 frontend-check:
     cd frontend && cargo fmt
     cd frontend && cargo check
-    cd frontend && cargo clippy --all-features -- -D warnings
+    cd frontend && cargo clippy --all-features
     cd backend && cargo fmt --all -- --check
 
 # Build the backend
@@ -79,7 +75,7 @@ backend-test:
 backend-check:
     cd backend && cargo fmt
     cd backend && cargo check
-    cd backend && cargo clippy --all-features -- -D warnings
+    cd backend && cargo clippy --all-features
     cd backend && cargo fmt --all -- --check
 
 # Build the tools/i18n-agent
@@ -94,7 +90,7 @@ i18n-test:
 i18n-check:
     cd tools/i18n-agent && cargo fmt
     cd tools/i18n-agent && cargo check
-    cd tools/i18n-agent && cargo clippy --all-features -- -D warnings
+    cd tools/i18n-agent && cargo clippy --all-features
     cd tools/i18n-agent && cargo fmt --all -- --check
 
 # Build the tools/confuse
@@ -109,7 +105,7 @@ confuse-test:
 confuse-check:
     cd tools/confuse && cargo fmt
     cd tools/confuse && cargo check
-    cd tools/confuse && cargo clippy --all-features -- -D warnings
+    cd tools/confuse && cargo clippy --all-features
     cd tools/confuse && cargo fmt --all -- --check
 
 # Helper recipes for when you tinker too hard

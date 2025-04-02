@@ -3,7 +3,7 @@ use axum::{
     Router,
     http::StatusCode,
     middleware::{self, Next},
-    response::Response,
+    response::{IntoResponse, Redirect, Response},
     serve,
 };
 use http::Request;
@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
+use tower::service_fn;
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
@@ -92,7 +93,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up static file serving for the app
     let frontend_path = PathBuf::from("../frontend/dist");
-    let static_files_service = ServeDir::new(frontend_path).append_index_html_on_directories(true);
+    let fallback_service = service_fn(|_req| async {
+        Ok::<_, std::convert::Infallible>(Redirect::to("/").into_response())
+    });
+    let static_files_service = ServeDir::new(frontend_path)
+        .append_index_html_on_directories(true)
+        .fallback(fallback_service);
 
     let app = Router::new()
         .layer(cors)

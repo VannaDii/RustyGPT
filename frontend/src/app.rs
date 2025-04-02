@@ -1,5 +1,7 @@
+use crate::api::RustyGPTClient;
+use crate::containers::setup::Setup;
+use crate::models::app_state::AppState;
 use crate::routes::MainRoute;
-use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use yew::suspense::Suspense;
@@ -14,17 +16,21 @@ extern "C" {
 
 #[function_component(App)]
 pub fn app() -> Html {
-    let setup_state = use_state(|| None::<bool>);
+    let app_state = use_state(|| None::<AppState>);
 
     {
-        let setup_state = setup_state.clone();
+        let app_state = app_state.clone();
         use_effect_with((), move |_| {
             spawn_local(async move {
-                // Simulate API call delay to /api/setup
-                TimeoutFuture::new(1000).await;
-                // TODO: Call /api/setup and update the state accordingly.
-                // For now, we stub the system as set up (true).
-                setup_state.set(Some(true));
+                let client = RustyGPTClient::new("http://localhost:8080/api");
+                let response = client.get_setup().await;
+                let is_setup = match response {
+                    Ok(setup_response) => setup_response.is_setup,
+                    Err(_) => false,
+                };
+                app_state.set(Some(AppState {
+                    is_setup: Some(is_setup),
+                }));
             });
             || ()
         });
@@ -33,18 +39,17 @@ pub fn app() -> Html {
     html! {
         <Suspense fallback={ html!{ <crate::components::loading::Loading/> } }>
             {
-                match *setup_state {
+                match *app_state {
                     None => html!{ /* Pending API response */ },
-                    Some(false) => html!{
-                        // ...Setup Component Stub...
-                        <div>{"Setup Component Stub"}</div>
+                    Some(ref state) if state.is_setup == Some(false) => html!{
+                        <Setup />
                     },
-                    Some(true) => html!{
-                        // ...Login Component Stub...
+                    Some(ref state) if state.is_setup == Some(true) => html!{
                         <BrowserRouter>
                             <Switch<MainRoute> render={crate::routes::switch} />
                         </BrowserRouter>
                     },
+                    _ => html!{}
                 }
             }
         </Suspense>
