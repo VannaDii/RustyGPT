@@ -8,8 +8,10 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use shared::models::{Conversation, Message, Timestamp};
+use shared::models::{
+    Conversation, ErrorResponse, Message, Timestamp,
+    conversation::{SendMessageRequest, SendMessageResponse},
+};
 use tokio::spawn;
 use uuid::Uuid;
 
@@ -18,18 +20,16 @@ use crate::{
     handlers::streaming::{SharedState, stream_partial_response},
 };
 
-#[derive(Debug, Deserialize)]
-pub struct SendMessageRequest {
-    pub content: String,
-    pub user_id: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SendMessageResponse {
-    pub message_id: String,
-}
-
-pub async fn get_conversations() -> Json<Vec<Conversation>> {
+#[utoipa::path(
+    get,
+    path = "/conversation",
+    responses(
+        (status = 200, description = "Conversations retrieved", body = Vec<Conversation>),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Chat"
+)]
+pub async fn get_conversation() -> Json<Vec<Conversation>> {
     let mock_conversations = vec![Conversation {
         id: Uuid::new_v4(),
         title: "Sample Chat".into(),
@@ -47,6 +47,15 @@ pub async fn get_conversations() -> Json<Vec<Conversation>> {
 }
 
 /// Send a message to a conversation with streaming response
+#[utoipa::path(
+    post,
+    path = "/conversation/{conversation_id}/messages",
+    responses(
+        (status = 200, description = "Message received", body = SendMessageResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Chat"
+)]
 pub async fn send_message(
     Extension(state): Extension<SharedState>,
     Path(conversation_id): Path<String>,
@@ -120,9 +129,9 @@ pub async fn send_message(
 // Function to register the conversation routes
 pub fn conversation_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/conversations", get(get_conversations))
+        .route("/conversation", get(get_conversation))
         .route(
-            "/conversations/{conversation_id}/messages",
+            "/conversation/{conversation_id}/messages",
             post(send_message),
         )
 }

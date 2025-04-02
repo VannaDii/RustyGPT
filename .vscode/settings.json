@@ -19,7 +19,9 @@
     "onclick",
     "Perfil",
     "Profil",
+    "reqwest",
     "rustup",
+    "rustygpt",
     "serde",
     "shlex",
     "Soumettre",
@@ -29,6 +31,7 @@
     "tinroof",
     "usado",
     "Usuarios",
+    "utoipa",
     "walkdir",
     "yewdux"
   ],

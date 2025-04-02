@@ -3,7 +3,7 @@ use axum::{
     Router,
     http::StatusCode,
     middleware::{self, Next},
-    response::Response,
+    response::{IntoResponse, Redirect, Response},
     serve,
 };
 use http::Request;
@@ -12,21 +12,26 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::{env, sync::Arc};
 use tokio::net::TcpListener;
+use tower::service_fn;
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
 };
 use tracing::{info, instrument, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use utoipa::OpenApi;
 
 mod app_state;
 mod handlers;
+mod openapi;
 mod routes;
 mod services;
 mod tracer;
 
 #[cfg(test)]
 mod main_test;
+
+use routes::openapi::openapi_routes;
 
 // Middleware to check if a user is authenticated
 #[instrument(skip(next))]
@@ -54,7 +59,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .init();
 
-    info!("Starting server with verbose logging...");
+    info!("Starting server...");
+
+    // Write OpenAPI spec to disk
+    let openapi = openapi::ApiDoc::openapi();
+    std::fs::write("../docs/rustygpt.yaml", openapi.to_yaml()?)?;
+    info!("OpenAPI spec written to docs/rustygpt.yaml");
 
     // Set up database connection pool
     let database_url = env::var("DATABASE_URL")
@@ -83,15 +93,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up static file serving for the app
     let frontend_path = PathBuf::from("../frontend/dist");
-    let static_files_service = ServeDir::new(frontend_path).append_index_html_on_directories(true);
+    let fallback_service = service_fn(|_req| async {
+        Ok::<_, std::convert::Infallible>(Redirect::to("/").into_response())
+    });
+    let static_files_service = ServeDir::new(frontend_path)
+        .append_index_html_on_directories(true)
+        .fallback(fallback_service);
 
-    // Register tracing and streaming routes BEFORE the fallback route.
     let app = Router::new()
         .layer(cors)
         .layer(tracer::create_trace_layer())
-        .nest("/api", api_router) // API routes
+        .nest("/api", api_router)
+        .merge(openapi_routes()) // OpenAPI routes defined in routes/openapi.rs
         .fallback_service(static_files_service)
-        .with_state(state);
+        .with_state(Arc::clone(&state));
 
     // Start the server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));

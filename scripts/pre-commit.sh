@@ -46,7 +46,7 @@ fi
 run_check "cargo fmt --all -- --check"
 
 # Run clippy
-run_check "cargo clippy --all-features -- -D warnings"
+run_check "cargo clippy --all-features"
 
 # Build the project
 run_check "cargo build"

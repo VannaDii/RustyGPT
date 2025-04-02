@@ -1,14 +1,15 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// Represents a request to authenticate using OAuth.
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 pub struct OAuthRequest {
     /// The authorization code received from the OAuth provider.
     pub auth_code: String,
 }
 
 /// Query parameters for the OAuth callback
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 pub struct OAuthCallback {
     /// The authorization code received from the OAuth provider
     pub code: String,
@@ -17,7 +18,7 @@ pub struct OAuthCallback {
 }
 
 /// Response for the OAuth initialization
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 pub struct OAuthInitResponse {
     /// The authorization URL to redirect the user to
     pub auth_url: String,

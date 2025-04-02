@@ -1,0 +1,354 @@
+openapi: 3.1.0
+info:
+  title: RustyGPT API
+  description: API documentation for RustyGPT
+  license:
+    name: ''
+  version: 1.0.0
+paths:
+  /conversation:
+    get:
+      tags:
+      - Chat
+      operationId: get_conversation
+      responses:
+        '200':
+          description: Conversations retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Conversation'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /conversation/{conversation_id}/messages:
+    post:
+      tags:
+      - Chat
+      summary: Send a message to a conversation with streaming response
+      operationId: send_message
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+        required: true
+      responses:
+        '200':
+          description: Message received
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMessageResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /oauth/apple:
+    get:
+      tags:
+      - Auth
+      operationId: apple_oauth_init
+      responses:
+        '200':
+          description: Authorization URL retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthInitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /oauth/apple/callback:
+    get:
+      tags:
+      - Auth
+      operationId: apple_oauth_callback
+      responses:
+        '302':
+          description: Authorization URL retrieved
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /oauth/apple/manual:
+    post:
+      tags:
+      - Auth
+      operationId: apple_oauth_manual
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthRequest'
+        required: true
+      responses:
+        '200':
+          description: Authorization URL retrieved
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /oauth/github:
+    get:
+      tags:
+      - Auth
+      operationId: github_oauth_init
+      responses:
+        '200':
+          description: Authorization URL retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthInitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /oauth/github/callback:
+    get:
+      tags:
+      - Auth
+      operationId: github_oauth_callback
+      responses:
+        '302':
+          description: Redirect post authentication
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /oauth/github/manual:
+    post:
+      tags:
+      - Auth
+      operationId: github_oauth_manual
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthRequest'
+        required: true
+      responses:
+        '200':
+          description: Revealed user ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /setup:
+    get:
+      tags:
+      - Setup
+      operationId: get_setup
+      responses:
+        '200':
+          description: Setup status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetupResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+      - Setup
+      operationId: post_setup
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetupRequest'
+        required: true
+      responses:
+        '200':
+          description: Setup completed successfully
+        '400':
+          description: Setup rejected by database
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    Conversation:
+      type: object
+      description: Represents a conversation between multiple users.
+      required:
+      - title
+      - id
+      - participant_ids
+      - messages
+      - last_updated
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the conversation.
+        last_updated:
+          $ref: '#/components/schemas/Timestamp'
+          description: Timestamp of the last message in the conversation.
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+          description: The messages in this conversation.
+        participant_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The users participating in this conversation.
+        title:
+          type: string
+          description: The title of the conversation.
+    ErrorResponse:
+      type: object
+      description: Represents an error response.
+      required:
+      - message
+      properties:
+        details:
+          type:
+          - string
+          - 'null'
+        message:
+          type: string
+    Message:
+      type: object
+      description: Represents a single message in a conversation.
+      required:
+      - id
+      - sender_id
+      - conversation_id
+      - content
+      - timestamp
+      properties:
+        content:
+          type: string
+          description: The message content.
+        conversation_id:
+          type: string
+          format: uuid
+          description: ID of the conversation this message belongs to.
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the message.
+        sender_id:
+          type: string
+          format: uuid
+          description: ID of the user who sent the message.
+        timestamp:
+          $ref: '#/components/schemas/Timestamp'
+          description: Timestamp when the message was sent.
+    OAuthInitResponse:
+      type: object
+      description: Response for the OAuth initialization
+      required:
+      - auth_url
+      properties:
+        auth_url:
+          type: string
+          description: The authorization URL to redirect the user to
+    OAuthRequest:
+      type: object
+      description: Represents a request to authenticate using OAuth.
+      required:
+      - auth_code
+      properties:
+        auth_code:
+          type: string
+          description: The authorization code received from the OAuth provider.
+    SendMessageRequest:
+      type: object
+      required:
+      - content
+      - user_id
+      properties:
+        content:
+          type: string
+        user_id:
+          type: string
+    SendMessageResponse:
+      type: object
+      required:
+      - message_id
+      properties:
+        message_id:
+          type: string
+    SetupRequest:
+      type: object
+      description: Represents a request for first-time setup.
+      required:
+      - username
+      - email
+      - password
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        username:
+          type: string
+    SetupResponse:
+      type: object
+      description: Represents a response for first-time setup check.
+      required:
+      - is_setup
+      properties:
+        is_setup:
+          type: boolean
+    Timestamp:
+      type: string
+      format: date-time
+tags:
+- name: Setup
+  description: Setup-related endpoints
+- name: Auth
+  description: Authentication-related endpoints
+- name: Chat
+  description: Chat-related endpoints

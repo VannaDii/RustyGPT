@@ -24,6 +24,10 @@
       }
     }
   },
+  "setup": {
+    "heading": "Looks like you are using RustyGPT for the first time",
+    "description": "Let's get your system setup so you can login and start having fun!"
+  },
   "header": {
     "logout": "Logout"
   },

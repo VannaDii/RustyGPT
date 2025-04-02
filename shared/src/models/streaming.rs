@@ -1,14 +1,18 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Represents a chunk of a streaming message.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct MessageChunk {
     /// ID of the conversation this chunk belongs to.
     pub conversation_id: Uuid,
 
     /// ID of the message this chunk belongs to.
     pub message_id: Uuid,
+
+    /// The content type of this chunk.
+    pub content_type: String,
 
     /// The content of this chunk.
     pub content: String,
@@ -30,6 +34,7 @@ mod tests {
         let chunk = MessageChunk {
             conversation_id,
             message_id,
+            content_type: "text".to_string(),
             content: "Hello".to_string(),
             is_final: false,
         };
@@ -48,6 +53,7 @@ mod tests {
         let chunk = MessageChunk {
             conversation_id,
             message_id,
+            content_type: "text".to_string(),
             content: "Test chunk".to_string(),
             is_final: true,
         };
