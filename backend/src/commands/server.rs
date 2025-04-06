@@ -1,3 +1,4 @@
+use crate::commands::config::Config;
 use app_state::AppState;
 use axum::{
     Router,
@@ -9,7 +10,7 @@ use routes::openapi::openapi_routes;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::{env, sync::Arc};
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::service_fn;
 use tower_http::{
@@ -18,24 +19,23 @@ use tower_http::{
 };
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use utoipa::OpenApi;
 
-use crate::{app_state, middleware::auth::auth_middleware, openapi, routes, tracer};
+use crate::{app_state, middleware::auth::auth_middleware, routes, tracer};
 
 /// Starts the backend server and binds it to the specified port.
 ///
 /// # Arguments
-/// * `port` - The port number to bind the server to.
+/// * `config` - The fully resolved configuration struct.
 ///
 /// # Errors
 /// Returns an error if the server fails to start.
 ///
 /// # Examples
 /// ```
-/// commands::server::run(8080)?;
+/// commands::server::run(config)?;
 /// ```
 #[tokio::main]
-pub async fn run(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(fmt::layer()) // Log to stdout
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -47,14 +47,8 @@ pub async fn run(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting server...");
 
-    // Write OpenAPI spec to disk
-    let openapi = openapi::ApiDoc::openapi();
-    std::fs::write("../docs/rustygpt.yaml", openapi.to_yaml()?)?;
-    info!("OpenAPI spec written to docs/rustygpt.yaml");
-
     // Set up database connection pool
-    let database_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/rusty_gpt".to_string());
+    let database_url = config.database_url;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -78,7 +72,7 @@ pub async fn run(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         );
 
     // Set up static file serving for the app
-    let frontend_path = PathBuf::from("../frontend/dist");
+    let frontend_path = PathBuf::from(config.frontend_path);
     let fallback_service = service_fn(|_req| async {
         Ok::<_, std::convert::Infallible>(Redirect::to("/").into_response())
     });
@@ -95,7 +89,7 @@ pub async fn run(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         .with_state(Arc::clone(&state));
 
     // Start the server
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
     let listener = TcpListener::bind(addr).await?;
     info!("Listening on {}", addr);
 
