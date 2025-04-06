@@ -55,3 +55,6 @@ utoipa-swagger-ui = { git = "https://github.com/juhaku/utoipa.git", rev = "ca6b2
 [dev-dependencies]
 axum-test = "17.2.0"
 tower = "0.5.2"
+
+[patch.crates-io]
+zip = "2.1.0" # Specify a compatible version of the zip crate
