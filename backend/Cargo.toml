@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 futures-util = "0.3"
 http = "1"
 hyper = { version = "1", features = ["client", "http1", "full"] }

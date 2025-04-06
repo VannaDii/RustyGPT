@@ -1,128 +1,76 @@
-use app_state::AppState;
-use axum::{
-    Router,
-    http::StatusCode,
-    middleware::{self, Next},
-    response::{IntoResponse, Redirect, Response},
-    serve,
-};
-use http::Request;
-use sqlx::postgres::PgPoolOptions;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::{env, sync::Arc};
-use tokio::net::TcpListener;
-use tower::service_fn;
-use tower_http::{
-    cors::{Any, CorsLayer},
-    services::ServeDir,
-};
-use tracing::{info, instrument, level_filters::LevelFilter};
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use utoipa::OpenApi;
+//! Main entry point for the RustyGPT backend CLI.
+
+use clap::{Parser, Subcommand};
+use std::error::Error;
 
 mod app_state;
+mod commands;
 mod handlers;
+mod middleware;
 mod openapi;
 mod routes;
 mod services;
 mod tracer;
 
-#[cfg(test)]
-mod main_test;
+/// RustyGPT CLI
+#[derive(Parser)]
+#[command(name = "RustyGPT CLI")]
+#[command(about = "Backend server and tools for RustyGPT", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
 
-use routes::openapi::openapi_routes;
+/// Subcommands for the RustyGPT CLI
+#[derive(Subcommand)]
+enum Commands {
+    /// Start the backend server
+    Serve {
+        /// The port number to bind the server to (e.g., 8080). Example usage: `--port 8080`
+        #[arg(
+            long,
+            short,
+            help = "The port number to bind the server to (e.g., 8080). Example usage: `--port 8080`"
+        )]
+        port: u16,
+    },
 
-// Middleware to check if a user is authenticated
-#[instrument(skip(next))]
-pub async fn auth_middleware(
-    req: Request<axum::body::Body>,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    // In a real application, you would check for a valid JWT token or session
-    // For now, we'll just pass through all requests
-    info!(
-        "Auth middleware processing request to: {}",
-        req.uri().path()
-    );
-    Ok(next.run(req).await)
+    /// Generate the OpenAPI specification
+    Spec {
+        /// Output path for the OpenAPI spec (YAML or JSON based on extension, or "json"/"yaml" for streaming)
+        output_path: Option<String>,
+    },
+
+    /// Generate shell completion scripts for the CLI
+    Completion {
+        /// The shell type for which to generate the completion script (e.g., bash, zsh, fish, powershell)
+        #[arg(
+            long,
+            short,
+            help = "The shell type for which to generate the completion script (e.g., bash, zsh, fish, powershell)"
+        )]
+        shell: String,
+    },
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::registry()
-        .with(fmt::layer()) // Log to stdout
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::DEBUG.into())
-                .from_env_lossy()
-        }))
-        .init();
+async fn main() -> Result<(), Box<dyn Error>> {
+    let cli = Cli::parse();
 
-    info!("Starting server...");
-
-    // Write OpenAPI spec to disk
-    let openapi = openapi::ApiDoc::openapi();
-    std::fs::write("../docs/rustygpt.yaml", openapi.to_yaml()?)?;
-    info!("OpenAPI spec written to docs/rustygpt.yaml");
-
-    // Set up database connection pool
-    let database_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/rusty_gpt".to_string());
-
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await
-        .expect("Failed to create database connection pool");
-
-    // Create application state
-    let state = Arc::new(AppState { pool });
-
-    // Set up CORS - TODO: Configure this
-    let cors = CorsLayer::new().allow_origin(Any);
-
-    // Build API router
-    let api_router = Router::new()
-        .merge(routes::setup::create_router_setup())
-        .merge(routes::auth::create_router_auth())
-        .merge(
-            routes::protected::create_router_protected()
-                .route_layer(middleware::from_fn(auth_middleware)),
-        );
-
-    // Set up static file serving for the app
-    let frontend_path = PathBuf::from("../frontend/dist");
-    let fallback_service = service_fn(|_req| async {
-        Ok::<_, std::convert::Infallible>(Redirect::to("/").into_response())
-    });
-    let static_files_service = ServeDir::new(frontend_path)
-        .append_index_html_on_directories(true)
-        .fallback(fallback_service);
-
-    let app = Router::new()
-        .layer(cors)
-        .layer(tracer::create_trace_layer())
-        .nest("/api", api_router)
-        .merge(openapi_routes()) // OpenAPI routes defined in routes/openapi.rs
-        .fallback_service(static_files_service)
-        .with_state(Arc::clone(&state));
-
-    // Start the server
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-    let listener = TcpListener::bind(addr).await?;
-    info!("Listening on {}", addr);
-
-    let shutdown_signal = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install CTRL+C signal handler");
-        info!("Shutting down...");
-    };
-
-    serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal)
-        .await?;
+    match cli.command {
+        Commands::Serve { port } => {
+            commands::server::run(port).expect("Server exited");
+        }
+        Commands::Spec { output_path } => {
+            commands::spec::generate_spec(output_path.as_deref())?;
+        }
+        Commands::Completion { shell } => {
+            let shell = shell
+                .parse::<clap_complete::Shell>()
+                .expect("Invalid shell type provided");
+            commands::completion::generate_completion(shell);
+        }
+    }
 
     Ok(())
 }

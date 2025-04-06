@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::AppState;
+use crate::app_state::AppState;
 use crate::handlers::setup::setup_routes;
 use axum::Router;
 use tracing::info;
