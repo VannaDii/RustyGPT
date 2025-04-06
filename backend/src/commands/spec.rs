@@ -55,3 +55,34 @@ pub fn generate_spec(output_path: Option<&str>) -> Result<(), Box<dyn std::error
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn test_generate_spec_to_json() {
+        let output_path = "test_spec.json";
+        generate_spec(Some(output_path)).unwrap();
+
+        // Assert that the file was created
+        assert!(Path::new(output_path).exists());
+
+        // Clean up
+        fs::remove_file(output_path).unwrap();
+    }
+
+    #[test]
+    fn test_generate_spec_to_yaml() {
+        let output_path = "test_spec.yaml";
+        generate_spec(Some(output_path)).unwrap();
+
+        // Assert that the file was created
+        assert!(Path::new(output_path).exists());
+
+        // Clean up
+        fs::remove_file(output_path).unwrap();
+    }
+}

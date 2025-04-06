@@ -15,3 +15,16 @@ pub fn create_router_protected() -> Router<Arc<AppState>> {
         // Add the streaming route
         .route("/api/stream/{user_id}", get(simple_sse_handler))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_router_protected() {
+        let router = create_router_protected();
+
+        // Assert that the router is created successfully
+        assert!(router.has_routes(), "Router should not be empty");
+    }
+}

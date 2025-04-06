@@ -10,3 +10,16 @@ pub fn create_router_setup() -> Router<Arc<AppState>> {
     info!("Creating setup router");
     Router::new().merge(setup_routes())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_router_setup() {
+        let router = create_router_setup();
+
+        // Assert that the router is created successfully
+        assert!(router.has_routes(), "Router should not be empty");
+    }
+}
