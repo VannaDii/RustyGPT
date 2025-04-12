@@ -4,17 +4,21 @@
 
 echo "Installing Git hooks..."
 
-# Create scripts directory if it doesn't exist
-mkdir -p scripts
+# Clean up previously installed hooks first
+echo "Cleaning up previously installed hooks..."
+rm -f .git/hooks/pre-commit .git/hooks/pre-push
+echo "Previous hooks removed."
 
-# Copy the pre-push hook
-echo "Installing pre-push hook..."
-cp scripts/pre-push.sh .git/hooks/pre-push
-chmod +x .git/hooks/pre-push
-echo "Pre-push hook installed successfully."
-
+# Create the pre-commit hook file
 echo "Installing pre-commit hook..."
-cp scripts/pre-commit.sh .git/hooks/pre-commit
+cat >.git/hooks/pre-commit <<'EOF'
+#!/bin/sh
+set -e
+echo "Running pre-commit checks..."
+just check
+EOF
+
+# Make the pre-commit hook executable
 chmod +x .git/hooks/pre-commit
 echo "Pre-commit hook installed successfully."
 
