@@ -52,6 +52,9 @@ async fn spawn_and_stream(task: Task, proc_info: ProcessInfo) {
     if let Some(ref dir) = task.working_dir {
         cmd.current_dir(dir);
     }
+    cmd.env("CLICOLOR", "1");
+    cmd.env("CLICOLOR_FORCE", "1");
+    cmd.env("FORCE_COLOR", "1");
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = cmd.spawn().expect("Failed to spawn process");
@@ -82,6 +85,8 @@ async fn stream_output<R>(name: String, color: Color, mut lines: R)
 where
     R: tokio_stream::Stream<Item = Result<String, std::io::Error>> + Unpin,
 {
+    // Ensure raw output is preserved by avoiding transformations.
+    // No changes needed here unless further testing reveals issues.
     let icon = icon_for_color(color);
     while let Some(Ok(line)) = lines.next().await {
         // Combine the icon and the task name in the prefix.

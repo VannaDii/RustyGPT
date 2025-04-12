@@ -1,6 +1,7 @@
 //! Main entry point for the RustyGPT backend CLI.
 
 use clap::{Parser, Subcommand};
+use dotenv::dotenv;
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -75,12 +76,15 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    dotenv().ok();
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Serve { port, config } => {
             let resolved_config = commands::config::Config::load_config(config, Some(port))?;
-            commands::server::run(resolved_config).expect("Server exited");
+            commands::server::run(resolved_config)
+                .await
+                .expect("Server exited");
         }
         Commands::Spec { output_path } => {
             commands::spec::generate_spec(output_path.as_deref())?;

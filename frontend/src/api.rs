@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use reqwest::{Client, Error};
 use shared::models::{
     Conversation, SetupRequest, SetupResponse,

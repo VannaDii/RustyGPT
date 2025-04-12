@@ -34,7 +34,6 @@ use crate::{app_state, middleware::auth::auth_middleware, routes, tracer};
 /// ```
 /// commands::server::run(config)?;
 /// ```
-#[tokio::main]
 pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(fmt::layer()) // Log to stdout

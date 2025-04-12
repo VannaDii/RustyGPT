@@ -12,7 +12,7 @@ yew = { version = "0.21", features = ["csr"] }
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde", "v4", "js"] }
 chrono = { version = "0.4", features = ["serde"] }
-utoipa = { git = "https://github.com/juhaku/utoipa.git", rev = "ca6b2a5", features = [
+utoipa = { version="5", features = [
   "macros",
   "yaml",
   "axum_extras",

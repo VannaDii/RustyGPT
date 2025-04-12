@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json;
-use serde_yaml;
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -20,7 +18,7 @@ impl Config {
     pub fn default() -> Self {
         Self {
             server_port: 8080,
-            database_url: "postgres://localhost:5432/rustygpt".to_string(),
+            database_url: "postgres://tinroof:rusty@localhost/rusty_gpt".to_string(),
             log_level: "info".to_string(),
             frontend_path: "../frontend/dist".to_string(),
         }

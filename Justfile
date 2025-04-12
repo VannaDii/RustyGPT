@@ -16,8 +16,7 @@ install:
 
 # Recipe to start both frontend and backend watchers concurrently
 dev:
-    just confuse-build
-    cargo run --manifest-path tools/confuse/Cargo.toml -- "backend@./backend:cargo watch -x run" "frontend@./frontend:trunk watch"
+    cargo run --manifest-path tools/confuse/Cargo.toml -- "backend@./backend:just backend-watch" "frontend@./frontend:trunk watch"
 
 # Standard checks for both frontend and backend
 check:
@@ -77,6 +76,14 @@ backend-check:
     cd backend && cargo check
     cd backend && cargo clippy --all-features
     cd backend && cargo fmt --all -- --check
+
+# Run the backend server
+backend-run:
+    cd backend && cargo run -- serve --port 8080
+
+# Watch the backend server
+backend-watch:
+    cd backend && cargo watch -x 'run -- serve --port 8080'
 
 # Build the tools/i18n-agent
 i18n-build:
