@@ -51,5 +51,20 @@
     }
   ],
   "editor.defaultFormatter": null,
-  "editor.formatOnSave": true
+  "editor.formatOnSave": true,
+  "mcp": {
+    "servers": {
+      "shell-exec": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "mcp-shell-execute"
+        ],
+        "env": {
+          "PWD": "${workspaceFolder}",
+          "ALLOWED_COMMANDS": "cargo,trunk,just,rustup,sqlx,psql"
+        }
+      }
+    }
+  },
 }
