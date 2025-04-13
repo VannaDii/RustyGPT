@@ -56,7 +56,7 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to create database connection pool");
 
     // Create application state
-    let state = Arc::new(AppState { pool });
+    let state = Arc::new(AppState { pool: Some(pool) });
 
     // Set up CORS - TODO: Configure this
     let cors = CorsLayer::new().allow_origin(Any);
@@ -68,7 +68,8 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         .merge(
             routes::protected::create_router_protected()
                 .route_layer(middleware::from_fn(auth_middleware)),
-        );
+        )
+        .merge(routes::copilot::create_router_copilot()); // Added copilot routes
 
     // Set up static file serving for the app
     let frontend_path = PathBuf::from(config.frontend_path);

@@ -1,5 +1,5 @@
 // Application state that will be shared across all routes
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct AppState {
-    pub(crate) pool: sqlx::PgPool,
+    pub(crate) pool: Option<sqlx::PgPool>,
 }

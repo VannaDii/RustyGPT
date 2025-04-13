@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod copilot;
 pub mod openapi;
 pub mod protected;
 pub mod setup;

@@ -2,16 +2,16 @@ use shared::models::SetupRequest;
 use sqlx::{Error, PgPool};
 
 /// Checks if the database is already set up.
-pub async fn is_setup(pool: &PgPool) -> Result<bool, Error> {
+pub async fn is_setup(pool: &Option<PgPool>) -> Result<bool, Error> {
     let row = sqlx::query!("SELECT is_setup() AS configured")
-        .fetch_one(pool)
+        .fetch_one(pool.as_ref().unwrap())
         .await?;
 
     Ok(row.configured.unwrap_or(false))
 }
 
 /// Performs the setup.
-pub async fn init_setup(pool: &PgPool, config: &SetupRequest) -> Result<bool, Error> {
+pub async fn init_setup(pool: &Option<PgPool>, config: &SetupRequest) -> Result<bool, Error> {
     // Check if the database is already set up
     if is_setup(pool).await? {
         return Ok(false);
@@ -24,7 +24,7 @@ pub async fn init_setup(pool: &PgPool, config: &SetupRequest) -> Result<bool, Er
         config.email,
         config.password,
     )
-    .fetch_one(pool)
+    .fetch_one(pool.as_ref().unwrap())
     .await?;
 
     Ok(result.success.unwrap_or(false))

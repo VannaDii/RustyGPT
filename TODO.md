@@ -11,7 +11,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 ## 🔊 0. Copilot Chat-Compatible API First
 
 - [ ] Scaffold `rustygpt-api` crate to serve Copilot-compatible endpoints
-  - [ ] `POST /v1/chat/completions` with OpenAI schema
+  - [x] `POST /v1/chat/completions` with OpenAI schema
   - [ ] `GET /v1/models` listing available model(s)
 - [ ] Static response MVP
   - [ ] Return dummy assistant message
@@ -33,7 +33,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
   - [ ] Add `/status` endpoint
   - [ ] Log: model, duration, stream flag, token count
 - [ ] Testing
-  - [ ] Unit + integration tests for `/v1/chat/completions`
+  - [x] Unit + integration tests for `/v1/chat/completions`
   - [ ] Manual validation in GitHub Copilot Chat
 
 ---

@@ -5,7 +5,10 @@ use tracing::{error, info, instrument};
 use uuid::Uuid;
 
 #[instrument(skip(pool))]
-pub async fn handle_apple_oauth(pool: &PgPool, auth_code: String) -> Result<Uuid, sqlx::Error> {
+pub async fn handle_apple_oauth(
+    pool: &Option<PgPool>,
+    auth_code: String,
+) -> Result<Uuid, sqlx::Error> {
     info!("Starting Apple OAuth flow");
     let client_id = env::var("APPLE_CLIENT_ID").map_err(|_| {
         error!("APPLE_CLIENT_ID missing");
@@ -40,7 +43,7 @@ pub async fn handle_apple_oauth(pool: &PgPool, auth_code: String) -> Result<Uuid
     let apple_id = token_response.access_token().secret().clone();
 
     let row = sqlx::query!("SELECT register_oauth_user(NULL, $1, NULL)", apple_id)
-        .fetch_one(pool)
+        .fetch_one(pool.as_ref().unwrap())
         .await?;
     info!(
         "Apple OAuth user registered with ID: {:?}",
@@ -59,7 +62,10 @@ pub fn create_http_client() -> reqwest::Client {
 }
 
 #[instrument(skip(pool))]
-pub async fn handle_github_oauth(pool: &PgPool, auth_code: String) -> Result<Uuid, sqlx::Error> {
+pub async fn handle_github_oauth(
+    pool: &Option<PgPool>,
+    auth_code: String,
+) -> Result<Uuid, sqlx::Error> {
     info!("Starting GitHub OAuth flow");
     let client_id = env::var("GITHUB_CLIENT_ID").map_err(|_| {
         error!("GITHUB_CLIENT_ID missing");
@@ -97,7 +103,7 @@ pub async fn handle_github_oauth(pool: &PgPool, auth_code: String) -> Result<Uui
     let github_id = token_response.access_token().secret().clone();
 
     let row = sqlx::query!("SELECT register_oauth_user(NULL, NULL, $1)", github_id)
-        .fetch_one(pool)
+        .fetch_one(pool.as_ref().unwrap())
         .await?;
     info!(
         "GitHub OAuth user registered with ID: {:?}",

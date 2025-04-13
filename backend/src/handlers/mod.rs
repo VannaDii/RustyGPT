@@ -1,5 +1,6 @@
 pub mod apple_auth;
 pub mod conversation;
+pub mod copilot;
 pub mod github_auth;
 pub mod setup;
 pub mod streaming;
