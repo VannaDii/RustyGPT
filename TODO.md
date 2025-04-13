@@ -1,6 +1,40 @@
 # ✅ RustyGPT — Full Implementation Plan (TODO Checklist)
 
-> A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrates local models, PostgreSQL, OAuth (Apple/GitHub), SSE streaming, stored procedures, and AI tools for survival, conversation, and reasoning.
+A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrates local models, PostgreSQL, OAuth (Apple/GitHub), SSE streaming, stored procedures, and AI tools for survival, conversation, and reasoning.
+
+**NOW PRIORITIZING:** Full GitHub Copilot Chat compatibility via OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints.
+
+**All LLM inference, model loading, pipeline orchestration, and task execution is handled locally—no external API calls or model services.**
+
+---
+
+## 🔊 0. Copilot Chat-Compatible API First
+
+- [ ] Scaffold `rustygpt-api` crate to serve Copilot-compatible endpoints
+  - [ ] `POST /v1/chat/completions` with OpenAI schema
+  - [ ] `GET /v1/models` listing available model(s)
+- [ ] Static response MVP
+  - [ ] Return dummy assistant message
+  - [ ] Confirm Copilot Chat connects
+- [ ] Implement RustyGPT backend model interface
+  - [ ] Use internal inference engine (no external Ollama or OpenAI)
+  - [ ] Translate OpenAI requests to internal model prompt format
+  - [ ] Return model streaming response as SSE chunks
+- [ ] Streaming support
+  - [ ] `stream: true` handling using `axum::response::sse::Sse`
+  - [ ] Emit correct `delta` format per OpenAI spec
+- [ ] Token accounting
+  - [ ] Integrate `tiktoken-rs` or local equivalent
+  - [ ] Return `usage` in completion response
+- [ ] Handle extended parameters
+  - [ ] Accept and ignore: `logit_bias`, `user`, `frequency_penalty`, etc.
+  - [ ] Gracefully skip unsupported params
+- [ ] Logging & Debugging
+  - [ ] Add `/status` endpoint
+  - [ ] Log: model, duration, stream flag, token count
+- [ ] Testing
+  - [ ] Unit + integration tests for `/v1/chat/completions`
+  - [ ] Manual validation in GitHub Copilot Chat
 
 ---
 
@@ -14,7 +48,7 @@
   - [ ] `rustygpt-db`
   - [ ] `rustygpt-index`
   - [ ] `rustygpt-utils`
-- [ ] Add `Makefile` or `justfile`
+- [ ] Add Makefile or justfile
 - [ ] Add `.cargo/config.toml` for targets
 
 ---
@@ -32,7 +66,7 @@
   - [ ] Config
   - [ ] DB pool
   - [ ] Cache
-  - [ ] LLM handle
+  - [ ] Model runtime handle
 - [ ] Add middleware
   - [ ] Tracing
   - [ ] Auth (JWT / Cookie)
@@ -55,20 +89,22 @@
   - [ ] Validate session
   - [ ] Link OAuth identity
 - [ ] Token handling
-  - [ ] Short-lived JWT
+  - [ ] Short- [ ]lived JWT
   - [ ] Secure refresh cookie
 
 ---
 
 ## 🧠 4. AI Model Integration (LLM)
 
-- [ ] Add local model backends
-  - [ ] `ollama`
-  - [ ] `open-webui`
-  - [ ] `comfyui`
-- [ ] Define trait abstraction for engine
-- [ ] Stream completions over SSE
-- [ ] Cache completions and embeddings
+- [ ] Implement internal model manager
+  - [ ] Load GGUF/ONNX models from disk
+  - [ ] Manage tokenizer, config, and metadata
+- [ ] Define unified engine trait for chat and embedding tasks
+  - [ ] Support stream and blocking modes
+  - [ ] Handle concurrency and cancellation
+- [ ] Integrate task queues and LLM job controller
+- [ ] Implement async model runtime per model backend
+- [ ] Add structured logging and retry controls
 
 ---
 
@@ -122,13 +158,11 @@
   - [ ] `rustygpt-api`
   - [ ] `rustygpt-frontend`
   - [ ] `postgres`
-  - [ ] `ollama`
-  - [ ] `open-webui`
-  - [ ] `comfyui`
+  - [ ] `rustygpt-model` (internal LLM server)
 - [ ] Mount volumes
   - [ ] `/array/data/books`
   - [ ] `/array/data/media`
-- [ ] Enable GPU pass-through
+- [ ] Enable GPU pass-through (REQUIRED For Linux and macOS)
 
 ---
 
@@ -143,7 +177,7 @@
   - [ ] Common commands
 - [ ] Add CLI tools or scripts
   - [ ] DB seed
-  - [ ] Model download
+  - [ ] Model download/init
   - [ ] Lint / check / coverage
 
 ---
@@ -167,7 +201,7 @@
 
 - [ ] Prompt styles
   - [ ] Socratic
-  - [ ] Devil's Advocate
+  - [ ] Devil’s Advocate
   - [ ] Chain of Thought
 - [ ] Add response rating UI
   - [ ] Confidence sliders
@@ -184,7 +218,7 @@
 - [ ] Run all inference locally
 - [ ] No cloud dependencies
 - [ ] Store all data locally
-- [ ] Offer "offline survival mode"
+- [ ] Offer “offline survival mode”
 
 ---
 
@@ -210,15 +244,20 @@
 
 ---
 
-## 🖼️ 15. ComfyUI Image Generation
+## 🖼️ 15. RustyGPT Image Generation
 
-- [ ] Send job to ComfyUI
-- [ ] Monitor job via socket or REST
-- [ ] Stream updates via SSE
+- [ ] Build internal image generation module
+- [ ] Use local stable diffusion models only
+- [ ] Define prompt + workflow schema in Rust
+- [ ] Implement graph-based image pipelines
+- [ ] Add in-memory job manager with status polling
+- [ ] Stream results via SSE to frontend
 - [ ] Display:
-  - [ ] Prompt UI
-  - [ ] Image history
-- [ ] Link generated images to messages
+  - [ ] Prompt inputs and generation history
+  - [ ] Real-time token + inference stats
+  - [ ] Image previews with metadata
+- [ ] Link generated images to message/thread context
+- [ ] Plan extensibility for style transfer, upscaling, and batch generation
 
 ---
 
@@ -235,15 +274,7 @@
 
 ---
 
-## 📑 17. Moderation & Guardrails
-
-- [ ] Add local-only moderation engine
-- [ ] Detect unsafe prompts
-- [ ] Rewrite or clarify problematic inputs
-
----
-
-## 🧩 18. Optional / Bonus Features
+## 🧩 17. Optional / Bonus Features
 
 - [ ] Raven companions (Ogg & Vorbis 🪶)
 - [ ] Local smart home API (EcoFlow, HomeKit, HA)
@@ -253,13 +284,14 @@
 
 ---
 
-## ✅ 19. Milestones
+## ✅ 18. Milestones
 
-- [ ] Milestone 1: Project scaffold + workspace
-- [ ] Milestone 2: Auth & DB
-- [ ] Milestone 3: Frontend MVP
-- [ ] Milestone 4: Local LLM Integration
-- [ ] Milestone 5: Book Indexing
-- [ ] Milestone 6: Threaded Conversation Explorer
-- [ ] Milestone 7: Survival Mode
-- [ ] Milestone 8: Image + Voice + Summaries
+- [ ] Milestone 1: Copilot Chat Compatibility
+- [ ] Milestone 2: Project scaffold + workspace
+- [ ] Milestone 3: Auth & DB
+- [ ] Milestone 4: Frontend MVP
+- [ ] Milestone 5: Local LLM Integration
+- [ ] Milestone 6: Book Indexing
+- [ ] Milestone 7: Threaded Conversation Explorer
+- [ ] Milestone 8: Survival Mode
+- [ ] Milestone 9: Image + Voice + Summaries

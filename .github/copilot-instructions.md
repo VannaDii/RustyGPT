@@ -4,6 +4,28 @@ This document defines strict, high-quality guidelines for GitHub Copilot to foll
 
 > **Workspace Members**: See the [workspace Cargo.toml](../Cargo.toml) for crate membership and layout.
 
+## Command Execution
+
+You have many tools available to you for command execution. You should primarily use the `#execute_command` tool without providing a `timeout` attribute, and ensuring the command you want to run is prefixed by a `cd` command that specifies the correct directory for the command to execute successfully. This ensures that the command runs in the appropriate context and can access the necessary resources.
+
+### Example Commands
+
+```sh
+cd /Users/vanna/Source/tubarr && cargo check
+```
+
+```json
+{
+  "command": "cd /Users/vanna/Source/tubarr && cargo check"
+}
+```
+
+**Notice there is never a `timeout` attribute.** This is because the command will run until it completes, and you should not set a timeout for it.
+
+### Test Commands
+
+When running tests, you MUST ONLY use the `cargo test` command and it MUST be run in the workspace root! This is essential and not open to negotiation!
+
 ---
 
 ## 1. Rust Code Design & Best Practices
