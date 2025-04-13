@@ -37,7 +37,7 @@ web-sys = { version = "0.3", features = [
   "ScrollToOptions",
   "Window",
 ] }
-yew = { version = "0.21", features = ["csr"] }
+yew = { version = "0.21", features = ["csr", "ssr"] }
 yew-hooks = "0.3.3"
 yew_icons = { version = "0.8.0", features = [
   "heroicons_solid",      # Includes all Heroicons solid variants
@@ -49,3 +49,6 @@ yew_icons = { version = "0.8.0", features = [
 yew-router = "0.18.0"
 yewdux = "0.11.0"
 shared = { path = "../shared" }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
