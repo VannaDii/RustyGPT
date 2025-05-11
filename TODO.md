@@ -8,6 +8,12 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
+## ⏮️ -1. Refactor CLI and Server
+
+- [ ] Move CLI out of Server
+- [ ] Add `lib` to Server
+- [ ] Enable CLI to run Server via `lib`
+
 ## 🔊 0. Copilot Chat-Compatible API First
 
 - [ ] Scaffold `rustygpt-api` crate to serve Copilot-compatible endpoints
