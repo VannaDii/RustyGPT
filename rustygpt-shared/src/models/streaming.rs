@@ -42,7 +42,7 @@ mod tests {
         assert_eq!(chunk.conversation_id, conversation_id);
         assert_eq!(chunk.message_id, message_id);
         assert_eq!(chunk.content, "Hello");
-        assert_eq!(chunk.is_final, false);
+        assert!(!chunk.is_final);
     }
 
     #[test]
@@ -65,6 +65,6 @@ mod tests {
         assert_eq!(deserialized.conversation_id, conversation_id);
         assert_eq!(deserialized.message_id, message_id);
         assert_eq!(deserialized.content, "Test chunk");
-        assert_eq!(deserialized.is_final, true);
+        assert!(deserialized.is_final);
     }
 }

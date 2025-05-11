@@ -184,7 +184,7 @@ fn test_extract_keys_from_json_with_prefixes() -> Result<()> {
 #[test]
 fn test_extract_keys_from_json_with_non_object() -> Result<()> {
     // Test with non-object values
-    let test_cases = vec![
+    let test_cases = [
         json!("string value"),
         json!(123),
         json!(true),
@@ -567,7 +567,7 @@ fn test_get_value_by_path() -> Result<()> {
     // Test 3: Get top-level boolean
     let value = get_value_by_path(&json, "boolean");
     assert!(value.is_some());
-    assert_eq!(value.unwrap().as_bool().unwrap(), true);
+    assert!(value.unwrap().as_bool().unwrap());
 
     // Test 4: Get top-level null
     let value = get_value_by_path(&json, "null");
@@ -731,7 +731,7 @@ fn test_audit_translations_edge_cases() -> Result<()> {
         let empty_keys = HashSet::new();
         let result = audit_translations(temp_dir.path(), &empty_keys)?;
 
-        for (_, data) in &result.translations {
+        for data in result.translations.values() {
             assert_eq!(data.all_keys.len(), data.unused_keys.len());
         }
     }

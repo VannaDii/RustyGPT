@@ -26,11 +26,9 @@ fn international_app() -> Html {
         .iter()
         .map(|(&key, value)| (key, value.translation))
         .collect();
-    let languages: Vec<&str> = translations.iter().map(|(&key, _)| key).collect();
 
     let config = I18nProviderConfig {
         translations,
-        languages,
         default_language: "en".to_string(),
         ..Default::default()
     };

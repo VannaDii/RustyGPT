@@ -1,3 +1,35 @@
 [workspace]
 resolver = "2"
-members = ["backend", "frontend", "shared", "tools/i18n-agent", "tools/confuse"]
+members = [
+  "rustygpt-cli",
+  "rustygpt-server",
+  "rustygpt-shared",
+  "rustygpt-tools/confuse",
+  "rustygpt-tools/i18n-agent",
+  "rustygpt-web",
+]
+
+[workspace.lints.rust]
+missing_docs = { level = "warn" }
+missing_debug_implementations = { level = "warn" }
+
+[workspace.lints.clippy]
+pedantic = { level = "warn" }
+
+[workspace.dependencies]
+chrono = { version = "0.4.41", features = ["serde"] }
+dotenv = "0.15.0"
+regex = { version = "1", features = ["unicode"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+shared = { version = "0.1", path = "rustygpt-shared" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+  "fmt",
+  "json",
+] }
+tokio = { version = "1.45.0", features = ["full"] }
+tokio-stream = "0.1"
+uuid = { version = "1", features = ["serde", "v4", "js"] }

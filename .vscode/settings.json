@@ -52,4 +52,7 @@
   ],
   "editor.defaultFormatter": null,
   "editor.formatOnSave": true,
+  "rustTestExplorer.rootCargoManifestFilePath": "${workspaceFolder}/Cargo.toml",
+  "rustTestExplorer.testRunner": "cargo",
+  "rust-analyzer.testExplorer": false
 }

@@ -1,5 +1,5 @@
 # Default recipe (runs when you just run "just" with no arguments)
-default: build
+default: check
 
 install:
     @echo "Installing Rust components and targets..."
@@ -16,104 +16,39 @@ install:
 
 # Recipe to start both frontend and backend watchers concurrently
 dev:
-    cargo run --manifest-path tools/confuse/Cargo.toml -- "backend@./backend:just backend-watch" "frontend@./frontend:trunk watch"
+    cargo run --manifest-path rustygpt-tools/confuse/Cargo.toml -- "server@./rustygpt-server:just watch-server" "client@./rustygpt-web:trunk watch"
 
 # Standard checks for both frontend and backend
 check:
-    just i18n-check
-    just i18n-test
-    just confuse-check
-    just confuse-test
-    just frontend-check
-    just frontend-test
-    just backend-check
-    just backend-test
+    cargo fmt -- --check
+    cargo check --workspace
+    cargo clippy --workspace --all-features
+
+# Auto-fix what can be
+fix:
+    cargo fmt --all
+    cargo clippy --workspace --all-features --fix
 
 # Build everything
 build:
-    just i18n-build
-    just confuse-build
-    just frontend-build
-    just backend-build
+    cargo build --workspace
+    cd rustygpt-web && trunk build
 
 # Test everything
 test:
-    just i18n-test
-    just confuse-test
-    just frontend-test
-    just backend-test
+    cargo test --workspace
 
 # Run all tests and generate coverage report
 coverage:
-    cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html
-
-# Build the frontend
-frontend-build:
-    cd frontend && trunk build
-
-# Build the frontend
-frontend-test:
-    cd frontend && trunk build
-
-# Run standard backend checks
-frontend-check:
-    cd frontend && cargo fmt
-    cd frontend && cargo check
-    cd frontend && cargo clippy --all-features
-    cd backend && cargo fmt --all -- --check
-
-# Build the backend
-backend-build:
-    cd backend && cargo build
-
-# Run backend tests
-backend-test:
-    cd backend && cargo test
-
-# Run standard backend checks
-backend-check:
-    cd backend && cargo fmt
-    cd backend && cargo check
-    cd backend && cargo clippy --all-features
-    cd backend && cargo fmt --all -- --check
+    cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/html/index.html
 
 # Run the backend server
-backend-run:
-    cd backend && cargo run -- serve --port 8080
+run-server:
+    cd rustygpt-server && cargo run -- serve --port 8080
 
 # Watch the backend server
-backend-watch:
-    cd backend && cargo watch -x 'run -- serve --port 8080'
-
-# Build the tools/i18n-agent
-i18n-build:
-    cd tools/i18n-agent && cargo build
-
-# Run tools/i18n-agent tests
-i18n-test:
-    cd tools/i18n-agent && cargo test
-
-# Run standard tools/i18n-agent checks
-i18n-check:
-    cd tools/i18n-agent && cargo fmt
-    cd tools/i18n-agent && cargo check
-    cd tools/i18n-agent && cargo clippy --all-features
-    cd tools/i18n-agent && cargo fmt --all -- --check
-
-# Build the tools/confuse
-confuse-build:
-    cd tools/confuse && cargo build
-
-# Run tools/confuse tests
-confuse-test:
-    cd tools/confuse && cargo test
-
-# Run standard tools/confuse checks
-confuse-check:
-    cd tools/confuse && cargo fmt
-    cd tools/confuse && cargo check
-    cd tools/confuse && cargo clippy --all-features
-    cd tools/confuse && cargo fmt --all -- --check
+watch-server:
+    cd rustygpt-server && cargo watch -x 'run -- serve --port 8080'
 
 # Helper recipes for when you tinker too hard
 nuke-port-zombies:

@@ -1,44 +1,31 @@
 [package]
-name = "backend"
+name = "cli"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
-chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
-dotenv = "0.15.0"
+dotenv = { workspace = true }
 futures-util = "0.3"
 http = "1"
 hyper = { version = "1", features = ["client", "http1", "full"] }
 hyper-rustls = { version = "0.27", features = ["http1", "webpki-roots"] }
 oauth2 = "5"
-regex = { version = "1", features = ["unicode"] }
 reqwest = "0.12"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9"
+shared = { workspace = true }
 sqlx = { version = "0.8", features = [
   "postgres",
   "macros",
   "runtime-tokio",
   "uuid",
 ] }
-tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
+tokio = { workspace = true }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = [
-  "env-filter",
-  "fmt",
-  "json",
-] }
 tower-service = "0.3"
-uuid = { version = "1", features = ["serde", "v4", "js"] }
-shared = { path = "../shared" }
-utoipa = { version="5", features = [
+utoipa = { version = "5", features = [
   "macros",
   "yaml",
   "axum_extras",
@@ -51,7 +38,7 @@ utoipa = { version="5", features = [
   "openapi_extensions",
 ] }
 utoipa-axum = "0.2"
-utoipa-swagger-ui = { version="9", features = ["axum", "reqwest"] }
+utoipa-swagger-ui = { version = "9", features = ["axum", "reqwest"] }
 
 [dev-dependencies]
 axum-test = "17"

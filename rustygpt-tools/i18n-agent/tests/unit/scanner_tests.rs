@@ -300,7 +300,7 @@ fn test_handle_dynamic_route_keys_with_malformed_routes() -> Result<()> {
 
     // The implementation is generating keys for each valid route
     // The expect number might vary based on exact implementation
-    assert!(keys.len() > 0);
+    assert!(!keys.is_empty());
     assert!(keys.contains("admin.routes.settings.title"));
     assert!(keys.contains("admin.routes.settings.icon"));
 
