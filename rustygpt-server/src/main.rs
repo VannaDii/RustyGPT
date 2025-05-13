@@ -2,17 +2,21 @@
 
 use clap::{Parser, Subcommand};
 use dotenv::dotenv;
+use shared::config::server::Config;
 use std::error::Error;
 use std::path::PathBuf;
 
 mod app_state;
-mod commands;
 mod handlers;
 mod middleware;
 mod openapi;
 mod routes;
+mod server;
 mod services;
 mod tracer;
+
+#[cfg(test)]
+mod server_test;
 
 /// RustyGPT CLI
 #[derive(Parser)]
@@ -44,34 +48,6 @@ enum Commands {
         )]
         config: Option<PathBuf>,
     },
-
-    /// Generate the OpenAPI specification
-    Spec {
-        /// Output path for the OpenAPI spec (YAML or JSON based on extension, or "json"/"yaml" for streaming)
-        output_path: Option<String>,
-    },
-
-    /// Generate shell completion scripts for the CLI
-    Completion {
-        /// The shell type for which to generate the completion script (e.g., bash, zsh, fish, powershell)
-        #[arg(
-            long,
-            short,
-            help = "The shell type for which to generate the completion script (e.g., bash, zsh, fish, powershell)"
-        )]
-        shell: String,
-    },
-
-    /// Generate a configuration file
-    Config {
-        /// Format of the configuration file to generate (yaml or json). Defaults to yaml.
-        #[arg(
-            long,
-            short,
-            help = "Format of the configuration file to generate (yaml or json). Defaults to yaml."
-        )]
-        format: Option<String>,
-    },
 }
 
 #[tokio::main]
@@ -81,23 +57,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match cli.command {
         Commands::Serve { port, config } => {
-            let resolved_config = commands::config::Config::load_config(config, Some(port))?;
-            commands::server::run(resolved_config)
-                .await
-                .expect("Server exited");
-        }
-        Commands::Spec { output_path } => {
-            commands::spec::generate_spec(output_path.as_deref())?;
-        }
-        Commands::Completion { shell } => {
-            let shell = shell
-                .parse::<clap_complete::Shell>()
-                .expect("Invalid shell type provided");
-            commands::completion::generate_completion(shell);
-        }
-        Commands::Config { format } => {
-            let format = format.unwrap_or_else(|| "yaml".to_string());
-            commands::config::generate_config(&format)?;
+            let resolved_config = Config::load_config(config, Some(port))?;
+            server::run(resolved_config).await.expect("Server exited");
         }
     }
 

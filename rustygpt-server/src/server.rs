@@ -1,4 +1,3 @@
-use crate::commands::config::Config;
 use app_state::AppState;
 use axum::{
     Router,
@@ -7,6 +6,7 @@ use axum::{
     serve,
 };
 use routes::openapi::openapi_routes;
+use shared::config::server::Config;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -29,11 +29,6 @@ use crate::{app_state, middleware::auth::auth_middleware, routes, tracer};
 ///
 /// # Errors
 /// Returns an error if the server fails to start.
-///
-/// # Examples
-/// ```
-/// commands::server::run(config)?;
-/// ```
 pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(fmt::layer()) // Log to stdout

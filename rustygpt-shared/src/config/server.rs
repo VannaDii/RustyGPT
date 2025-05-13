@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::env;
-use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
+use std::{env, fs, path::PathBuf};
 
 /// Represents the configuration structure for RustyGPT.
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -15,7 +12,7 @@ pub struct Config {
 
 impl Config {
     /// Generates a default configuration.
-    pub fn default() -> Self {
+    pub fn with_defaults() -> Self {
         Self {
             server_port: 8080,
             database_url: "postgres://tinroof:rusty@localhost/rusty_gpt".to_string(),
@@ -36,7 +33,7 @@ impl Config {
         config_path: Option<PathBuf>,
         port_override: Option<u16>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut config = Config::default();
+        let mut config = Config::with_defaults();
 
         // Load from file if provided
         if let Some(path) = config_path {
@@ -58,24 +55,24 @@ impl Config {
         }
 
         // Use environment variables only if values are not already set
-        if config.server_port == Config::default().server_port {
+        if config.server_port == Config::with_defaults().server_port {
             if let Ok(port) = env::var("RUSTYGPT_SERVER_PORT") {
                 config.server_port = port.parse().map_err(|_| {
                     "Invalid RUSTYGPT_SERVER_PORT value: must be a valid number between 1 and 65535"
                 })?;
             }
         }
-        if config.database_url == Config::default().database_url {
+        if config.database_url == Config::with_defaults().database_url {
             if let Ok(db_url) = env::var("RUSTYGPT_DATABASE_URL") {
                 config.database_url = db_url;
             }
         }
-        if config.log_level == Config::default().log_level {
+        if config.log_level == Config::with_defaults().log_level {
             if let Ok(log_level) = env::var("RUSTYGPT_LOG_LEVEL") {
                 config.log_level = log_level;
             }
         }
-        if config.frontend_path == Config::default().frontend_path {
+        if config.frontend_path == Config::with_defaults().frontend_path {
             if let Ok(frontend_path) = env::var("RUSTYGPT_FRONTEND_PATH") {
                 config.frontend_path = frontend_path;
             }
@@ -93,32 +90,4 @@ impl Config {
 
         Ok(config)
     }
-}
-
-/// Generates a configuration file in the specified format.
-///
-/// # Arguments
-/// * `format` - The format of the configuration file ("yaml" or "json").
-///
-/// # Errors
-/// Returns an error if the format is unsupported or if writing the file fails.
-pub fn generate_config(format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::default();
-    let file_name = match format {
-        "yaml" => "config.yaml",
-        "json" => "config.json",
-        _ => return Err("Unsupported format. Use 'yaml' or 'json'.".into()),
-    };
-
-    let serialized = match format {
-        "yaml" => serde_yaml::to_string(&config)?,
-        "json" => serde_json::to_string_pretty(&config)?,
-        _ => unreachable!(),
-    };
-
-    let mut file = fs::File::create(file_name)?;
-    file.write_all(serialized.as_bytes())?;
-
-    println!("Configuration file '{}' generated successfully.", file_name);
-    Ok(())
 }

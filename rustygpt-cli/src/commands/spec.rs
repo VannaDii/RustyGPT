@@ -1,6 +1,6 @@
 //! Command to generate the OpenAPI specification and write it to a file.
 
-use crate::openapi::ApiDoc;
+use server::openapi::ApiDoc;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
