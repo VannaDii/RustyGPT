@@ -11,12 +11,12 @@ You have many tools available to you for command execution. You should primarily
 ### Example Commands
 
 ```sh
-cd /Users/vanna/Source/tubarr && cargo check
+cd ~/Source/tubarr && cargo check
 ```
 
 ```json
 {
-  "command": "cd /Users/vanna/Source/tubarr && cargo check"
+  "command": "cd ~/Source/tubarr && cargo check"
 }
 ```
 
