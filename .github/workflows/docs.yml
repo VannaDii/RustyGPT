@@ -1,11 +1,11 @@
-name: Documentation
+name: Docs
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  # Allow manual trigger
+
   workflow_dispatch:
 
 permissions:
@@ -36,6 +36,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Just
+        uses: extractions/setup-just@v2
+
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
@@ -50,22 +53,13 @@ jobs:
             ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Cache dependencies
+      - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
-      - name: Generate documentation
-        run: |
-          # Generate documentation for all crates
-          cargo doc --no-deps --workspace
-
-          # Copy the generated docs to the docs directory
-          mkdir -p docs/api
-          cp -r target/doc/* docs/api/
-
-          # Ensure the index.html file exists
-          touch docs/index.html
+      - name: Docs
+        run: just docs
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -73,7 +67,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           enablement: true
 
-      - name: Upload artifact
+      - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: './docs'
@@ -85,6 +79,6 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@v4

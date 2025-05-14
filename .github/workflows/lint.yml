@@ -30,52 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Add Cargo bin to PATH
-        run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/cargo
-            /usr/local/rustup
-            ${{ env.CARGO_HOME }}/bin
-            ${{ env.CARGO_HOME }}/git
-            ${{ env.CARGO_HOME }}/registry
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Create .env file
-        run: cp .env.template .env
-
-      - name: Install Cargo Tools
-        run: |
-          if rustup target list --installed | grep -F "wasm32-unknown-unknown" >/dev/null; then
-            echo "Target wasm32-unknown-unknown already installed"
-          else
-            rustup target add wasm32-unknown-unknown
-          fi
-          if ! cargo clippy --version >/dev/null 2>&1; then
-            rustup component add clippy
-          else
-            echo "clippy already installed"
-          fi
-
-      - name: Clippy check
-        run: cargo clippy --all-features
-
-  rustfmt:
-    name: Format
-    container:
-      image: rust:latest
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
+      - name: Install Just
+        uses: extractions/setup-just@v2
 
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
@@ -91,7 +47,7 @@ jobs:
             ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Cache dependencies
+      - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -99,21 +55,11 @@ jobs:
       - name: Create .env file
         run: cp .env.template .env
 
-      - name: Install Cargo Tools
-        run: |
-          if rustup target list --installed | grep -F "wasm32-unknown-unknown" >/dev/null; then
-            echo "Target wasm32-unknown-unknown already installed"
-          else
-            rustup target add wasm32-unknown-unknown
-          fi
-          if ! cargo fmt --version >/dev/null 2>&1; then
-            rustup component add rustfmt
-          else
-            echo "rustfmt already installed"
-          fi
+      - name: Install
+        run: just install
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Check
+        run: just check
 
   audit:
     name: Security audit

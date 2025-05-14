@@ -34,6 +34,11 @@ build:
     cargo build --workspace
     cd rustygpt-web && trunk build
 
+# Build everything
+build-release:
+    cargo build --workspace --release
+    cd rustygpt-web && trunk build --release
+
 # Test everything
 test:
     cargo test --workspace
@@ -41,6 +46,17 @@ test:
 # Run all tests and generate coverage report
 coverage:
     cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/html/index.html
+
+docs:
+    # Generate documentation for all crates
+    cargo doc --no-deps --workspace
+
+    # Copy the generated docs to the docs directory
+    mkdir -p docs/api
+    cp -r target/doc/* docs/api/
+
+    # Ensure the index.html file exists
+    touch docs/index.html
 
 # Run the backend server
 run-server:

@@ -30,6 +30,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Just
+        uses: extractions/setup-just@v2
+
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
@@ -44,7 +47,7 @@ jobs:
             ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Cache dependencies
+      - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -53,44 +56,25 @@ jobs:
         run: cp .env.template .env
 
       - name: Install Cargo Tools
-        run: |
-          if rustup target list --installed | grep -F "wasm32-unknown-unknown" >/dev/null; then
-            echo "Target wasm32-unknown-unknown already installed"
-          else
-            rustup target add wasm32-unknown-unknown
-          fi
-          if ! cargo install-update --version >/dev/null 2>&1; then
-            cargo install cargo-update
-          else
-            echo "cargo-update already installed"
-          fi
-          cargo install-update -a trunk wasm-bindgen-cli wasm-opt sqlx-cli cargo-llvm-cov cargo-audit
-          if ! command -v trunk >/dev/null; then
-            cargo install trunk --locked
-          fi
+        run: just install
 
       - name: Build
-        run: cargo build --release
+        run: just build-release
 
-      - name: Build frontend
-        working-directory: frontend
-        run: trunk build --release
-
-      - name: Generate changelog
+      - name: Changelog
         id: changelog
         run: |
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -z "$PREVIOUS_TAG" ]; then
-            echo "CHANGELOG<<EOF" >> $GITHUB_ENV
-            git log --pretty=format:"* %s (%h)" $(git rev-list --max-parents=0 HEAD)..HEAD >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
+            CHANGELOG=$(git log --pretty=format:"* %s (%h)" $(git rev-list --max-parents=0 HEAD)..HEAD)
           else
-            echo "CHANGELOG<<EOF" >> $GITHUB_ENV
-            git log --pretty=format:"* %s (%h)" $PREVIOUS_TAG..HEAD >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
+            CHANGELOG=$(git log --pretty=format:"* %s (%h)" $PREVIOUS_TAG..HEAD)
           fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Create release
+      - name: Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
@@ -98,7 +82,7 @@ jobs:
           body: |
             ## Changes in this Release
 
-            ${{ env.CHANGELOG }}
+            ${{ steps.changelog.outputs.changelog }}
 
             ## Installation
 
@@ -117,7 +101,7 @@ jobs:
           DATE=$(date +%Y-%m-%d)
 
           # Create new changelog entry
-          echo -e "# Changelog\n\n## $VERSION - $DATE\n\n${{ env.CHANGELOG }}\n\n$(cat CHANGELOG.md 2>/dev/null || echo '')" > CHANGELOG.md
+          echo -e "# Changelog\n\n## $VERSION - $DATE\n\n${{ steps.changelog.outputs.changelog }}\n\n$(cat CHANGELOG.md 2>/dev/null || echo '')" > CHANGELOG.md
 
           # Commit and push the updated CHANGELOG.md
           git config --local user.email "action@github.com"
