@@ -538,3 +538,146 @@ flowchart LR
 - **Event Sourcing**: Implementation of event sourcing for conversation history
 - **Caching Layer**: Addition of a caching layer for improved performance
 - **Distributed Processing**: Support for distributed AI model inference
+
+### Entity Lifecycle Management
+
+The entity lifecycle management process ensures the accuracy, relevance, and efficiency of dimensioned entities throughout their existence in the system. This comprehensive lifecycle spans from entity creation to archival, with multiple stages designed to maintain data integrity and optimize performance.
+
+#### Lifecycle Stages
+
+##### 1. Entity Creation
+
+- **Manual Creation:**
+  - Entities can be created explicitly through structured administrative interfaces.
+  - Each creation includes mandatory attributes and generates initial embeddings.
+  - Validation rules ensure data consistency and prevent malformed entities.
+
+- **Dynamic Discovery:**
+  - The system automatically identifies potential entities during data processing.
+  - Extraction occurs from various sources: user queries, document analysis, or RAG operations.
+  - Newly discovered entities are staged for validation before formal integration.
+
+##### 2. Validation and Deduplication
+
+- **Similarity Assessment:**
+  - New entities undergo vector-based similarity checks against existing records.
+  - Cosine similarity metrics identify potential duplicates or closely related entities.
+  - Configurable thresholds determine automatic merging versus human review.
+
+- **Human-in-the-Loop Verification:**
+  - Edge cases with borderline similarity scores are flagged for manual review.
+  - Review interfaces present contextual information to aid decision-making.
+  - Authorized users can merge, separate, or augment entity relationships.
+
+##### 3. Embedding Generation and Maintenance
+
+- **Initial Embedding:**
+  - Generated using pure Rust implementations via the `llama_cpp` crate.
+  - All embeddings are stored in standardized vector formats (768-dimensional by default).
+  - Optimized for both CPU and GPU acceleration where available.
+
+- **Incremental Indexing:**
+  - Updates to entity attributes trigger selective re-embedding.
+  - Only changed entities require reprocessing, minimizing computational overhead.
+  - Index structures are efficiently updated without requiring complete rebuilds.
+
+- **Model Re-basing:**
+  - When embedding models are upgraded, systematic re-embedding occurs.
+  - Batch processing optimizes resource utilization during model transitions.
+  - Verification processes ensure semantic consistency after re-basing operations.
+
+##### 4. Relationship Inference and Management
+
+- **Automatic Relationship Detection:**
+  - Relationships are inferred based on shared attributes and embedding proximity.
+  - The `ltree` path structure enables hierarchical relationship organization.
+  - Relationship weights reflect confidence levels and relevance scores.
+
+- **Dynamic Weight Adjustment:**
+  - Relationship strengths evolve based on usage patterns and reasoning outcomes.
+  - Frequently traversed relationships gain higher weights.
+  - Contextual relevance feedback adjusts relationship significance over time.
+
+##### 5. Pruning and Memory Management
+
+- **Reference Tracking:**
+  - Usage frequency and recency metrics are maintained for each entity.
+  - The `reference_tracking` table records access patterns and last-used timestamps.
+  - Statistical analysis identifies candidates for pruning or preservation.
+
+- **Multi-level Pruning Strategy:**
+  - Active Set: Frequently used entities remain in high-speed access memory.
+  - Inactive Set: Less commonly accessed entities move to secondary storage.
+  - Archived Set: Rarely used entities are compressed and moved to long-term storage.
+
+- **LRU-based Garbage Collection:**
+  - Least Recently Used algorithm governs resource allocation.
+  - Adaptive thresholds adjust based on system load and memory availability.
+  - Batch pruning operations execute during low-usage periods.
+
+##### 6. Entity Reactivation
+
+- **Triggered Resurrection:**
+  - References to pruned entities automatically trigger reactivation.
+  - Reactivated entities undergo validation and embedding refresh.
+  - Relationships to active entities are restored and recalibrated.
+
+- **Contextual Restoration:**
+  - When reactivating an entity, contextually related entities are also assessed.
+  - Relevant relationship clusters may be restored to maintain reasoning coherence.
+  - Embedding consistency checks ensure semantic alignment with current models.
+
+#### Lifecycle Flow Diagram
+
+```mermaid
+flowchart TD
+    subgraph Creation
+        MC[Manual Creation] --> VA[Validation]
+        DD[Dynamic Discovery] --> VA
+    end
+
+    subgraph Processing
+        VA --> DD{Duplicate?}
+        DD -->|Yes| HR[Human Review]
+        DD -->|No| EG[Embedding Generation]
+        HR --> EG
+        EG --> RI[Relationship Inference]
+    end
+
+    subgraph Maintenance
+        RI --> UT[Usage Tracking]
+        UT --> PM{Pruning?}
+        PM -->|Yes| PR[Pruning]
+        PM -->|No| UT
+        PR --> AR[Archive]
+        AR --> RA[Reactivation]
+        RA --> VA
+    end
+
+    classDef creation fill:#d1e7dd,stroke:#198754,stroke-width:1px;
+    classDef processing fill:#fff3cd,stroke:#ffc107,stroke-width:1px;
+    classDef maintenance fill:#cff4fc,stroke:#0dcaf0,stroke-width:1px;
+
+    class MC,DD creation;
+    class VA,DD,HR,EG,RI processing;
+    class UT,PM,PR,AR,RA maintenance;
+```
+
+#### Implementation Considerations
+
+- **Performance Optimization:**
+  - Batch operations for embedding updates and relationship maintenance.
+  - Asynchronous processing for non-time-critical lifecycle operations.
+  - Prioritization of operations based on entity relevance and usage patterns.
+
+- **Resource Management:**
+  - Graceful degradation during high system load.
+  - Configurable thresholds for pruning and archival decisions.
+  - Dynamic allocation of computational resources based on operation importance.
+
+- **Data Integrity:**
+  - Transaction-based updates to prevent partial entity modifications.
+  - Versioned entity records to support rollback if needed.
+  - Periodic consistency checks to identify and resolve anomalies.
+
+By implementing this comprehensive lifecycle management approach, the system maintains optimal performance even as the entity knowledge base grows. The combination of automated processes and selective human verification ensures both efficiency and accuracy throughout the entity lifespan.
