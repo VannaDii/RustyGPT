@@ -681,3 +681,750 @@ flowchart TD
   - Periodic consistency checks to identify and resolve anomalies.
 
 By implementing this comprehensive lifecycle management approach, the system maintains optimal performance even as the entity knowledge base grows. The combination of automated processes and selective human verification ensures both efficiency and accuracy throughout the entity lifespan.
+
+## Streaming Response Implementation
+
+The RustyGPT architecture employs Server-Sent Events (SSE) for streaming real-time responses from AI models to clients. This implementation ensures efficient, scalable delivery of token-by-token responses while maintaining connection context and handling various edge cases.
+
+### Core SSE Architecture
+
+#### Server-Side Implementation
+
+The backend implements SSE through the Axum web framework's event stream capabilities:
+
+```rust
+async fn stream_response(
+    State(app_state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Path(conversation_id): Path<Uuid>,
+    Query(params): Query<StreamParams>,
+    claims: Claims,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(100);
+
+    // Register conversation with the message broker
+    app_state.message_broker.register_conversation(conversation_id, tx.clone(), claims.sub).await;
+
+    // Start AI generation in separate task to avoid blocking
+    tokio::spawn(async move {
+        // AI generation process that sends tokens through tx
+        // ...
+    });
+
+    // Create SSE stream from receiver
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"))
+}
+```
+
+#### Message Correlation with Conversation IDs
+
+Each SSE connection is uniquely associated with a conversation through:
+
+1. **Path Parameters**: The conversation ID is embedded in the endpoint path (`/api/conversations/{id}/stream`).
+2. **Event IDs**: Each SSE event contains an ID field with a format that includes the conversation ID and sequence number.
+3. **Message Registry**: The backend maintains a registry mapping conversation IDs to active connections.
+
+```rust
+// Sample SSE event format
+Event::default()
+    .id(format!("conv-{}-seq-{}", conversation_id, seq_num))
+    .event("token")
+    .data(token_json)
+```
+
+#### Connection Initialization Sequence
+
+When a client connects to the SSE endpoint:
+
+1. The backend validates authentication and authorization claims
+2. A configuration payload is immediately sent containing:
+   - API version and compatibility information
+   - Available endpoints and capabilities
+   - Timeout configurations
+   - Supported models and parameters
+
+```
+event: config
+data: {
+  "apiVersion": "1.2.0",
+  "timeoutSeconds": 120,
+  "supportedModels": ["llama2-7b", "mistral-7b"],
+  "maxTokens": 4096,
+  "endpoints": {
+    "tokenCounts": "/api/token-counts",
+    "modelSwitch": "/api/conversations/{id}/model"
+  }
+}
+```
+
+### Message Types and Structure
+
+The SSE implementation uses a structured event type system:
+
+#### 1. Content Tokens
+
+Regular AI-generated tokens that form the response content:
+
+```
+id: conv-3f8a9e1c-seq-42
+event: token
+data: {"content": "world", "index": 42}
+```
+
+#### 2. Control Messages
+
+System events that communicate state changes:
+
+```
+id: conv-3f8a9e1c-ctrl-7
+event: control
+data: {"type": "thinking", "active": true}
+```
+
+Control types include:
+- `thinking`: AI model is processing but not yet generating tokens
+- `complete`: Response generation is complete
+- `error`: An error occurred (with error details)
+- `interrupted`: Generation was interrupted
+- `model_switch`: Model was changed during generation
+
+#### 3. Metadata Updates
+
+Information about the generation process:
+
+```
+id: conv-3f8a9e1c-meta-3
+event: metadata
+data: {"tokenCount": 156, "modelName": "llama2-7b", "promptTokens": 342}
+```
+
+### Error Handling and Recovery
+
+The SSE implementation includes robust error handling:
+
+#### 1. Connection-Level Errors
+
+- **Connection Timeout**: Handled with configurable keepalive intervals
+- **Client Disconnection**: Detected and resources are properly released
+
+```rust
+// In the broker implementation
+fn handle_client_disconnect(&self, conversation_id: Uuid) {
+    // Cancel ongoing generation
+    // Release resources
+    // Log disconnection
+}
+```
+
+#### 2. Generation-Level Errors
+
+- **Model Errors**: Wrapped as error events with diagnostic information
+- **Rate Limiting**: Pre-emptive client notification before timeout
+- **Token Limit Reached**: Graceful completion with status info
+
+```
+id: conv-3f8a9e1c-error-1
+event: error
+data: {"code": "MODEL_OVERLOADED", "message": "Model is currently overloaded", "retryIn": 5000}
+```
+
+#### 3. Recovery Mechanisms
+
+- **Automatic Reconnection**: The client implements exponential backoff
+- **State Preservation**: The server maintains generation state for reconnections
+- **Partial Response Recovery**: Clients can request continuation from last received token
+
+### Client-Side Implementation
+
+In the Yew frontend, SSE handling is implemented with structured state management:
+
+```rust
+#[derive(Clone)]
+struct SseClient {
+    conversation_id: Uuid,
+    message_callback: Callback<SseMessage>,
+    error_callback: Callback<SseError>,
+}
+
+impl SseClient {
+    fn connect(&self) -> Result<EventSource, JsError> {
+        let event_source = EventSource::new(&format!("/api/conversations/{}/stream", self.conversation_id))?;
+
+        // Set up event handlers
+        self.setup_token_handler(&event_source);
+        self.setup_control_handler(&event_source);
+        self.setup_metadata_handler(&event_source);
+        self.setup_error_handler(&event_source);
+
+        Ok(event_source)
+    }
+
+    fn setup_token_handler(&self, es: &EventSource) {
+        // Handle incoming tokens
+    }
+
+    // Other handler methods...
+}
+```
+
+#### UI Considerations
+
+The frontend implements several UX enhancements for streaming:
+
+1. **Progressive Rendering**: Tokens are rendered incrementally with syntax highlighting
+2. **Typing Indicators**: Visual cues show when the AI is "thinking" or generating
+3. **Interrupted Response Handling**: UI properly handles and indicates incomplete responses
+
+#### Conversation Management
+
+The client maintains conversation state:
+
+```rust
+#[derive(Properties, Clone, PartialEq)]
+struct ConversationState {
+    id: Uuid,
+    messages: Vec<Message>,
+    generation_status: GenerationStatus,
+    current_model: String,
+    token_count: usize,
+}
+
+enum GenerationStatus {
+    Idle,
+    Thinking,
+    Generating,
+    Error(SseError),
+    Complete,
+}
+```
+
+### Performance Considerations
+
+The streaming implementation employs several optimizations:
+
+1. **Connection Pooling**: The server maintains a pool of database connections
+2. **Backpressure Handling**: Channel-based streaming with configurable buffer sizes
+3. **Resource Limits**: Per-client and global limits on concurrent connections
+4. **Monitoring**: Instrumented with tracing for performance analysis
+
+### Security Measures
+
+Security is ensured through:
+
+1. **Authentication**: JWT validation on connection establishment
+2. **Authorization**: Conversation ownership verification
+3. **Rate Limiting**: Per-user limits on connection frequency
+4. **Payload Validation**: Input sanitization and output escaping
+
+### Sequence Diagram
+
+The following diagram illustrates the complete streaming flow:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+    participant Model
+    participant DB
+
+    Client->>Server: POST /api/conversations
+    Server->>DB: Create conversation
+    DB-->>Server: Conversation ID
+    Server-->>Client: Conversation ID
+
+    Client->>Server: GET /api/conversations/{id}/stream
+    Server-->>Client: SSE Connection Established
+    Server-->>Client: Configuration Data
+
+    Server->>Model: Generate(prompt)
+    loop Token Generation
+        Model-->>Server: Next token
+        Server-->>Client: SSE token event
+    end
+
+    alt Generation Completes
+        Model-->>Server: Generation complete
+        Server-->>Client: SSE complete event
+        Server->>DB: Store complete response
+    else Error Occurs
+        Model-->>Server: Error
+        Server-->>Client: SSE error event
+        Server->>DB: Log error
+    end
+
+    Client->>Server: Close connection
+    Server->>Model: Cancel generation (if in progress)
+```
+
+This streaming architecture ensures efficient, real-time AI responses while maintaining reliability, scalability, and proper resource management across the entire system.
+
+## Testing and Quality Strategy
+
+The RustyGPT project implements a comprehensive testing and quality assurance strategy that emphasizes code correctness, performance, and maintainability across all components of the system. This approach ensures high reliability while supporting the rapid development cycles needed for the complex reasoning and entity management capabilities of the platform.
+
+### Core Testing Philosophy
+
+The testing strategy follows these foundational principles:
+
+1. **Complete Coverage**: All code paths must be tested, with particular attention to error handling branches
+2. **Isolation**: Tests should be independent and not affect other tests when run in parallel or sequence
+3. **Determinism**: Tests should produce consistent results regardless of environment or execution order
+4. **Performance Awareness**: Tests should include performance benchmarks where appropriate
+5. **Continuous Validation**: Integration with CI/CD ensures quality at every commit
+
+### Test Categories and Implementation
+
+#### Unit Testing
+
+Unit tests form the foundation of the testing hierarchy and focus on validating individual functions, methods, and components in isolation:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_entity_validation() {
+        // Test entity validation logic
+        let invalid_entity = Entity { /* ... */ };
+        let result = validate_entity(&invalid_entity);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Invalid entity: missing required field");
+    }
+
+    #[tokio::test]
+    async fn test_async_entity_retrieval() {
+        // Test asynchronous entity retrieval
+        let entity_id = Uuid::new_v4();
+        let entity = retrieve_entity(entity_id).await.unwrap();
+        assert_eq!(entity.id, entity_id);
+    }
+}
+```
+
+Key aspects:
+- Co-location with implementation code (`#[cfg(test)]` modules)
+- Heavy use of mocking for external dependencies
+- Separate test cases for success and error paths
+- Comprehensive boundary condition testing
+
+#### Integration Testing
+
+Integration tests validate the interaction between different components and ensure they work correctly together:
+
+```rust
+// tests/api_integration_tests.rs
+use rustygpt_api::routes::entity;
+use rustygpt_db::test_utils::setup_test_db;
+
+#[tokio::test]
+async fn test_entity_creation_flow() {
+    // Set up test database and API
+    let db = setup_test_db().await;
+    let api = rustygpt_api::create_test_api(db).await;
+
+    // Test entity creation through API
+    let response = api
+        .post("/entities")
+        .json(&json!({ "name": "Test Entity", "type": "Person" }))
+        .send()
+        .await;
+
+    assert_eq!(response.status(), 200);
+
+    // Verify entity was stored correctly
+    let entity_id = response.json::<EntityResponse>().await.unwrap().id;
+    let entity = db.get_entity(entity_id).await.unwrap();
+    assert_eq!(entity.name, "Test Entity");
+}
+```
+
+Key aspects:
+- Separate test directory with its own test harness
+- Use of test utilities for database setup and teardown
+- End-to-end workflows across multiple components
+- Test-specific configuration and environments
+
+#### Property-Based Testing
+
+Property-based testing is used to discover edge cases and unexpected behaviors by generating random valid inputs:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn entity_serialization_roundtrip(
+            name in "[a-zA-Z0-9]{1,50}",
+            entity_type in proptest::sample::select(&["Person", "Organization", "Location"]),
+            attributes in proptest::collection::vec(any::<(String, String)>(), 0..10),
+        ) {
+            let entity = Entity {
+                name: name.clone(),
+                entity_type: entity_type.to_string(),
+                attributes: attributes.clone(),
+                ..Default::default()
+            };
+
+            // Serialize and deserialize
+            let serialized = serde_json::to_string(&entity).unwrap();
+            let deserialized: Entity = serde_json::from_str(&serialized).unwrap();
+
+            // Verify properties are preserved
+            prop_assert_eq!(deserialized.name, name);
+            prop_assert_eq!(deserialized.entity_type, entity_type);
+            prop_assert_eq!(deserialized.attributes, attributes);
+        }
+    }
+}
+```
+
+Key aspects:
+- Use of the `proptest` crate for generating test cases
+- Property validation rather than specific input/output assertions
+- Automatic shrinking of counterexamples when failures occur
+- Testing of invariants that should hold for all inputs
+
+#### Fuzz Testing
+
+Fuzz testing is applied to critical components that parse or process user-provided data:
+
+```rust
+#[cfg(test)]
+mod fuzz_tests {
+    use super::*;
+    use arbitrary::Arbitrary;
+    use libfuzzer_sys::fuzz_target;
+
+    #[derive(Arbitrary, Debug)]
+    struct FuzzedEntityInput {
+        name: String,
+        entity_type: String,
+        attributes: Vec<(String, String)>,
+    }
+
+    fuzz_target!(|input: FuzzedEntityInput| {
+        // Create entity from fuzzed input with safety constraints
+        let entity = Entity {
+            name: input.name.chars().take(100).collect(),
+            entity_type: input.entity_type.chars().take(50).collect(),
+            attributes: input.attributes.into_iter()
+                .map(|(k, v)| (k.chars().take(50).collect(), v.chars().take(100).collect()))
+                .collect(),
+            ..Default::default()
+        };
+
+        // Exercise entity processing code
+        let _ = process_entity(entity);
+    });
+}
+```
+
+Key aspects:
+- Automated discovery of security and reliability issues
+- Targeted at code that processes external inputs
+- Continuous execution in CI with seed corpus maintenance
+- Coverage-guided to maximize code path exploration
+
+#### End-to-End Testing
+
+End-to-end tests validate complete user scenarios across the entire system stack:
+
+```rust
+// tests/e2e/conversation_test.rs
+#[tokio::test]
+async fn test_conversation_with_reasoning() {
+    // Start test environment with embedded server and client
+    let test_env = TestEnvironment::new().await;
+
+    // Simulate user conversation flow with reasoning
+    let conversation_id = test_env.create_conversation("Test conversation").await;
+
+    // Send message that requires reasoning
+    let response = test_env
+        .send_message(conversation_id, "How are forests and oceans related?")
+        .await;
+
+    // Validate response includes knowledge from both domains
+    assert!(response.contains("carbon cycle"));
+    assert!(response.contains("ecosystem"));
+
+    // Verify DAG reasoning nodes were properly executed
+    let reasoning_path = test_env.get_reasoning_path(conversation_id).await;
+    assert!(reasoning_path.contains("EntityIdentification"));
+    assert!(reasoning_path.contains("RelationshipTraversal"));
+}
+```
+
+Key aspects:
+- Tests the system as a user would experience it
+- Validates cross-component integration
+- Includes UI rendering tests for frontend components
+- Simulates various user scenarios and edge cases
+
+### Performance Testing
+
+Performance testing ensures the system maintains acceptable response times even under load:
+
+```rust
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use criterion::{criterion_group, criterion_main, Criterion};
+
+    fn entity_lookup_benchmark(c: &mut Criterion) {
+        let mut group = c.benchmark_group("Entity Lookup");
+
+        // Setup test data
+        let db = setup_benchmark_db();
+        let entity_ids = generate_test_entity_ids(1000);
+
+        group.bench_function("lookup_by_id", |b| {
+            b.iter(|| {
+                for id in &entity_ids {
+                    let _ = block_on(db.get_entity(*id));
+                }
+            })
+        });
+
+        group.bench_function("lookup_by_embedding", |b| {
+            b.iter(|| {
+                let embedding = generate_test_embedding();
+                let _ = block_on(db.find_similar_entities(embedding, 10));
+            })
+        });
+
+        group.finish();
+    }
+
+    criterion_group!(benches, entity_lookup_benchmark);
+    criterion_main!(benches);
+}
+```
+
+Key aspects:
+- Systematic benchmarking of critical operations
+- Performance regression detection in CI
+- Realistic data volumes and access patterns
+- Profiling integration for identifying bottlenecks
+
+### Test Infrastructure
+
+#### Mock Database
+
+A standardized mock database implementation enables consistent testing across the codebase:
+
+```rust
+// rustygpt-db/src/test_utils.rs
+pub async fn setup_test_db() -> TestDatabase {
+    let db_url = format!("postgres://postgres:postgres@localhost:5432/rustygpt_test_{}", Uuid::new_v4());
+
+    // Create test database
+    let admin_conn = PgPool::connect("postgres://postgres:postgres@localhost:5432/postgres")
+        .await
+        .expect("Failed to connect to postgres");
+
+    sqlx::query(&format!("CREATE DATABASE {}", db_url.split('/').last().unwrap()))
+        .execute(&admin_conn)
+        .await
+        .expect("Failed to create test database");
+
+    // Connect to test database
+    let pool = PgPool::connect(&db_url).await.expect("Failed to connect to test database");
+
+    // Run migrations
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
+
+    TestDatabase { pool, db_url }
+}
+```
+
+Key aspects:
+- Isolated test databases with unique names
+- Automated migration application
+- Cleanup of test resources after test completion
+- Support for both real and in-memory database options
+
+#### Test Fixtures
+
+A fixture system provides standardized test data:
+
+```rust
+// rustygpt-test/src/fixtures.rs
+pub struct FixtureBuilder {
+    entities: Vec<Entity>,
+    relationships: Vec<Relationship>,
+}
+
+impl FixtureBuilder {
+    pub fn new() -> Self {
+        Self {
+            entities: Vec::new(),
+            relationships: Vec::new(),
+        }
+    }
+
+    pub fn with_person(mut self, name: &str) -> Self {
+        let entity = Entity {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            entity_type: "Person".to_string(),
+            ..Default::default()
+        };
+        self.entities.push(entity);
+        self
+    }
+
+    // Additional builder methods
+
+    pub async fn build(self, db: &TestDatabase) -> Fixture {
+        // Insert fixtures into database
+        for entity in &self.entities {
+            db.insert_entity(entity).await.expect("Failed to insert entity");
+        }
+
+        for relationship in &self.relationships {
+            db.insert_relationship(relationship).await.expect("Failed to insert relationship");
+        }
+
+        Fixture {
+            entities: self.entities,
+            relationships: self.relationships,
+        }
+    }
+}
+```
+
+Key aspects:
+- Builder pattern for flexible test setup
+- Pre-defined common scenarios
+- Support for complex entity and relationship graphs
+- Automated cleanup in test teardown
+
+### Test Execution and CI/CD
+
+#### Local Testing
+
+Developers run tests locally with standardized commands:
+
+```sh
+# Run unit tests
+cargo test --lib
+
+# Run integration tests
+cargo test --test '*'
+
+# Run benchmarks
+cargo bench
+
+# Measure code coverage
+cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html
+```
+
+#### Continuous Integration
+
+Tests are automatically run in CI with every pull request:
+
+```yaml
+# .github/workflows/test.yml
+name: Test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --workspace
+      - uses: actions-rs/cargo@v1
+        with:
+          command: llvm-cov
+          args: --workspace --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@v3
+        with:
+          files: lcov.info
+```
+
+### Quality Metrics and Monitoring
+
+#### Code Coverage
+
+The project maintains a minimum of 90% code coverage with an aspirational goal of 100%:
+
+```mermaid
+classDiagram
+    class CodeCoverage {
+        +Total: 93%
+        +rustygpt-api: 95%
+        +rustygpt-db: 91%
+        +rustygpt-dag: 89%
+        +rustygpt-shared: 97%
+    }
+```
+
+#### Static Analysis
+
+Static analysis tools run on all code to ensure quality:
+
+- **Clippy**: Enforces idiomatic Rust code with zero warnings
+- **Rustfmt**: Ensures consistent code formatting
+- **Rust Analyzer**: IDE integration for immediate feedback
+- **Cargo Deny**: Checks for dependency security and licensing issues
+
+#### Documentation Testing
+
+All code examples in documentation are executed as tests to ensure they stay current:
+
+```rust
+/// Creates a new entity with the given name and type.
+///
+/// # Examples
+///
+/// ```
+/// use rustygpt_dag::entity::{Entity, create_entity};
+///
+/// let entity = create_entity("John Doe", "Person").unwrap();
+/// assert_eq!(entity.name, "John Doe");
+/// assert_eq!(entity.entity_type, "Person");
+/// ```
+pub fn create_entity(name: &str, entity_type: &str) -> Result<Entity, EntityError> {
+    // Implementation
+}
+```
+
+### Future Test Strategy Enhancements
+
+1. **Chaos Testing**: Introduce controlled failures to validate system resilience
+2. **User Behavior Testing**: Analyze real user patterns to inform test scenarios
+3. **AI-Assisted Test Generation**: Use LLMs to generate test cases for complex logic
+4. **Compliance Test Suite**: Validate data privacy and security requirements
+5. **Cross-Platform Testing**: Ensure compatibility across all supported platforms
+
+The comprehensive testing and quality strategy ensures that RustyGPT maintains high reliability and performance while enabling rapid innovation. By combining diverse testing approaches with robust automation, the system can evolve while maintaining its core promises of correctness and efficiency.
