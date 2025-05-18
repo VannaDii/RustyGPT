@@ -1,0 +1,294 @@
+{
+  "title": "Rust WASM on iOS",
+  "create_time": 1741836832.818747,
+  "update_time": 1741836986.97083,
+  "mapping": {
+    "eaa1d692-a2b4-4635-add2-927ec5ff2553": {
+      "id": "eaa1d692-a2b4-4635-add2-927ec5ff2553",
+      "message": null,
+      "parent": null,
+      "children": [
+        "3375559e-2735-4727-b8ab-a3f311fa893d"
+      ]
+    },
+    "3375559e-2735-4727-b8ab-a3f311fa893d": {
+      "id": "3375559e-2735-4727-b8ab-a3f311fa893d",
+      "message": {
+        "id": "3375559e-2735-4727-b8ab-a3f311fa893d",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "eaa1d692-a2b4-4635-add2-927ec5ff2553",
+      "children": [
+        "140573cd-1be3-459b-87e0-8ab26a944900"
+      ]
+    },
+    "140573cd-1be3-459b-87e0-8ab26a944900": {
+      "id": "140573cd-1be3-459b-87e0-8ab26a944900",
+      "message": {
+        "id": "140573cd-1be3-459b-87e0-8ab26a944900",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741836832.8184092,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "3375559e-2735-4727-b8ab-a3f311fa893d",
+      "children": [
+        "e6e81967-f7dc-4f82-b051-76dba44bae9c"
+      ]
+    },
+    "e6e81967-f7dc-4f82-b051-76dba44bae9c": {
+      "id": "e6e81967-f7dc-4f82-b051-76dba44bae9c",
+      "message": {
+        "id": "e6e81967-f7dc-4f82-b051-76dba44bae9c",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741836832.10576,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Can rust WASM be compiled for iOS and other mobile devices? What about tvOS?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "91f878e9982d9b72-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "140573cd-1be3-459b-87e0-8ab26a944900",
+      "children": [
+        "4ca7b664-09f0-4a81-929e-ec6b595ac786"
+      ]
+    },
+    "4ca7b664-09f0-4a81-929e-ec6b595ac786": {
+      "id": "4ca7b664-09f0-4a81-929e-ec6b595ac786",
+      "message": {
+        "id": "4ca7b664-09f0-4a81-929e-ec6b595ac786",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741836844.966582,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "e6e81967-f7dc-4f82-b051-76dba44bae9c",
+          "request_id": "91f878e9982d9b72-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "e6e81967-f7dc-4f82-b051-76dba44bae9c",
+      "children": [
+        "f965ca93-9fde-4df7-905b-d5c73efc4ca8"
+      ]
+    },
+    "f965ca93-9fde-4df7-905b-d5c73efc4ca8": {
+      "id": "f965ca93-9fde-4df7-905b-d5c73efc4ca8",
+      "message": {
+        "id": "f965ca93-9fde-4df7-905b-d5c73efc4ca8",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741836833.011112,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Yes, Rust’s WebAssembly (WASM) can be compiled for iOS and other mobile devices, but with caveats.\n\n### iOS and Android:\n- **Direct WASM Execution:** iOS and Android do not support running WASM natively outside of a web browser. However, you can:\n  - Run WASM inside a **WebView** (e.g., Safari’s WKWebView on iOS or Chrome WebView on Android).\n  - Use WebAssembly runtimes like [Wasmer](https://wasmer.io/) or [Wasmtime](https://wasmtime.dev/) inside a native mobile app.\n  - Leverage Rust’s **Rust-to-native (via `cargo build --target`)** for direct compilation to ARM (avoiding WASM entirely).\n\n- **Rust-to-Native as an Alternative:** Instead of WASM, compiling Rust directly to `aarch64-apple-ios` (iOS) or `aarch64-linux-android` (Android) is preferred for mobile apps, especially when performance and system APIs are required.\n\n### tvOS (Apple TV):\n- **No Native WASM Execution:** tvOS, like iOS, does not allow WASM to run outside a browser.\n- **Possible Workarounds:**\n  - Embed WASM in a WebView-based tvOS app.\n  - Use Rust compiled to `aarch64-apple-tvos` to build native code instead.\n\n### Summary:\n- **WASM for web-based apps** → Works via WebView on iOS/tvOS/Android.\n- **WASM for native apps** → Needs a runtime like Wasmer/Wasmtime.\n- **Rust as a native alternative** → Best for mobile/tvOS via `cargo build --target aarch64-*`.\n\nIf your goal is to build a Rust-based mobile or tvOS app, native Rust (rather than WASM) is usually the better approach."
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "4ca7b664-09f0-4a81-929e-ec6b595ac786",
+          "request_id": "91f878e9982d9b72-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "4ca7b664-09f0-4a81-929e-ec6b595ac786",
+      "children": [
+        "06bd5eef-8d92-448d-aec9-47de41f83f0a"
+      ]
+    },
+    "06bd5eef-8d92-448d-aec9-47de41f83f0a": {
+      "id": "06bd5eef-8d92-448d-aec9-47de41f83f0a",
+      "message": {
+        "id": "06bd5eef-8d92-448d-aec9-47de41f83f0a",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741836947.968339,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "How does rust-to-native handle the yew framework? What frameworks can support WASM and compiling to native?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "91f87bbd59ed8392-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "f965ca93-9fde-4df7-905b-d5c73efc4ca8",
+      "children": [
+        "ed53c5ef-155d-4185-8df0-34310c1754de"
+      ]
+    },
+    "ed53c5ef-155d-4185-8df0-34310c1754de": {
+      "id": "ed53c5ef-155d-4185-8df0-34310c1754de",
+      "message": {
+        "id": "ed53c5ef-155d-4185-8df0-34310c1754de",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741836949.244649,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Rust-to-native compilation **does not** support the Yew framework because Yew is designed specifically for WebAssembly (WASM) and relies on JavaScript interop and web-based technologies (like the DOM and Web APIs). If you need a Rust framework that supports both **WASM** and **native** targets, you’ll need to look at alternatives.\n\n## **Handling Yew in Native Compilation**\nYew is tightly coupled with `wasm32-unknown-unknown` and uses `web_sys` and `wasm-bindgen`, which don’t work outside the browser. **If you need native support, you must use a different UI framework**.\n\n---\n\n## **Rust Frameworks That Support Both WASM and Native Compilation**\nFor building apps that can run on **both** WebAssembly and native platforms, consider these Rust frameworks:\n\n### **1. Leptos** (WASM + Server-Side Rendering)\n- **Web:** WASM via `wasm32-unknown-unknown`\n- **Server-side rendering (SSR):** Runs as a native Rust backend.\n- **Mobile Support:** Not natively, but could be wrapped with something like Tauri.\n\n### **2. Dioxus** (Best Yew Alternative for Native + WASM)\n- **Web:** Compiles to WASM.\n- **Native:** Compiles to a native target using `dioxus-desktop` (built on wry/tao, similar to Tauri).\n- **Mobile:** Can compile to iOS/Android via `dioxus-native` (experimental).\n- **Strengths:** Like Yew, but with native + WASM support.\n\n### **3. Tauri (for Web + Desktop)**\n- **Web:** Integrates with frontend frameworks like Yew, Leptos, or Dioxus.\n- **Native:** Wraps a Rust backend with a WebView, making it cross-platform.\n- **Mobile:** Experimental mobile support for iOS/Android.\n\n### **4. Iced (for GUI Apps, No Web)**\n- **Web:** **No WASM support.**\n- **Native:** Good for cross-platform native UIs (macOS, Windows, Linux).\n- **Mobile:** Works with `aarch64-apple-ios` and `aarch64-linux-android`.\n\n---\n\n## **Best Choice Based on Use Case**\n| **Use Case**          | **Framework**       | **Notes** |\n|-----------------------|--------------------|----------|\n| **WebAssembly (Yew-style UI)** | Yew, Leptos, Dioxus | Yew = WASM-only, Dioxus/Leptos = both SSR/WASM |\n| **Cross-platform Web + Desktop** | Dioxus + Tauri | Tauri is best for Rust apps with a web frontend |\n| **Cross-platform Native + Web** | Dioxus | Can do both, though mobile is experimental |\n| **Native Desktop UI (not WASM)** | Iced | If you don't need a web version |\n| **Native Mobile App (iOS/Android)** | Dioxus-native, Iced | No good WASM-native hybrid exists yet |\n\n---\n\n## **Final Thoughts**\nIf you want **both** WASM **and** native apps, **Dioxus** is the best alternative to Yew. If you want **WASM-only**, stick with Yew. If you need **native UI**, use **Iced** or Tauri (wrapped around a web frontend)."
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "06bd5eef-8d92-448d-aec9-47de41f83f0a",
+          "request_id": "91f87bbd59ed8392-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "06bd5eef-8d92-448d-aec9-47de41f83f0a",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "ed53c5ef-155d-4185-8df0-34310c1754de",
+  "plugin_ids": null,
+  "conversation_id": "67d25220-5204-800e-a6bc-2aa407cbe0e7",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [
+    "https://wasmer.io/",
+    "https://wasmtime.dev/"
+  ],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "67d25220-5204-800e-a6bc-2aa407cbe0e7"
+}

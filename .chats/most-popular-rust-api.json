@@ -1,0 +1,694 @@
+{
+  "title": "Most Popular Rust API",
+  "create_time": 1741459663.925447,
+  "update_time": 1741471885.316483,
+  "mapping": {
+    "62953bff-5722-41b7-b5a2-0700ab8a6750": {
+      "id": "62953bff-5722-41b7-b5a2-0700ab8a6750",
+      "message": null,
+      "parent": null,
+      "children": [
+        "9a89c9d3-b829-4a07-9ea5-2c0581513287"
+      ]
+    },
+    "9a89c9d3-b829-4a07-9ea5-2c0581513287": {
+      "id": "9a89c9d3-b829-4a07-9ea5-2c0581513287",
+      "message": {
+        "id": "9a89c9d3-b829-4a07-9ea5-2c0581513287",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "62953bff-5722-41b7-b5a2-0700ab8a6750",
+      "children": [
+        "10002bb2-4cc0-45c9-a19c-86f2ec539e17"
+      ]
+    },
+    "10002bb2-4cc0-45c9-a19c-86f2ec539e17": {
+      "id": "10002bb2-4cc0-45c9-a19c-86f2ec539e17",
+      "message": {
+        "id": "10002bb2-4cc0-45c9-a19c-86f2ec539e17",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741459663.9250379,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "9a89c9d3-b829-4a07-9ea5-2c0581513287",
+      "children": [
+        "baddc3d6-3676-4e7f-ba54-6f76a7763e08"
+      ]
+    },
+    "baddc3d6-3676-4e7f-ba54-6f76a7763e08": {
+      "id": "baddc3d6-3676-4e7f-ba54-6f76a7763e08",
+      "message": {
+        "id": "baddc3d6-3676-4e7f-ba54-6f76a7763e08",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741459663.333631,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Which backend REST API framework is most popular in business and open source projects?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "91d480b099837684-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "10002bb2-4cc0-45c9-a19c-86f2ec539e17",
+      "children": [
+        "8e521a4b-4504-4a0c-b381-a8e3408d1b47"
+      ]
+    },
+    "8e521a4b-4504-4a0c-b381-a8e3408d1b47": {
+      "id": "8e521a4b-4504-4a0c-b381-a8e3408d1b47",
+      "message": {
+        "id": "8e521a4b-4504-4a0c-b381-a8e3408d1b47",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741459676.025579,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "baddc3d6-3676-4e7f-ba54-6f76a7763e08",
+          "request_id": "91d480b099837684-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "baddc3d6-3676-4e7f-ba54-6f76a7763e08",
+      "children": [
+        "101bf47a-f132-4cab-ac4e-225b1e172cc5"
+      ]
+    },
+    "101bf47a-f132-4cab-ac4e-225b1e172cc5": {
+      "id": "101bf47a-f132-4cab-ac4e-225b1e172cc5",
+      "message": {
+        "id": "101bf47a-f132-4cab-ac4e-225b1e172cc5",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741459664.059084,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "The most popular backend REST API frameworks in Rust for business and open-source projects are **Axum** and **Actix Web**. Here's how they compare:\n\n### **1. Axum** (Most Recommended)\n- **Backed by**: Tokio, the async runtime that dominates Rust's async ecosystem.\n- **Popularity**: Rapidly growing and widely adopted in production.\n- **Advantages**:\n  - Strong integration with **tower** middleware (observability, authentication, rate limiting, etc.).\n  - Best async performance with Tokio-based services.\n  - Simple, declarative API with a focus on ergonomics.\n  - First-class support for extractors, state management, and WebSockets.\n  - Easier to use than Actix Web while maintaining great performance.\n- **Use Case**: Best choice for long-term projects due to ecosystem stability and maintainability.\n\n### **2. Actix Web** (Still Fast, but Controversial)\n- **Backed by**: Actix actor framework.\n- **Popularity**: Previously the most popular, but Axum is overtaking it.\n- **Advantages**:\n  - Historically the **fastest** Rust web framework (but by a narrow margin).\n  - Uses an actor model for handling requests, which can be powerful in specific cases.\n  - Feature-rich, with built-in support for middleware, templates, and state.\n- **Concerns**:\n  - **Community & Maintenance**: The project has had stability issues in the past due to maintainer conflicts.\n  - **Complexity**: More difficult to work with than Axum for many applications.\n- **Use Case**: Good for performance-focused applications but less ergonomic than Axum.\n\n### **Honorable Mentions**\n- **Warp**: Great for functional programming and composability but less widely used than Axum.\n- **Rocket**: Very ergonomic but lacks full async support and isn't as scalable.\n\n### **Conclusion**\nFor **business and open-source projects**, **Axum is the best choice** because of its strong community, modern async support, and maintainability. **Actix Web** is still a viable alternative if you need extreme performance and are comfortable with its ecosystem."
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "8e521a4b-4504-4a0c-b381-a8e3408d1b47",
+          "request_id": "91d480b099837684-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "8e521a4b-4504-4a0c-b381-a8e3408d1b47",
+      "children": [
+        "55735d48-1012-425b-b1e1-7851cba45766"
+      ]
+    },
+    "55735d48-1012-425b-b1e1-7851cba45766": {
+      "id": "55735d48-1012-425b-b1e1-7851cba45766",
+      "message": {
+        "id": "55735d48-1012-425b-b1e1-7851cba45766",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741465633.4632769,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "rebase_system_message": true,
+          "timestamp_": "absolute",
+          "message_type": null,
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "101bf47a-f132-4cab-ac4e-225b1e172cc5",
+      "children": [
+        "a8b42bd5-7714-4ac9-a0fa-e60c30840ab2"
+      ]
+    },
+    "a8b42bd5-7714-4ac9-a0fa-e60c30840ab2": {
+      "id": "a8b42bd5-7714-4ac9-a0fa-e60c30840ab2",
+      "message": {
+        "id": "a8b42bd5-7714-4ac9-a0fa-e60c30840ab2",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741465632.453654,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "What about (de)serialization and payload validation like `io-ts` `PathDecoder` and `withMessage`, also OpenAPI Spec creation at compile time?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "91d5126e497cdf19-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "55735d48-1012-425b-b1e1-7851cba45766",
+      "children": [
+        "f37228c5-5eec-4b6d-88dd-21315c7cd6f2"
+      ]
+    },
+    "f37228c5-5eec-4b6d-88dd-21315c7cd6f2": {
+      "id": "f37228c5-5eec-4b6d-88dd-21315c7cd6f2",
+      "message": {
+        "id": "f37228c5-5eec-4b6d-88dd-21315c7cd6f2",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741465645.561351,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "rebase_system_message": true,
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "a8b42bd5-7714-4ac9-a0fa-e60c30840ab2",
+          "request_id": "91d5126e497cdf19-SEA",
+          "timestamp_": "absolute",
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a8b42bd5-7714-4ac9-a0fa-e60c30840ab2",
+      "children": [
+        "f115d481-672c-4716-867c-25836d93b9b8"
+      ]
+    },
+    "f115d481-672c-4716-867c-25836d93b9b8": {
+      "id": "f115d481-672c-4716-867c-25836d93b9b8",
+      "message": {
+        "id": "f115d481-672c-4716-867c-25836d93b9b8",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741465633.632851,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "For (de)serialization, payload validation, and OpenAPI Spec generation at **compile-time** in Rust, here are the best tools that compare to **`io-ts`, `PathDecoder`, and `withMessage` in TypeScript**:\n\n---\n\n## **1. (De)Serialization – `serde`**\nRust’s standard way to handle (de)serialization is **[`serde`](https://crates.io/crates/serde)**, which provides:\n- **High-performance (de)serialization** via `serde_json`, `serde_yaml`, `bincode`, etc.\n- **Custom validation rules** using `serde` attributes.\n- **Struct-based validation** via `serde`'s derive macros.\n\n### **Example**\n```rust\nuse serde::{Deserialize, Serialize};\n\n#[derive(Serialize, Deserialize, Debug)]\nstruct User {\n    name: String,\n    age: u8,\n}\n```\nThis is similar to **`io-ts` runtime type validation**, but it doesn't enforce validation directly.\n\n---\n\n## **2. Payload Validation – `validator` + `utoipa` (for OpenAPI)**\nTo enforce runtime validation like `io-ts` **`PathDecoder`** and **`withMessage`**, use [`validator`](https://crates.io/crates/validator) with **Axum extractors**.\n\n### **Example: Validation Like `io-ts`**\n```rust\nuse serde::Deserialize;\nuse validator::Validate;\n\n#[derive(Debug, Validate, Deserialize)]\nstruct NewUser {\n    #[validate(length(min = 3, message = \"Name must be at least 3 characters\"))]\n    name: String,\n\n    #[validate(range(min = 18, message = \"Age must be at least 18\"))]\n    age: u8,\n}\n```\n- This ensures requests fail **before hitting business logic**.\n- Works similarly to **`withMessage` in io-ts**.\n\n### **Integration with Axum**\n```rust\nuse axum::{extract::Json, response::IntoResponse, Router};\nuse validator::Validate;\n\nasync fn create_user(Json(payload): Json<NewUser>) -> impl IntoResponse {\n    if let Err(errors) = payload.validate() {\n        return (axum::http::StatusCode::BAD_REQUEST, format!(\"{:?}\", errors)).into_response();\n    }\n    \"User created\".into_response()\n}\n```\nThis is how **Axum + validator** replaces `io-ts`.\n\n---\n\n## **3. OpenAPI Spec Generation at Compile-Time – `utoipa`**\n[`utoipa`](https://crates.io/crates/utoipa) is the best choice for **compile-time** OpenAPI (Swagger) generation, similar to `tsoa` in TypeScript.\n\n### **Example**\n```rust\nuse serde::{Deserialize, Serialize};\nuse utoipa::ToSchema;\n\n#[derive(Serialize, Deserialize, ToSchema)]\nstruct User {\n    name: String,\n    age: u8,\n}\n\n#[utoipa::path(\n    post,\n    path = \"/users\",\n    request_body = User,\n    responses(\n        (status = 200, description = \"User created successfully\")\n    )\n)]\nasync fn create_user(Json(payload): Json<User>) {}\n```\n- This generates OpenAPI **without runtime overhead**.\n- Works great with **Swagger UI**.\n\n---\n\n## **Final Comparison**\n| Feature                     | Rust Equivalent                      | TypeScript Equivalent |\n|-----------------------------|--------------------------------------|-----------------------|\n| **(De)Serialization**       | `serde` + `serde_json`               | `io-ts` |\n| **Validation**              | `validator`                          | `PathDecoder`, `withMessage` |\n| **Validation in HTTP Layer**| `axum::extract::Json` + `validator` | `express-validator` |\n| **OpenAPI Spec (Compile-Time)** | `utoipa` + `utoipa-swagger-ui` | `tsoa` |\n\n---\n\n## **Best Stack for Axum**\nIf you're building a **Rust REST API** with OpenAPI support and strong validation:\n- ✅ **Axum** (framework)\n- ✅ **serde** (serialization)\n- ✅ **validator** (validation)\n- ✅ **utoipa** (OpenAPI at compile-time)\n- ✅ **tower middleware** (rate limiting, logging, etc.)\n\nThis setup achieves what TypeScript's **io-ts + PathDecoder + tsoa** does, but in a fully **compiled, type-safe Rust ecosystem**. 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "f37228c5-5eec-4b6d-88dd-21315c7cd6f2",
+          "request_id": "91d5126e497cdf19-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "f37228c5-5eec-4b6d-88dd-21315c7cd6f2",
+      "children": [
+        "1813dfe0-e6d0-48b5-b130-b77c01001719"
+      ]
+    },
+    "1813dfe0-e6d0-48b5-b130-b77c01001719": {
+      "id": "1813dfe0-e6d0-48b5-b130-b77c01001719",
+      "message": {
+        "id": "1813dfe0-e6d0-48b5-b130-b77c01001719",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {
+            "real_author": "tool:app-pairing"
+          }
+        },
+        "create_time": 1741471737.680715,
+        "update_time": null,
+        "content": {
+          "content_type": "app_pairing_content",
+          "workspaces": [
+            {
+              "id": "11457",
+              "app_id": "com.apple.Terminal",
+              "app_name": "Terminal",
+              "title": "vanna@Vannas-MacBook-Pro",
+              "content_type": "window"
+            }
+          ],
+          "context_parts": [
+            {
+              "workspace_id": "11457",
+              "text": "<truncated__content/>  Downloaded libssh2-sys v0.3.1\n  Downloaded libz-sys v1.1.21\n  Downloaded libgit2-sys v0.18.0+1.9.0\n  Downloaded 39 crates (5.9 MB) in 0.91s (largest was `libgit2-sys` at 1.9 MB)\n   Compiling proc-macro2 v1.0.94\n   Compiling unicode-ident v1.0.18\n   Compiling libc v0.2.170\n   Compiling serde v1.0.218\n   Compiling autocfg v1.4.0\n   Compiling memchr v2.7.4\n   Compiling cfg-if v1.0.0\n   Compiling stable_deref_trait v1.2.0\n   Compiling shlex v1.3.0\n   Compiling pin-project-lite v0.2.16\n   Compiling core-foundation-sys v0.8.7\n   Compiling pkg-config v0.3.32\n   Compiling once_cell v1.20.3\n   Compiling bytes v1.10.1\n   Compiling vcpkg v0.2.15\n   Compiling litemap v0.7.5\n   Compiling itoa v1.0.15\n   Compiling smallvec v1.14.0\n   Compiling writeable v0.5.5\n   Compiling slab v0.4.9\n   Compiling bitflags v2.9.0\n   Compiling futures-core v0.3.31\n   Compiling futures-sink v0.3.31\n   Compiling icu_locid_transform_data v1.5.0\n   Compiling tracing-core v0.1.33\n   Compiling futures-io v0.3.31\n   Compiling quote v1.0.39\n   Compiling semver v1.0.26\n   Compiling fnv v1.0.7\n   Compiling rustix v1.0.1\n   Compiling pin-utils v0.1.0\n   Compiling syn v2.0.99\n   Compiling futures-task v0.3.31\n   Compiling icu_properties_data v1.5.0\n   Compiling getrandom v0.3.1\n   Compiling futures-util v0.3.31\n   Compiling http v1.2.0\n   Compiling crc32fast v1.4.2\n   Compiling utf16_iter v1.0.5\n   Compiling socket2 v0.5.8\n   Compiling mio v1.0.3\n   Compiling jobserver v0.1.32\n   Compiling core-foundation v0.9.4\n   Compiling errno v0.3.10\n   Compiling cc v1.2.16\n   Compiling utf8_iter v1.0.4\n   Compiling icu_normalizer_data v1.5.0\n   Compiling tokio v1.44.0\n   Compiling write16 v1.0.0\n   Compiling httparse v1.10.1\n   Compiling http-body v1.0.1\n   Compiling security-framework-sys v2.14.0\n   Compiling percent-encoding v2.3.1\n   Compiling fastrand v2.3.0\n   Compiling try-lock v0.2.5\n   Compiling native-tls v0.2.14\n   Compiling want v0.3.1\n   Compiling form_urlencoded v1.2.1\n   Compiling security-framework v2.11.1\n   Compiling futures-channel v0.3.31\n   Compiling log v0.4.26\n   Compiling serde_json v1.0.140\n   Compiling system-configuration-sys v0.6.0\n   Compiling tempfile v3.18.0\n   Compiling unicase v2.8.1\n   Compiling ryu v1.0.20\n   Compiling tower-service v0.3.3\n   Compiling adler2 v2.0.0\n   Compiling libz-sys v1.1.21\n   Compiling openssl-sys v0.9.106\n   Compiling libssh2-sys v0.3.1\n   Compiling miniz_oxide v0.8.5\n   Compiling mime_guess v2.0.5\n   Compiling num-traits v0.2.19\n   Compiling utf8parse v0.2.2\n   Compiling equivalent v1.0.2\n   Compiling hashbrown v0.15.2\n   Compiling thiserror v2.0.12\n   Compiling synstructure v0.13.1\n   Compiling anstyle-parse v0.2.6\n   Compiling indexmap v2.7.1\n   Compiling flate2 v1.1.0\n   Compiling http-body-util v0.1.2\n   Compiling libgit2-sys v0.18.0+1.9.0\n   Compiling sync_wrapper v1.0.2\n   Compiling indexmap v1.8.2\n   Compiling aho-corasick v1.1.3\n   Compiling colorchoice v1.0.3\n   Compiling tower-layer v0.3.3\n   Compiling thiserror v1.0.69\n   Compiling regex-syntax v0.6.29\n   Compiling hyper v1.6.0\n   Compiling tokio-native-tls v0.3.1\n   Compiling regex-syntax v0.8.5\n   Compiling static_assertions v1.1.0\n   Compiling anyhow v1.0.97\n   Compiling anstyle-query v1.1.2\n   Compiling rustls-pki-types v1.11.0\n   Compiling mime v0.3.17\n   Compiling anstyle v1.0.10\n   Compiling serde_derive v1.0.218\n   Compiling zerofrom-derive v0.1.6\n   Compiling yoke-derive v0.7.5\n   Compiling zerovec-derive v0.10.3\n   Compiling displaydoc v0.2.5\n   Compiling zerofrom v0.1.6\n   Compiling icu_provider_macros v1.5.0\n   Compiling yoke v0.7.5\n   Compiling zerovec v0.10.4\n   Compiling tracing-attributes v0.1.28\n   Compiling thiserror-impl v2.0.12\n   Compiling tinystr v0.7.6\n   Compiling icu_locid v1.5.0\n   Compiling icu_collections v1.5.0\n   Compiling tracing v0.1.41\n   Compiling hyper-util v0.1.10\n   Compiling icu_provider v1.5.0\n   Compiling icu_locid_transform v1.5.0\n   Compiling camino v1.1.9\n   Compiling icu_properties v1.5.1\n   Compiling is_terminal_polyfill v1.70.1\n   Compiling anstream v0.6.18\n   Compiling rustc_version v0.4.1\n   Compiling toml_datetime v0.6.8\n   Compiling serde_spanned v0.6.8\n   Compiling serde_urlencoded v0.7.1\n   Compiling hyper-tls v0.6.0\n   Compiling regex-automata v0.4.9\n   Compiling regex-automata v0.1.10\n   Compiling thiserror-impl v1.0.69\n   Compiling icu_normalizer v1.5.0\n   Compiling idna_adapter v1.2.0\n   Compiling idna v1.0.3\n   Compiling rustls-pemfile v2.2.0\n   Compiling twox-hash v1.6.3\n   Compiling tower v0.5.2\n   Compiling url v2.5.4\n   Compiling system-configuration v0.6.1\n   Compiling gzip-header v1.0.0\n   Compiling iana-time-zone v0.1.61\n   Compiling minimal-lexical v0.2.1\n   Compiling lazy_static v1.5.0\n   Compiling llvm_profparser v0.7.1\n   Compiling heck v0.5.0\n   Compiling strsim v0.11.1\n   Compiling md5 v0.7.0\n   Compiling winnow v0.7.3\n   Compiling overload v0.1.1\n   Compiling object v0.36.7\n   Compiling adler32 v1.2.0\n   Compiling clap_lex v0.7.4\n   Compiling base64 v0.22.1\n   Compiling hashbrown v0.11.2\n   Compiling ipnet v2.11.0\n   Compiling clap_builder v4.5.31\n   Compiling reqwest v0.12.12\n   Compiling deflate v1.0.0\n   Compiling nu-ansi-term v0.46.0\n   Compiling clap_derive v4.5.28\n   Compiling toml_edit v0.22.24\n   Compiling nom v7.1.3\n   Compiling chrono v0.4.40\n   Compiling sharded-slab v0.1.7\n   Compiling regex v1.11.1\n   Compiling ruzstd v0.7.3\n   Compiling matchers v0.1.0\n   Compiling cargo-tarpaulin v0.32.2\n   Compiling cargo-platform v0.1.9\n   Compiling object v0.26.2\n   Compiling tracing-log v0.2.0\n   Compiling thread_local v1.1.8\n   Compiling humantime v2.1.0\n   Compiling leb128 v0.2.5\n   Compiling same-file v1.0.6\n   Compiling rustc-hash v1.1.0\n   Compiling fallible-iterator v0.3.0\n   Compiling walkdir v2.5.0\n   Compiling humantime-serde v1.1.1\n   Compiling tracing-subscriber v0.3.19\n   Compiling cargo_metadata v0.19.2\n   Compiling gimli v0.31.1\n   Compiling toml v0.8.20\n   Compiling clap v4.5.31\n   Compiling coveralls-api v0.7.0\n   Compiling num_cpus v1.16.0\n   Compiling quick-xml v0.37.2\n   Compiling glob v0.3.2\n   Compiling rustc-demangle v0.1.24\n   Compiling git2 v0.20.0\n    Finished `release` profile [optimized] target(s) in 39.21s\n  Installing /Users/vanna/.cargo/bin/cargo-tarpaulin\n   Installed package `cargo-tarpaulin v0.32.2` (executable `cargo-tarpaulin`)\n\n    ~/source/rusty_gpt ······················································································ 39s   sre-eks-non-prod ⎈  13:18:08  \n❯ <user__selection></user__selection>\n",
+              "textfield_id": "0",
+              "path": "vanna@Vannas-MacBook-Pro",
+              "path_hash": "e9a784ba77d2fe93745f6e3c390804e93c86a72f570a7ce0448933c45dbbeda3",
+              "annotations": null,
+              "content_type": "text",
+              "truncated_head_lines": 371,
+              "truncated_tail_lines": 0,
+              "supports_editing": false
+            }
+          ],
+          "custom_instructions": ""
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "exclusive_key": "app-pairing-whisper",
+          "app_pairing": {
+            "type": "context",
+            "shared_workspaces": [
+              {
+                "text_fields": [
+                  {
+                    "id": "0",
+                    "name": "vanna@Vannas-MacBook-Pro",
+                    "truncated_head_lines": 371,
+                    "truncated_tail_lines": 0
+                  }
+                ],
+                "app_id": "com.apple.Terminal",
+                "id": "11457",
+                "title": "vanna@Vannas-MacBook-Pro",
+                "app_name": "Terminal"
+              }
+            ],
+            "total_context_length": 6482
+          },
+          "is_visually_hidden_from_conversation": true,
+          "request_id": "91d5a77c491dba3a-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "f115d481-672c-4716-867c-25836d93b9b8",
+      "children": [
+        "367b733a-ffbd-4a69-9ea9-f5e95f21831e"
+      ]
+    },
+    "367b733a-ffbd-4a69-9ea9-f5e95f21831e": {
+      "id": "367b733a-ffbd-4a69-9ea9-f5e95f21831e",
+      "message": {
+        "id": "367b733a-ffbd-4a69-9ea9-f5e95f21831e",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741471737.683228,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "This is what I have for our main backend entry point. I think this is not the best solution and we should split the route and handler into a different file, perhaps `handlers/conversation.rs` and then bring that into a loader of sorts that can register the handler to the route.\n\n```rs\nuse axum::{Json, Router, routing::get, serve};\nuse chrono::Utc;\nuse shared::models::{Conversation, Message, Timestamp};\nuse tokio::net::TcpListener;\nuse uuid::Uuid;\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new().route(\"/api/conversations\", get(get_conversations));\n\n    let listener = TcpListener::bind(\"0.0.0.0:8080\").await.unwrap();\n    serve(listener, app).await.unwrap();\n}\n\nasync fn get_conversations() -> Json<Vec<Conversation>> {\n    let mock_conversations = vec![Conversation {\n        id: Uuid::new_v4(),\n        title: \"Sample Chat\".into(),\n        participant_ids: vec![Uuid::new_v4()],\n        messages: vec![Message {\n            id: Uuid::new_v4(),\n            sender_id: Uuid::new_v4(),\n            conversation_id: Uuid::new_v4(),\n            content: \"Hello, world!\".into(),\n            timestamp: Timestamp(Utc::now()),\n        }],\n        last_updated: Timestamp(Utc::now()),\n    }];\n    Json(mock_conversations)\n}\n```"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ]
+          },
+          "request_id": "91d5a77c491dba3a-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "1813dfe0-e6d0-48b5-b130-b77c01001719",
+      "children": [
+        "e744d5c1-9eba-4415-a044-f19536fe3ea3"
+      ]
+    },
+    "e744d5c1-9eba-4415-a044-f19536fe3ea3": {
+      "id": "e744d5c1-9eba-4415-a044-f19536fe3ea3",
+      "message": {
+        "id": "e744d5c1-9eba-4415-a044-f19536fe3ea3",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741471750.956381,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "rebase_system_message": true,
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "367b733a-ffbd-4a69-9ea9-f5e95f21831e",
+          "request_id": "91d5a77c491dba3a-SEA",
+          "timestamp_": "absolute",
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "367b733a-ffbd-4a69-9ea9-f5e95f21831e",
+      "children": [
+        "4803192b-2a29-4811-9980-b0a2c2fe3e1f"
+      ]
+    },
+    "4803192b-2a29-4811-9980-b0a2c2fe3e1f": {
+      "id": "4803192b-2a29-4811-9980-b0a2c2fe3e1f",
+      "message": {
+        "id": "4803192b-2a29-4811-9980-b0a2c2fe3e1f",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741471739.006469,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "You're absolutely right—it's best to split the route handler into a separate module and use a **router loader** to keep `main.rs` clean. Here's how to structure it more cleanly:\n\n---\n\n### **1. Project Structure**\n```\nsrc/\n├── handlers/\n│   ├── conversation.rs\n├── routes.rs\n├── main.rs\n```\n\n---\n\n### **2. Move the Handler to `handlers/conversation.rs`**\n```rust\nuse axum::{Json, routing::get, Router};\nuse chrono::Utc;\nuse shared::models::{Conversation, Message, Timestamp};\nuse uuid::Uuid;\n\npub async fn get_conversations() -> Json<Vec<Conversation>> {\n    let mock_conversations = vec![Conversation {\n        id: Uuid::new_v4(),\n        title: \"Sample Chat\".into(),\n        participant_ids: vec![Uuid::new_v4()],\n        messages: vec![Message {\n            id: Uuid::new_v4(),\n            sender_id: Uuid::new_v4(),\n            conversation_id: Uuid::new_v4(),\n            content: \"Hello, world!\".into(),\n            timestamp: Timestamp(Utc::now()),\n        }],\n        last_updated: Timestamp(Utc::now()),\n    }];\n    Json(mock_conversations)\n}\n\n// Function to register the conversation routes\npub fn conversation_routes() -> Router {\n    Router::new().route(\"/api/conversations\", get(get_conversations))\n}\n```\n\n---\n\n### **3. Create `routes.rs` to Load All Route Modules**\n```rust\nuse axum::Router;\nuse crate::handlers::conversation::conversation_routes;\n\npub fn create_router() -> Router {\n    Router::new()\n        .merge(conversation_routes()) // Merge multiple route groups here\n}\n```\n\n---\n\n### **4. Update `main.rs` to Use the Loader**\n```rust\nuse axum::serve;\nuse tokio::net::TcpListener;\n\nmod handlers;\nmod routes;\n\n#[tokio::main]\nasync fn main() {\n    let app = routes::create_router();\n\n    let listener = TcpListener::bind(\"0.0.0.0:8080\").await.unwrap();\n    serve(listener, app).await.unwrap();\n}\n```\n\n---\n\n### **✅ Why This is Better**\n1. **Separation of Concerns** – Routes and handlers are modular.\n2. **Scalability** – New routes can be added without touching `main.rs`.\n3. **Readability** – `main.rs` remains clean and only responsible for initialization.\n\nThis structure sets you up well for adding middleware, database connections, and additional route modules later. 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "e744d5c1-9eba-4415-a044-f19536fe3ea3",
+          "request_id": "91d5a77c491dba3a-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "e744d5c1-9eba-4415-a044-f19536fe3ea3",
+      "children": [
+        "e68d89d8-f1e9-4e70-8d22-dd7065054c94"
+      ]
+    },
+    "e68d89d8-f1e9-4e70-8d22-dd7065054c94": {
+      "id": "e68d89d8-f1e9-4e70-8d22-dd7065054c94",
+      "message": {
+        "id": "e68d89d8-f1e9-4e70-8d22-dd7065054c94",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741471857.8941529,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "rebase_system_message": true,
+          "timestamp_": "absolute",
+          "message_type": null,
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "4803192b-2a29-4811-9980-b0a2c2fe3e1f",
+      "children": [
+        "cee69a68-8300-43fd-b88d-f4e886267818"
+      ]
+    },
+    "cee69a68-8300-43fd-b88d-f4e886267818": {
+      "id": "cee69a68-8300-43fd-b88d-f4e886267818",
+      "message": {
+        "id": "cee69a68-8300-43fd-b88d-f4e886267818",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741471857.074445,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "is there a const vs let in rust?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "shared_workspaces": [
+              {
+                "app_id": "com.apple.Terminal",
+                "app_name": "Terminal"
+              }
+            ],
+            "type": "user"
+          },
+          "request_id": "91d5aa644934ba3a-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "e68d89d8-f1e9-4e70-8d22-dd7065054c94",
+      "children": [
+        "8baa25f8-37ab-41cf-b2fc-02225b7da875"
+      ]
+    },
+    "8baa25f8-37ab-41cf-b2fc-02225b7da875": {
+      "id": "8baa25f8-37ab-41cf-b2fc-02225b7da875",
+      "message": {
+        "id": "8baa25f8-37ab-41cf-b2fc-02225b7da875",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741471858.193272,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Yes, Rust has both `const` and `let`, but they serve different purposes:\n\n### **1. `const` – Immutable Compile-Time Constants**\n- **Must be explicitly typed**.\n- **Evaluated at compile time**.\n- **Does NOT allow runtime computation** (e.g., function calls, heap allocations).\n- **Accessible globally** (like `#define` in C).\n\n#### **Example: `const`**\n```rust\nconst MAX_USERS: u32 = 100; // Must have a type\n\nfn main() {\n    println!(\"Max users: {}\", MAX_USERS);\n}\n```\n\n#### **Invalid Example**\nThis won’t compile because `String::from(\"Hello\")` is a runtime operation:\n```rust\nconst MESSAGE: String = String::from(\"Hello\"); // ❌ Error: not a compile-time constant\n```\n\n---\n\n### **2. `let` – Runtime Variable (Mutable or Immutable)**\n- **Can be mutable (`mut`) or immutable (default)**.\n- **Evaluated at runtime**.\n- **Can hold heap-allocated values (e.g., `String`, `Vec`)**.\n\n#### **Example: `let`**\n```rust\nfn main() {\n    let users = 100; // Immutable by default\n    let mut counter = 0; // Mutable variable\n\n    counter += 1;\n    println!(\"Counter: {}\", counter);\n}\n```\n\n---\n\n### **Key Differences**\n| Feature       | `const`                    | `let`                        |\n|--------------|---------------------------|-----------------------------|\n| **Mutability** | Always immutable           | Can be mutable with `mut`  |\n| **Scope**     | Available globally          | Block-scoped               |\n| **Eval Time** | Compile-time                | Runtime                     |\n| **Type**      | Required                     | Inferred (unless ambiguous) |\n| **Heap Usage**| No heap allocations         | Can allocate heap memory    |\n\n---\n\n### **3. `static` – Similar to `const` but with a Fixed Memory Address**\n- **Stored in static memory (not stack)**.\n- **Allows `mut` but requires `unsafe`**.\n\n#### **Example: `static`**\n```rust\nstatic GREETING: &str = \"Hello, world!\"; // Lives for the entire program\n\nfn main() {\n    println!(\"{}\", GREETING);\n}\n```\n\n---\n\n### **When to Use What?**\n- Use **`const`** when a value **never changes** and should be **inlined at compile time**.\n- Use **`let`** for normal variables **that may change at runtime**.\n- Use **`static`** for **global values** that require a **fixed memory address**.\n\nFor most cases, **`const` and `let`** will be enough. 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "cee69a68-8300-43fd-b88d-f4e886267818",
+          "request_id": "91d5aa644934ba3a-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "cee69a68-8300-43fd-b88d-f4e886267818",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "8baa25f8-37ab-41cf-b2fc-02225b7da875",
+  "plugin_ids": null,
+  "conversation_id": "67cc90cf-88ac-800e-8d5b-00dac408079c",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "67cc90cf-88ac-800e-8d5b-00dac408079c"
+}

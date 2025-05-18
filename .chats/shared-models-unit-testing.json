@@ -1,0 +1,1435 @@
+{
+  "title": "Shared Models Unit Testing",
+  "create_time": 1741467379.03411,
+  "update_time": 1741469067.625182,
+  "mapping": {
+    "63a368d5-e1fb-452f-b754-9f64925abf58": {
+      "id": "63a368d5-e1fb-452f-b754-9f64925abf58",
+      "message": null,
+      "parent": null,
+      "children": [
+        "dd461603-f702-462e-a61d-c9da0f61616a"
+      ]
+    },
+    "dd461603-f702-462e-a61d-c9da0f61616a": {
+      "id": "dd461603-f702-462e-a61d-c9da0f61616a",
+      "message": {
+        "id": "dd461603-f702-462e-a61d-c9da0f61616a",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "63a368d5-e1fb-452f-b754-9f64925abf58",
+      "children": [
+        "3bf60305-0208-46c0-8230-1e376dedce24"
+      ]
+    },
+    "3bf60305-0208-46c0-8230-1e376dedce24": {
+      "id": "3bf60305-0208-46c0-8230-1e376dedce24",
+      "message": {
+        "id": "3bf60305-0208-46c0-8230-1e376dedce24",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467379.0326433,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "dd461603-f702-462e-a61d-c9da0f61616a",
+      "children": [
+        "800ddfdc-fe45-4653-8d30-2e816b7aba6b"
+      ]
+    },
+    "800ddfdc-fe45-4653-8d30-2e816b7aba6b": {
+      "id": "800ddfdc-fe45-4653-8d30-2e816b7aba6b",
+      "message": {
+        "id": "800ddfdc-fe45-4653-8d30-2e816b7aba6b",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {
+            "real_author": "tool:app-pairing"
+          }
+        },
+        "create_time": 1741467378.220182,
+        "update_time": null,
+        "content": {
+          "content_type": "app_pairing_content",
+          "workspaces": [
+            {
+              "id": "11457",
+              "app_id": "com.apple.Terminal",
+              "app_name": "Terminal",
+              "title": "vanna@Vannas-MacBook-Pro",
+              "content_type": "window"
+            }
+          ],
+          "context_parts": [
+            {
+              "workspace_id": "11457",
+              "text": "  tip: to pass '--workspace' as a value, use '-- --workspace'\n\nUsage: cargo new --vcs <VCS> --name <NAME> <PATH>\n\nFor more information, try '--help'.\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:47:41  \n❯ code .                                                           \n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:48:47  \n❯ touch Cargo.toml             \n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:49:05  \n❯ cargo new backend --bin\ncargo new frontend --lib\ncargo new shared --lib\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating binary (application) `backend` package\nwarning: compiling this new package may not work due to invalid workspace configuration\n\nfailed to load manifest for workspace member `/Users/vanna/Source/rusty_gpt/frontend`\nreferenced by workspace at `/Users/vanna/Source/rusty_gpt/Cargo.toml`\n\nCaused by:\n  failed to read `/Users/vanna/Source/rusty_gpt/frontend/Cargo.toml`\n\nCaused by:\n  No such file or directory (os error 2)\nnote: see more `Cargo.toml` keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating library `frontend` package\nwarning: compiling this new package may not work due to invalid workspace configuration\n\nfailed to load manifest for workspace member `/Users/vanna/Source/rusty_gpt/shared`\nreferenced by workspace at `/Users/vanna/Source/rusty_gpt/Cargo.toml`\n\nCaused by:\n  failed to read `/Users/vanna/Source/rusty_gpt/shared/Cargo.toml`\n\nCaused by:\n  No such file or directory (os error 2)\nnote: see more `Cargo.toml` keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating library `shared` package\nnote: see more `Cargo.toml` keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:49:36  \n❯ clear                  \n\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:50:46  \n❯ cd ..    \n\n    ~/source ········································································································ sre-eks-non-prod ⎈  12:50:47  \n❯ mkdir rusty_gpt && cd rusty_gpt\nmkdir: rusty_gpt: File exists\n\n    ~/source ········································································································ sre-eks-non-prod ⎈  12:50:49  \n❯ rm -rf rusty_gpt\n\n    ~/source ········································································································ sre-eks-non-prod ⎈  12:51:00  \n❯ mkdir rusty_gpt && cd rusty_gpt\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:51:05  \n❯ touch Cargo.toml\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:51:12  \n❯ cargo new backend --bin\ncargo new frontend --lib\ncargo new shared --lib\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating binary (application) `backend` package\nwarning: compiling this new package may not work due to invalid workspace configuration\n\nfailed to load manifest for workspace member `/Users/vanna/Source/rusty_gpt/frontend`\nreferenced by workspace at `/Users/vanna/Source/rusty_gpt/Cargo.toml`\n\nCaused by:\n  failed to read `/Users/vanna/Source/rusty_gpt/frontend/Cargo.toml`\n\nCaused by:\n  No such file or directory (os error 2)\nnote: see more `Cargo.toml` keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating library `frontend` package\nwarning: compiling this new package may not work due to invalid workspace configuration\n\nfailed to load manifest for workspace member `/Users/vanna/Source/rusty_gpt/shared`\nreferenced by workspace at `/Users/vanna/Source/rusty_gpt/Cargo.toml`\n\nCaused by:\n  failed to read `/Users/vanna/Source/rusty_gpt/shared/Cargo.toml`\n\nCaused by:\n  No such file or directory (os error 2)\nnote: see more `Cargo.toml` keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating library `shared` package\nnote: see more `Cargo.toml` keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:51:41  \n❯ cargo new backend --bin\ncargo new frontend --lib\ncargo new shared --lib\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating binary (application) `backend` package\nerror: destination `/Users/vanna/Source/rusty_gpt/backend` already exists\n\nUse `cargo init` to initialize the directory\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating library `frontend` package\nerror: destination `/Users/vanna/Source/rusty_gpt/frontend` already exists\n\nUse `cargo init` to initialize the directory\nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating library `shared` package\nerror: destination `/Users/vanna/Source/rusty_gpt/shared` already exists\n\nUse `cargo init` to initialize the directory\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:52:48  \n❯ cargo init --bin --name backend       \nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating binary (application) package\nerror: `cargo init` cannot be run on existing Cargo packages\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:53:15  \n❯ cargo check                    \nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Checking backend v0.1.0 (/Users/vanna/Source/rusty_gpt/backend)\n    Checking frontend v0.1.0 (/Users/vanna/Source/rusty_gpt/frontend)\n    Checking shared v0.1.0 (/Users/vanna/Source/rusty_gpt/shared)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:54:04  \n❯ mv ~/.cargo/config ~/.cargo/config.toml\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:55:19  \n❯ cargo check                            \n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:55:23  \n❯ <user__selection></user__selection>\n",
+              "textfield_id": "0",
+              "path": "vanna@Vannas-MacBook-Pro",
+              "path_hash": "e9a784ba77d2fe93745f6e3c390804e93c86a72f570a7ce0448933c45dbbeda3",
+              "annotations": null,
+              "content_type": "text",
+              "truncated_head_lines": 0,
+              "truncated_tail_lines": 0,
+              "supports_editing": false
+            }
+          ],
+          "custom_instructions": ""
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true,
+          "app_pairing": {
+            "total_context_length": 8638,
+            "type": "context",
+            "shared_workspaces": [
+              {
+                "app_id": "com.apple.Terminal",
+                "text_fields": [
+                  {
+                    "truncated_tail_lines": 0,
+                    "truncated_head_lines": 0,
+                    "name": "vanna@Vannas-MacBook-Pro",
+                    "id": "0"
+                  }
+                ],
+                "title": "vanna@Vannas-MacBook-Pro",
+                "id": "11457",
+                "app_name": "Terminal"
+              }
+            ]
+          },
+          "exclusive_key": "app-pairing-whisper",
+          "request_id": "91d53d0bcb6c76f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "3bf60305-0208-46c0-8230-1e376dedce24",
+      "children": [
+        "d9983744-f920-46e7-a20b-bd0f90a5f52c"
+      ]
+    },
+    "d9983744-f920-46e7-a20b-bd0f90a5f52c": {
+      "id": "d9983744-f920-46e7-a20b-bd0f90a5f52c",
+      "message": {
+        "id": "d9983744-f920-46e7-a20b-bd0f90a5f52c",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467378.220817,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Okay, let's setup the shared models and get them under unit tests"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_id": "com.apple.Terminal",
+                "app_name": "Terminal"
+              }
+            ]
+          },
+          "request_id": "91d53d0bcb6c76f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "800ddfdc-fe45-4653-8d30-2e816b7aba6b",
+      "children": [
+        "bb18bf63-d135-46bf-9b77-7d068f996f82"
+      ]
+    },
+    "bb18bf63-d135-46bf-9b77-7d068f996f82": {
+      "id": "bb18bf63-d135-46bf-9b77-7d068f996f82",
+      "message": {
+        "id": "bb18bf63-d135-46bf-9b77-7d068f996f82",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467391.230913,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "d9983744-f920-46e7-a20b-bd0f90a5f52c",
+          "request_id": "91d53d0bcb6c76f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "d9983744-f920-46e7-a20b-bd0f90a5f52c",
+      "children": [
+        "e9352203-55df-4a5b-a9e7-59d431a3c785"
+      ]
+    },
+    "e9352203-55df-4a5b-a9e7-59d431a3c785": {
+      "id": "e9352203-55df-4a5b-a9e7-59d431a3c785",
+      "message": {
+        "id": "e9352203-55df-4a5b-a9e7-59d431a3c785",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467379.328539,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "To set up the **shared models** and get them under **unit tests**, follow these steps:\n\n---\n\n### **1. Define the Shared Models**\nInside `shared/src/lib.rs`, define some common structures that both the backend and frontend will use.\n\nFor example, if you're dealing with a user model:\n\n```rust\n// shared/src/lib.rs\n\nuse serde::{Deserialize, Serialize};\n\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\npub struct User {\n    pub id: u32,\n    pub username: String,\n    pub email: String,\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn test_user_creation() {\n        let user = User {\n            id: 1,\n            username: \"test_user\".to_string(),\n            email: \"test@example.com\".to_string(),\n        };\n\n        assert_eq!(user.id, 1);\n        assert_eq!(user.username, \"test_user\");\n        assert_eq!(user.email, \"test@example.com\");\n    }\n}\n```\n\n---\n\n### **2. Add Dependencies**\nIn `shared/Cargo.toml`, add:\n\n```toml\n[dependencies]\nserde = { version = \"1\", features = [\"derive\"] }\n\n[dev-dependencies]\nserde_json = \"1\"\n```\n\n---\n\n### **3. Use the Shared Models in Backend**\nModify `backend/src/main.rs` to use the shared models.\n\n```rust\n// backend/src/main.rs\n\nuse shared::User;\n\nfn main() {\n    let user = User {\n        id: 1,\n        username: \"backend_user\".to_string(),\n        email: \"backend@example.com\".to_string(),\n    };\n\n    println!(\"User: {:?}\", user);\n}\n```\n\n---\n\n### **4. Run Unit Tests for Shared Models**\nExecute:\n\n```sh\ncargo test -p shared\n```\n\nIf everything is set up correctly, it should pass without errors.\n\n---\n\nNow, your **shared models** are properly defined and **unit tested**. Let me know if you need more! 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "bb18bf63-d135-46bf-9b77-7d068f996f82",
+          "request_id": "91d53d0bcb6c76f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "bb18bf63-d135-46bf-9b77-7d068f996f82",
+      "children": [
+        "d2ad568c-296e-47fc-ba0e-e86bc6060e68"
+      ]
+    },
+    "d2ad568c-296e-47fc-ba0e-e86bc6060e68": {
+      "id": "d2ad568c-296e-47fc-ba0e-e86bc6060e68",
+      "message": {
+        "id": "d2ad568c-296e-47fc-ba0e-e86bc6060e68",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467457.0939732,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "should we put models in their own files under a models directory?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ]
+          },
+          "request_id": "91d53ef85f4e76f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "e9352203-55df-4a5b-a9e7-59d431a3c785",
+      "children": [
+        "4ea4ef52-fbd2-46a2-961c-bfa57f82b897"
+      ]
+    },
+    "4ea4ef52-fbd2-46a2-961c-bfa57f82b897": {
+      "id": "4ea4ef52-fbd2-46a2-961c-bfa57f82b897",
+      "message": {
+        "id": "4ea4ef52-fbd2-46a2-961c-bfa57f82b897",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467458.145426,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Yes, structuring your shared models in their own files under a `models` directory inside `shared/src/` is a **best practice** for maintainability and scalability. This way, each model is easier to manage, extend, and test separately.\n\n---\n\n### **1. Restructure Shared Models**\nModify your `shared` crate to have a `models` directory:\n\n```sh\nmkdir -p shared/src/models\ntouch shared/src/models/user.rs\n```\n\nMove the `User` model into `shared/src/models/user.rs`:\n\n```rust\n// shared/src/models/user.rs\n\nuse serde::{Deserialize, Serialize};\n\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\npub struct User {\n    pub id: u32,\n    pub username: String,\n    pub email: String,\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn test_user_creation() {\n        let user = User {\n            id: 1,\n            username: \"test_user\".to_string(),\n            email: \"test@example.com\".to_string(),\n        };\n\n        assert_eq!(user.id, 1);\n        assert_eq!(user.username, \"test_user\");\n        assert_eq!(user.email, \"test@example.com\");\n    }\n}\n```\n\n---\n\n### **2. Update `lib.rs` to Re-Export Models**\nModify `shared/src/lib.rs` to expose the models:\n\n```rust\n// shared/src/lib.rs\n\npub mod models;\n```\n\nThen, create `shared/src/models/mod.rs` to expose individual models:\n\n```rust\n// shared/src/models/mod.rs\n\npub mod user;\npub use user::User;\n```\n\n---\n\n### **3. Verify the Changes**\nNow, your backend can import models like this:\n\n```rust\n// backend/src/main.rs\n\nuse shared::models::User;\n\nfn main() {\n    let user = User {\n        id: 1,\n        username: \"backend_user\".to_string(),\n        email: \"backend@example.com\".to_string(),\n    };\n\n    println!(\"User: {:?}\", user);\n}\n```\n\nRun:\n\n```sh\ncargo check\ncargo test -p shared\n```\n\n---\n\n### **Benefits of This Structure**\n✅ **Separation of Concerns** – Each model is in its own file, making it easy to manage.  \n✅ **Scalability** – As more models are added, they remain organized.  \n✅ **Reusability** – Clean module exports allow easy usage in both backend and frontend.  \n\nThis is the **recommended approach** for managing models in a Rust workspace. 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "d2ad568c-296e-47fc-ba0e-e86bc6060e68",
+          "request_id": "91d53ef85f4e76f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "d2ad568c-296e-47fc-ba0e-e86bc6060e68",
+      "children": [
+        "84be4797-adb0-40f9-bd7b-c37c6cf0f5e1"
+      ]
+    },
+    "84be4797-adb0-40f9-bd7b-c37c6cf0f5e1": {
+      "id": "84be4797-adb0-40f9-bd7b-c37c6cf0f5e1",
+      "message": {
+        "id": "84be4797-adb0-40f9-bd7b-c37c6cf0f5e1",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467520.4559479,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Can we use something like docstrings for intellisense infomation and auto-generated documentation?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ],
+            "type": "user"
+          },
+          "request_id": "91d54084cb7676f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "4ea4ef52-fbd2-46a2-961c-bfa57f82b897",
+      "children": [
+        "8f8c57ef-aef8-4e09-b97d-c040b31b7454"
+      ]
+    },
+    "8f8c57ef-aef8-4e09-b97d-c040b31b7454": {
+      "id": "8f8c57ef-aef8-4e09-b97d-c040b31b7454",
+      "message": {
+        "id": "8f8c57ef-aef8-4e09-b97d-c040b31b7454",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467521.375478,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Yes! Rust has **documentation comments** (`///`) that work like docstrings in Python. These comments integrate seamlessly with **IntelliSense in VS Code** and can be used to generate documentation using `cargo doc`.\n\n---\n\n## **1. Adding Documentation Comments to Models**\nModify `shared/src/models/user.rs`:\n\n```rust\n// shared/src/models/user.rs\n\nuse serde::{Deserialize, Serialize};\n\n/// Represents a user in the system.\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\npub struct User {\n    /// Unique identifier for the user.\n    pub id: u32,\n\n    /// The user's chosen username.\n    pub username: String,\n\n    /// The user's email address.\n    pub email: String,\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn test_user_creation() {\n        let user = User {\n            id: 1,\n            username: \"test_user\".to_string(),\n            email: \"test@example.com\".to_string(),\n        };\n\n        assert_eq!(user.id, 1);\n        assert_eq!(user.username, \"test_user\");\n        assert_eq!(user.email, \"test@example.com\");\n    }\n}\n```\n\n### **What This Does**\n- VS Code IntelliSense will show descriptions when hovering over `User` or its fields.\n- The documentation is auto-generated when running `cargo doc`.\n\n---\n\n## **2. Generate Documentation**\nRun:\n\n```sh\ncargo doc --open\n```\n\nThis will generate and open a **webpage** in your browser with the formatted documentation.\n\n---\n\n## **3. Multi-Line Documentation Comments**\nFor longer descriptions, use **multi-line comments**:\n\n```rust\n/// Represents a user in the system.\n///\n/// Users have a unique `id`, a `username`, and an `email` address.\n/// This struct is used for serialization/deserialization in API calls.\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\npub struct User {\n    /// Unique identifier for the user.\n    pub id: u32,\n\n    /// The user's chosen username.\n    ///\n    /// Must be unique across all users in the system.\n    pub username: String,\n\n    /// The user's email address.\n    ///\n    /// This is used for login and notifications.\n    pub email: String,\n}\n```\n\n---\n\n## **4. Adding Examples in Docs**\nTo include **code examples** that appear in `cargo doc`:\n\n```rust\n/// Represents a user in the system.\n///\n/// # Example\n/// ```\n/// use shared::models::User;\n///\n/// let user = User {\n///     id: 1,\n///     username: \"test_user\".to_string(),\n///     email: \"test@example.com\".to_string(),\n/// };\n/// ```\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]\npub struct User {\n    pub id: u32,\n    pub username: String,\n    pub email: String,\n}\n```\n\nThis makes documentation even **more useful** when viewing it in a browser.\n\n---\n\n## **5. Inline Documentation for Functions**\nIf you have helper functions, use `///` for public functions and `//!` for module-level comments:\n\n```rust\n/// Formats a user's details into a string.\n///\n/// # Example\n/// ```\n/// use shared::models::User;\n///\n/// let user = User {\n///     id: 1,\n///     username: \"alice\".to_string(),\n///     email: \"alice@example.com\".to_string(),\n/// };\n///\n/// assert_eq!(user.display(), \"User alice <alice@example.com>\");\n/// ```\nimpl User {\n    /// Returns a formatted string representation of the user.\n    pub fn display(&self) -> String {\n        format!(\"User {} <{}>\", self.username, self.email)\n    }\n}\n```\n\n---\n\n## **6. Summary: Why Use Rust Doc Comments?**\n✅ **IntelliSense Support** – Tooltips show in VS Code.  \n✅ **Auto-Generated Docs** – Run `cargo doc --open`.  \n✅ **Encourages Clean Code** – Self-documenting structs and functions.  \n✅ **Supports Examples** – Helps others understand usage quickly.  \n\nUsing `///` and `//!` makes your Rust code more readable and **developer-friendly**. 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "84be4797-adb0-40f9-bd7b-c37c6cf0f5e1",
+          "request_id": "91d54084cb7676f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "84be4797-adb0-40f9-bd7b-c37c6cf0f5e1",
+      "children": [
+        "7c279307-766b-4e20-ac65-2ac033ce686b"
+      ]
+    },
+    "7c279307-766b-4e20-ac65-2ac033ce686b": {
+      "id": "7c279307-766b-4e20-ac65-2ac033ce686b",
+      "message": {
+        "id": "7c279307-766b-4e20-ac65-2ac033ce686b",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {
+            "real_author": "tool:app-pairing"
+          }
+        },
+        "create_time": 1741467718.676859,
+        "update_time": null,
+        "content": {
+          "content_type": "app_pairing_content",
+          "workspaces": [
+            {
+              "id": "11457",
+              "app_id": "com.apple.Terminal",
+              "app_name": "Terminal",
+              "title": "vanna@Vannas-MacBook-Pro",
+              "content_type": "window"
+            }
+          ],
+          "context_parts": [
+            {
+              "workspace_id": "11457",
+              "text": "<truncated__content/>error: destination `/Users/vanna/Source/rusty_gpt/shared` already exists\n\nUse `cargo init` to initialize the directory\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:52:48  \n❯ cargo init --bin --name backend       \nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating binary (application) package\nerror: `cargo init` cannot be run on existing Cargo packages\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:53:15  \n❯ cargo check                    \nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Checking backend v0.1.0 (/Users/vanna/Source/rusty_gpt/backend)\n    Checking frontend v0.1.0 (/Users/vanna/Source/rusty_gpt/frontend)\n    Checking shared v0.1.0 (/Users/vanna/Source/rusty_gpt/shared)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:54:04  \n❯ mv ~/.cargo/config ~/.cargo/config.toml\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:55:19  \n❯ cargo check                            \n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:55:23  \n❯ tree .                \nzsh: command not found: tree\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  13:00:28  \n❯ brew install tree\n==> Downloading https://formulae.brew.sh/api/formula.jws.json\n==> Downloading https://formulae.brew.sh/api/cask.jws.json\n==> Downloading https://ghcr.io/v2/homebrew/core/tree/manifests/2.2.1\n####################################################################################################################################################### 100.0%\n==> Fetching tree\n==> Downloading https://ghcr.io/v2/homebrew/core/tree/blobs/sha256:ccfac896234e1c63841b421873387c407f375af7e6db54abea549d24e3c69589\n####################################################################################################################################################### 100.0%\n==> Pouring tree--2.2.1.arm64_sequoia.bottle.tar.gz\n🍺  /opt/homebrew/Cellar/tree/2.2.1: 9 files, 187.7KB\n==> Running `brew cleanup tree`...\nDisable this behaviour by setting HOMEBREW_NO_INSTALL_CLEANUP.\nHide these hints with HOMEBREW_NO_ENV_HINTS (see `man brew`).\n\n    ~/source/rusty_gpt ······················································································· 3s   sre-eks-non-prod ⎈  13:00:35  \n❯ tree .\n.\n├── Cargo.lock\n├── Cargo.toml\n├── backend\n│   ├── Cargo.toml\n│   └── src\n│       └── main.rs\n├── frontend\n│   ├── Cargo.toml\n│   └── src\n│       └── lib.rs\n├── shared\n│   ├── Cargo.toml\n│   └── src\n│       ├── lib.rs\n│       └── models\n│           └── user.rs\n└── target\n    ├── CACHEDIR.TAG\n    └── debug\n        ├── build\n        │   ├── proc-macro2-6ae8c3e2346ad2ab\n        │   │   ├── invoked.timestamp\n        │   │   ├── out\n        │   │   ├── output\n        │   │   ├── root-output\n        │   │   └── stderr\n        │   ├── proc-macro2-e860b36a47f1cefa\n        │   │   ├── build-script-build\n        │   │   ├── build_script_build-e860b36a47f1cefa\n        │   │   └── build_script_build-e860b36a47f1cefa.d\n        │   ├── serde-505044b73e364ec5\n        │   │   ├── invoked.timestamp\n        │   │   ├── out\n        │   │   ├── output\n        │   │   ├── root-output\n        │   │   └── stderr\n        │   ├── serde-c07d7c26b04e7698\n        │   │   ├── build-script-build\n        │   │   ├── build_script_build-c07d7c26b04e7698\n        │   │   └── build_script_build-c07d7c26b04e7698.d\n        │   ├── serde_json-124270c3076fb5b8\n        │   │   ├── invoked.timestamp\n        │   │   ├── out\n        │   │   ├── output\n        │   │   ├── root-output\n        │   │   └── stderr\n        │   └── serde_json-fe98ad8dcb7b9f29\n        │       ├── build-script-build\n        │       ├── build_script_build-fe98ad8dcb7b9f29\n        │       └── build_script_build-fe98ad8dcb7b9f29.d\n        ├── deps\n        │   ├── backend-41f7ecde59d839cf.d\n        │   ├── backend-eb58731cccff8e23.d\n        │   ├── frontend-3cf5be4e51fddc8f.d\n        │   ├── frontend-d70172070111abda.d\n        │   ├── itoa-e28cb22c2e115028.d\n        │   ├── libbackend-41f7ecde59d839cf.rmeta\n        │   ├── libbackend-eb58731cccff8e23.rmeta\n        │   ├── libfrontend-3cf5be4e51fddc8f.rmeta\n        │   ├── libfrontend-d70172070111abda.rmeta\n        │   ├── libitoa-e28cb22c2e115028.rmeta\n        │   ├── libmemchr-1f5e23143eff83cf.rmeta\n        │   ├── libproc_macro2-0efce5b7b3717f10.rlib\n        │   ├── libproc_macro2-0efce5b7b3717f10.rmeta\n        │   ├── libquote-65445975dee92893.rlib\n        │   ├── libquote-65445975dee92893.rmeta\n        │   ├── libryu-55359225d91fb63a.rmeta\n        │   ├── libserde-6fbd04503c24424b.rmeta\n        │   ├── libserde_derive-d3902e124f21728f.dylib\n        │   ├── libserde_json-96f0f54b6e0a69cc.rmeta\n        │   ├── libshared-0078b4cb47f01519.rmeta\n        │   ├── libshared-8b990a34d0af4a97.rmeta\n        │   ├── libshared-aba2cd8f818546d8.rmeta\n        │   ├── libsyn-85339ce6b73d6a0f.rlib\n        │   ├── libsyn-85339ce6b73d6a0f.rmeta\n        │   ├── libunicode_ident-904b1c5de53466ff.rlib\n        │   ├── libunicode_ident-904b1c5de53466ff.rmeta\n        │   ├── memchr-1f5e23143eff83cf.d\n        │   ├── proc_macro2-0efce5b7b3717f10.d\n        │   ├── quote-65445975dee92893.d\n        │   ├── ryu-55359225d91fb63a.d\n        │   ├── serde-6fbd04503c24424b.d\n        │   ├── serde_derive-d3902e124f21728f.d\n        │   ├── serde_json-96f0f54b6e0a69cc.d\n        │   ├── shared-0078b4cb47f01519.d\n        │   ├── shared-8b990a34d0af4a97.d\n        │   ├── shared-aba2cd8f818546d8.d\n        │   ├── syn-85339ce6b73d6a0f.d\n        │   └── unicode_ident-904b1c5de53466ff.d\n        ├── examples\n        └── incremental\n            ├── backend-00dfzok2054gv\n            │   ├── s-h5ar3e29mx-1q8fnsn-4qvupucqzyhktbcib2oweef2y\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar3e29mx-1q8fnsn.lock\n            ├── backend-2q5eclh0ib10j\n            │   ├── s-h5ar09wjuw-1kff3ut-9n3mjbanbampmgbbimddlpl4c\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar09wjuw-1kff3ut.lock\n            ├── frontend-3io8exwz1uviq\n            │   ├── s-h5ar3e2kqv-0er0ayl-f2aauk6bsgygphl43pir4z5qd\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar3e2kqv-0er0ayl.lock\n            ├── frontend-3ne5s1n3fwaaf\n            │   ├── s-h5ar09wjv8-1lm9nsa-7mnuqd9he37311tqkq7k11zmm\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar09wjv8-1lm9nsa.lock\n            ├── shared-0iyxsjalql31y\n            │   ├── s-h5ar09wjuv-07qhnkv-ccbgm437y82bwdh9figticl1q\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar09wjuv-07qhnkv.lock\n            ├── shared-227v12503xy4s\n            │   ├── s-h5ar5m0ffr-048lg4s-bjs2xl35otteyrcjos4nzvqsy\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   ├── s-h5ar5m0ffr-048lg4s.lock\n            │   ├── s-h5ar6f7619-075dszv-working\n            │   │   ├── dep-graph.bin\n            │   │   ├── dep-graph.part.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar6f7619-075dszv.lock\n            └── shared-3efcrcmqzlw07\n                ├── s-h5ar5m0f3d-0bj1t1n-8d6ks5wiqcz88u8nycyu92pb9\n                │   ├── dep-graph.bin\n                │   ├── query-cache.bin\n                │   └── work-products.bin\n                ├── s-h5ar5m0f3d-0bj1t1n.lock\n                ├── s-h5ar6f760h-06iy44x-working\n                │   ├── dep-graph.bin\n                │   ├── dep-graph.part.bin\n                │   ├── query-cache.bin\n                │   └── work-products.bin\n                └── s-h5ar6f760h-06iy44x.lock\n\n39 directories, 107 files\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  13:00:39  \n❯ <user__selection></user__selection>\n",
+              "textfield_id": "0",
+              "path": "vanna@Vannas-MacBook-Pro",
+              "path_hash": "e9a784ba77d2fe93745f6e3c390804e93c86a72f570a7ce0448933c45dbbeda3",
+              "annotations": null,
+              "content_type": "text",
+              "truncated_head_lines": 125,
+              "truncated_tail_lines": 0,
+              "supports_editing": false
+            }
+          ],
+          "custom_instructions": ""
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true,
+          "app_pairing": {
+            "shared_workspaces": [
+              {
+                "title": "vanna@Vannas-MacBook-Pro",
+                "app_name": "Terminal",
+                "id": "11457",
+                "text_fields": [
+                  {
+                    "truncated_tail_lines": 0,
+                    "name": "vanna@Vannas-MacBook-Pro",
+                    "truncated_head_lines": 125,
+                    "id": "0"
+                  }
+                ],
+                "app_id": "com.apple.Terminal"
+              }
+            ],
+            "total_context_length": 9124,
+            "type": "context"
+          },
+          "exclusive_key": "app-pairing-whisper",
+          "request_id": "91d5455c9ddb76f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "8f8c57ef-aef8-4e09-b97d-c040b31b7454",
+      "children": [
+        "a9069ed4-17d1-40b6-9d07-697d8767757b"
+      ]
+    },
+    "a9069ed4-17d1-40b6-9d07-697d8767757b": {
+      "id": "a9069ed4-17d1-40b6-9d07-697d8767757b",
+      "message": {
+        "id": "a9069ed4-17d1-40b6-9d07-697d8767757b",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467718.67729,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "unresolved module, can't find module file: models.rs, or models/mod.rsrust-analyzerE0583\nfile not found for module `models`\nto create the module `models`, create file \"shared/src/models.rs\" or \"shared/src/models/mod.rs\"\nif there is a `mod models` elsewhere in the crate already, import it with `use crate::...` insteadrustcClick for full compiler diagnostic\nshared\npub mod models"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_id": "com.apple.Terminal",
+                "app_name": "Terminal"
+              }
+            ]
+          },
+          "request_id": "91d5455c9ddb76f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "7c279307-766b-4e20-ac65-2ac033ce686b",
+      "children": [
+        "241081ff-d357-4202-aee4-e2646a006052"
+      ]
+    },
+    "241081ff-d357-4202-aee4-e2646a006052": {
+      "id": "241081ff-d357-4202-aee4-e2646a006052",
+      "message": {
+        "id": "241081ff-d357-4202-aee4-e2646a006052",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467720.586337,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "It looks like **Rust Analyzer** and `rustc` are not recognizing your `models` directory correctly. This usually happens if the `mod.rs` file is missing in the `models/` directory.\n\n---\n\n### **Fix: Add `mod.rs` Inside `models/`**\nIn `shared/src/models/`, you need a `mod.rs` file to define the module:\n\n```sh\ntouch shared/src/models/mod.rs\n```\n\nThen, inside `shared/src/models/mod.rs`, expose the models:\n\n```rust\npub mod user;\n\npub use user::User;\n```\n\n---\n\n### **Verify Your Folder Structure**\nEnsure your `shared` crate looks like this:\n\n```\nshared/\n│── Cargo.toml\n└── src/\n    ├── lib.rs\n    ├── models/\n    │   ├── mod.rs\n    │   └── user.rs\n```\n\n---\n\n### **Update `lib.rs` to Reference `models`**\nModify `shared/src/lib.rs` to expose the `models` module:\n\n```rust\npub mod models;\n```\n\n---\n\n### **Try Again**\nRun:\n\n```sh\ncargo check\n```\n\nIf Rust Analyzer is still showing errors, restart it in VS Code:\n1. Open **Command Palette** (`Cmd+Shift+P`).\n2. Search for **Rust Analyzer: Restart Server** and select it.\n\nThis should resolve the issue. 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "a9069ed4-17d1-40b6-9d07-697d8767757b",
+          "request_id": "91d5455c9ddb76f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a9069ed4-17d1-40b6-9d07-697d8767757b",
+      "children": [
+        "7b3c775e-b1f1-4315-b160-e315d2e8079d"
+      ]
+    },
+    "7b3c775e-b1f1-4315-b160-e315d2e8079d": {
+      "id": "7b3c775e-b1f1-4315-b160-e315d2e8079d",
+      "message": {
+        "id": "7b3c775e-b1f1-4315-b160-e315d2e8079d",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {
+            "real_author": "tool:app-pairing"
+          }
+        },
+        "create_time": 1741467780.26916,
+        "update_time": null,
+        "content": {
+          "content_type": "app_pairing_content",
+          "workspaces": [
+            {
+              "id": "11457",
+              "app_id": "com.apple.Terminal",
+              "app_name": "Terminal",
+              "title": "vanna@Vannas-MacBook-Pro",
+              "content_type": "window"
+            }
+          ],
+          "context_parts": [
+            {
+              "workspace_id": "11457",
+              "text": "<truncated__content/>    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:52:48  \n❯ cargo init --bin --name backend       \nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Creating binary (application) package\nerror: `cargo init` cannot be run on existing Cargo packages\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:53:15  \n❯ cargo check                    \nwarning: `/Users/vanna/.cargo/config` is deprecated in favor of `config.toml`\nnote: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`\n    Checking backend v0.1.0 (/Users/vanna/Source/rusty_gpt/backend)\n    Checking frontend v0.1.0 (/Users/vanna/Source/rusty_gpt/frontend)\n    Checking shared v0.1.0 (/Users/vanna/Source/rusty_gpt/shared)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:54:04  \n❯ mv ~/.cargo/config ~/.cargo/config.toml\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:55:19  \n❯ cargo check                            \n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  12:55:23  \n❯ tree .                \nzsh: command not found: tree\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  13:00:28  \n❯ brew install tree\n==> Downloading https://formulae.brew.sh/api/formula.jws.json\n==> Downloading https://formulae.brew.sh/api/cask.jws.json\n==> Downloading https://ghcr.io/v2/homebrew/core/tree/manifests/2.2.1\n####################################################################################################################################################### 100.0%\n==> Fetching tree\n==> Downloading https://ghcr.io/v2/homebrew/core/tree/blobs/sha256:ccfac896234e1c63841b421873387c407f375af7e6db54abea549d24e3c69589\n####################################################################################################################################################### 100.0%\n==> Pouring tree--2.2.1.arm64_sequoia.bottle.tar.gz\n🍺  /opt/homebrew/Cellar/tree/2.2.1: 9 files, 187.7KB\n==> Running `brew cleanup tree`...\nDisable this behaviour by setting HOMEBREW_NO_INSTALL_CLEANUP.\nHide these hints with HOMEBREW_NO_ENV_HINTS (see `man brew`).\n\n    ~/source/rusty_gpt ······················································································· 3s   sre-eks-non-prod ⎈  13:00:35  \n❯ tree .\n.\n├── Cargo.lock\n├── Cargo.toml\n├── backend\n│   ├── Cargo.toml\n│   └── src\n│       └── main.rs\n├── frontend\n│   ├── Cargo.toml\n│   └── src\n│       └── lib.rs\n├── shared\n│   ├── Cargo.toml\n│   └── src\n│       ├── lib.rs\n│       └── models\n│           └── user.rs\n└── target\n    ├── CACHEDIR.TAG\n    └── debug\n        ├── build\n        │   ├── proc-macro2-6ae8c3e2346ad2ab\n        │   │   ├── invoked.timestamp\n        │   │   ├── out\n        │   │   ├── output\n        │   │   ├── root-output\n        │   │   └── stderr\n        │   ├── proc-macro2-e860b36a47f1cefa\n        │   │   ├── build-script-build\n        │   │   ├── build_script_build-e860b36a47f1cefa\n        │   │   └── build_script_build-e860b36a47f1cefa.d\n        │   ├── serde-505044b73e364ec5\n        │   │   ├── invoked.timestamp\n        │   │   ├── out\n        │   │   ├── output\n        │   │   ├── root-output\n        │   │   └── stderr\n        │   ├── serde-c07d7c26b04e7698\n        │   │   ├── build-script-build\n        │   │   ├── build_script_build-c07d7c26b04e7698\n        │   │   └── build_script_build-c07d7c26b04e7698.d\n        │   ├── serde_json-124270c3076fb5b8\n        │   │   ├── invoked.timestamp\n        │   │   ├── out\n        │   │   ├── output\n        │   │   ├── root-output\n        │   │   └── stderr\n        │   └── serde_json-fe98ad8dcb7b9f29\n        │       ├── build-script-build\n        │       ├── build_script_build-fe98ad8dcb7b9f29\n        │       └── build_script_build-fe98ad8dcb7b9f29.d\n        ├── deps\n        │   ├── backend-41f7ecde59d839cf.d\n        │   ├── backend-eb58731cccff8e23.d\n        │   ├── frontend-3cf5be4e51fddc8f.d\n        │   ├── frontend-d70172070111abda.d\n        │   ├── itoa-e28cb22c2e115028.d\n        │   ├── libbackend-41f7ecde59d839cf.rmeta\n        │   ├── libbackend-eb58731cccff8e23.rmeta\n        │   ├── libfrontend-3cf5be4e51fddc8f.rmeta\n        │   ├── libfrontend-d70172070111abda.rmeta\n        │   ├── libitoa-e28cb22c2e115028.rmeta\n        │   ├── libmemchr-1f5e23143eff83cf.rmeta\n        │   ├── libproc_macro2-0efce5b7b3717f10.rlib\n        │   ├── libproc_macro2-0efce5b7b3717f10.rmeta\n        │   ├── libquote-65445975dee92893.rlib\n        │   ├── libquote-65445975dee92893.rmeta\n        │   ├── libryu-55359225d91fb63a.rmeta\n        │   ├── libserde-6fbd04503c24424b.rmeta\n        │   ├── libserde_derive-d3902e124f21728f.dylib\n        │   ├── libserde_json-96f0f54b6e0a69cc.rmeta\n        │   ├── libshared-0078b4cb47f01519.rmeta\n        │   ├── libshared-8b990a34d0af4a97.rmeta\n        │   ├── libshared-aba2cd8f818546d8.rmeta\n        │   ├── libsyn-85339ce6b73d6a0f.rlib\n        │   ├── libsyn-85339ce6b73d6a0f.rmeta\n        │   ├── libunicode_ident-904b1c5de53466ff.rlib\n        │   ├── libunicode_ident-904b1c5de53466ff.rmeta\n        │   ├── memchr-1f5e23143eff83cf.d\n        │   ├── proc_macro2-0efce5b7b3717f10.d\n        │   ├── quote-65445975dee92893.d\n        │   ├── ryu-55359225d91fb63a.d\n        │   ├── serde-6fbd04503c24424b.d\n        │   ├── serde_derive-d3902e124f21728f.d\n        │   ├── serde_json-96f0f54b6e0a69cc.d\n        │   ├── shared-0078b4cb47f01519.d\n        │   ├── shared-8b990a34d0af4a97.d\n        │   ├── shared-aba2cd8f818546d8.d\n        │   ├── syn-85339ce6b73d6a0f.d\n        │   └── unicode_ident-904b1c5de53466ff.d\n        ├── examples\n        └── incremental\n            ├── backend-00dfzok2054gv\n            │   ├── s-h5ar3e29mx-1q8fnsn-4qvupucqzyhktbcib2oweef2y\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar3e29mx-1q8fnsn.lock\n            ├── backend-2q5eclh0ib10j\n            │   ├── s-h5ar09wjuw-1kff3ut-9n3mjbanbampmgbbimddlpl4c\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar09wjuw-1kff3ut.lock\n            ├── frontend-3io8exwz1uviq\n            │   ├── s-h5ar3e2kqv-0er0ayl-f2aauk6bsgygphl43pir4z5qd\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar3e2kqv-0er0ayl.lock\n            ├── frontend-3ne5s1n3fwaaf\n            │   ├── s-h5ar09wjv8-1lm9nsa-7mnuqd9he37311tqkq7k11zmm\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar09wjv8-1lm9nsa.lock\n            ├── shared-0iyxsjalql31y\n            │   ├── s-h5ar09wjuv-07qhnkv-ccbgm437y82bwdh9figticl1q\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar09wjuv-07qhnkv.lock\n            ├── shared-227v12503xy4s\n            │   ├── s-h5ar5m0ffr-048lg4s-bjs2xl35otteyrcjos4nzvqsy\n            │   │   ├── dep-graph.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   ├── s-h5ar5m0ffr-048lg4s.lock\n            │   ├── s-h5ar6f7619-075dszv-working\n            │   │   ├── dep-graph.bin\n            │   │   ├── dep-graph.part.bin\n            │   │   ├── query-cache.bin\n            │   │   └── work-products.bin\n            │   └── s-h5ar6f7619-075dszv.lock\n            └── shared-3efcrcmqzlw07\n                ├── s-h5ar5m0f3d-0bj1t1n-8d6ks5wiqcz88u8nycyu92pb9\n                │   ├── dep-graph.bin\n                │   ├── query-cache.bin\n                │   └── work-products.bin\n                ├── s-h5ar5m0f3d-0bj1t1n.lock\n                ├── s-h5ar6f760h-06iy44x-working\n                │   ├── dep-graph.bin\n                │   ├── dep-graph.part.bin\n                │   ├── query-cache.bin\n                │   └── work-products.bin\n                └── s-h5ar6f760h-06iy44x.lock\n\n39 directories, 107 files\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  13:00:39  \n❯ cargo check\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s\n\n    ~/source/rusty_gpt ······························································································ sre-eks-non-prod ⎈  13:02:40  \n❯ <user__selection></user__selection>\n",
+              "textfield_id": "0",
+              "path": "vanna@Vannas-MacBook-Pro",
+              "path_hash": "e9a784ba77d2fe93745f6e3c390804e93c86a72f570a7ce0448933c45dbbeda3",
+              "annotations": null,
+              "content_type": "text",
+              "truncated_head_lines": 129,
+              "truncated_tail_lines": 0,
+              "supports_editing": false
+            }
+          ],
+          "custom_instructions": ""
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "exclusive_key": "app-pairing-whisper",
+          "is_visually_hidden_from_conversation": true,
+          "app_pairing": {
+            "total_context_length": 9249,
+            "type": "context",
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "text_fields": [
+                  {
+                    "id": "0",
+                    "name": "vanna@Vannas-MacBook-Pro",
+                    "truncated_tail_lines": 0,
+                    "truncated_head_lines": 129
+                  }
+                ],
+                "app_id": "com.apple.Terminal",
+                "title": "vanna@Vannas-MacBook-Pro",
+                "id": "11457"
+              }
+            ]
+          },
+          "request_id": "91d546dcca8376f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "241081ff-d357-4202-aee4-e2646a006052",
+      "children": [
+        "aca72aab-83e2-445c-a934-9502e3da6e46"
+      ]
+    },
+    "aca72aab-83e2-445c-a934-9502e3da6e46": {
+      "id": "aca72aab-83e2-445c-a934-9502e3da6e46",
+      "message": {
+        "id": "aca72aab-83e2-445c-a934-9502e3da6e46",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467780.269627,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Okay, now let's build up the models from our other chat to support the conversations"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ],
+            "type": "user"
+          },
+          "request_id": "91d546dcca8376f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "7b3c775e-b1f1-4315-b160-e315d2e8079d",
+      "children": [
+        "fd7288e4-17c4-49be-af9b-0eb167f39e62"
+      ]
+    },
+    "fd7288e4-17c4-49be-af9b-0eb167f39e62": {
+      "id": "fd7288e4-17c4-49be-af9b-0eb167f39e62",
+      "message": {
+        "id": "fd7288e4-17c4-49be-af9b-0eb167f39e62",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467781.210616,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Great! Let's build up the **shared models** needed to support conversations. We need to define models for users, messages, conversations, and possibly metadata like timestamps and statuses.\n\n---\n\n### **1. Define Core Models**\nWe'll place these inside `shared/src/models/`.\n\n#### **User Model**\n`shared/src/models/user.rs`\n```rust\nuse serde::{Deserialize, Serialize};\n\n/// Represents a user in the system.\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\npub struct User {\n    /// Unique identifier for the user.\n    pub id: uuid::Uuid,\n\n    /// The user's chosen display name.\n    pub username: String,\n\n    /// The user's email address.\n    pub email: String,\n}\n```\n\n---\n\n#### **Message Model**\n`shared/src/models/message.rs`\n```rust\nuse serde::{Deserialize, Serialize};\nuse chrono::{DateTime, Utc};\nuse uuid::Uuid;\n\n/// Represents a single message in a conversation.\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\npub struct Message {\n    /// Unique identifier for the message.\n    pub id: Uuid,\n\n    /// ID of the user who sent the message.\n    pub sender_id: Uuid,\n\n    /// ID of the conversation this message belongs to.\n    pub conversation_id: Uuid,\n\n    /// The message content.\n    pub content: String,\n\n    /// Timestamp when the message was sent.\n    pub timestamp: DateTime<Utc>,\n}\n```\n\n---\n\n#### **Conversation Model**\n`shared/src/models/conversation.rs`\n```rust\nuse serde::{Deserialize, Serialize};\nuse uuid::Uuid;\nuse chrono::{DateTime, Utc};\n\n/// Represents a conversation between multiple users.\n#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\npub struct Conversation {\n    /// Unique identifier for the conversation.\n    pub id: Uuid,\n\n    /// The users participating in this conversation.\n    pub participant_ids: Vec<Uuid>,\n\n    /// Timestamp of the last message in the conversation.\n    pub last_updated: DateTime<Utc>,\n}\n```\n\n---\n\n### **2. Expose Models in `mod.rs`**\nModify `shared/src/models/mod.rs`:\n```rust\npub mod user;\npub mod message;\npub mod conversation;\n\npub use user::User;\npub use message::Message;\npub use conversation::Conversation;\n```\n\n---\n\n### **3. Update `lib.rs` to Expose Models**\nModify `shared/src/lib.rs`:\n```rust\npub mod models;\n```\n\n---\n\n### **4. Add Dependencies**\nAdd these to `shared/Cargo.toml`:\n```toml\n[dependencies]\nserde = { version = \"1\", features = [\"derive\"] }\nuuid = { version = \"1\", features = [\"serde\", \"v4\"] }\nchrono = { version = \"0.4\", features = [\"serde\"] }\n```\n\n---\n\n### **5. Add Unit Tests**\nInside `shared/src/models/message.rs`:\n```rust\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use uuid::Uuid;\n    use chrono::Utc;\n\n    #[test]\n    fn test_message_creation() {\n        let message = Message {\n            id: Uuid::new_v4(),\n            sender_id: Uuid::new_v4(),\n            conversation_id: Uuid::new_v4(),\n            content: \"Hello, world!\".to_string(),\n            timestamp: Utc::now(),\n        };\n\n        assert_eq!(message.content, \"Hello, world!\");\n    }\n}\n```\n\n---\n\n### **6. Verify Setup**\nRun:\n\n```sh\ncargo check\ncargo test -p shared\n```\n\nNow your **conversation system models** are properly structured and tested! 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "aca72aab-83e2-445c-a934-9502e3da6e46",
+          "request_id": "91d546dcca8376f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "aca72aab-83e2-445c-a934-9502e3da6e46",
+      "children": [
+        "9488204f-733c-47ef-a171-6c8d8fcd33f4"
+      ]
+    },
+    "9488204f-733c-47ef-a171-6c8d8fcd33f4": {
+      "id": "9488204f-733c-47ef-a171-6c8d8fcd33f4",
+      "message": {
+        "id": "9488204f-733c-47ef-a171-6c8d8fcd33f4",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467966.843954,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "What about the test for the conversation model?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ]
+          },
+          "request_id": "91d54b6ade3b76f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "fd7288e4-17c4-49be-af9b-0eb167f39e62",
+      "children": [
+        "a6947d2d-ba6f-488d-99c4-d26c36feb688"
+      ]
+    },
+    "a6947d2d-ba6f-488d-99c4-d26c36feb688": {
+      "id": "a6947d2d-ba6f-488d-99c4-d26c36feb688",
+      "message": {
+        "id": "a6947d2d-ba6f-488d-99c4-d26c36feb688",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741467968.11892,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Good catch! We should also add unit tests for the **Conversation** model.  \n\n---\n\n### **Unit Test for the Conversation Model**\nModify `shared/src/models/conversation.rs` and add this at the bottom:\n\n```rust\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use uuid::Uuid;\n    use chrono::Utc;\n\n    #[test]\n    fn test_conversation_creation() {\n        let conversation = Conversation {\n            id: Uuid::new_v4(),\n            participant_ids: vec![Uuid::new_v4(), Uuid::new_v4()],\n            last_updated: Utc::now(),\n        };\n\n        assert_eq!(conversation.participant_ids.len(), 2);\n    }\n\n    #[test]\n    fn test_conversation_empty_participants() {\n        let conversation = Conversation {\n            id: Uuid::new_v4(),\n            participant_ids: vec![],\n            last_updated: Utc::now(),\n        };\n\n        assert!(conversation.participant_ids.is_empty());\n    }\n}\n```\n\n---\n\n### **Breakdown of Tests**\n1. **`test_conversation_creation`**  \n   - Ensures a conversation can be created with two participants.\n   - Checks that `participant_ids.len()` is **2**.\n\n2. **`test_conversation_empty_participants`**  \n   - Ensures a conversation can exist **with no participants**.\n   - Asserts that `participant_ids` is **empty**.\n\n---\n\n### **Run Tests**\nExecute:\n\n```sh\ncargo test -p shared\n```\n\nEverything should pass! 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "9488204f-733c-47ef-a171-6c8d8fcd33f4",
+          "request_id": "91d54b6ade3b76f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "9488204f-733c-47ef-a171-6c8d8fcd33f4",
+      "children": [
+        "1af33ead-6468-48e8-8229-de51db480a2d"
+      ]
+    },
+    "1af33ead-6468-48e8-8229-de51db480a2d": {
+      "id": "1af33ead-6468-48e8-8229-de51db480a2d",
+      "message": {
+        "id": "1af33ead-6468-48e8-8229-de51db480a2d",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741468004.992414,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Also an updated user test now that we're using uuid"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ],
+            "type": "user"
+          },
+          "request_id": "91d54c594bfe76f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a6947d2d-ba6f-488d-99c4-d26c36feb688",
+      "children": [
+        "4faa7f05-ad49-4d9c-876d-2b343f738cc9"
+      ]
+    },
+    "4faa7f05-ad49-4d9c-876d-2b343f738cc9": {
+      "id": "4faa7f05-ad49-4d9c-876d-2b343f738cc9",
+      "message": {
+        "id": "4faa7f05-ad49-4d9c-876d-2b343f738cc9",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741468005.865293,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Good call! Since we switched to using `uuid::Uuid` for the `User` model, we should update the **user tests** accordingly.\n\n---\n\n### **Updated Unit Test for the User Model**\nModify `shared/src/models/user.rs` and add this at the bottom:\n\n```rust\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use uuid::Uuid;\n\n    #[test]\n    fn test_user_creation() {\n        let user = User {\n            id: Uuid::new_v4(),\n            username: \"test_user\".to_string(),\n            email: \"test@example.com\".to_string(),\n        };\n\n        assert!(!user.id.is_nil(), \"User ID should not be nil\");\n        assert_eq!(user.username, \"test_user\");\n        assert_eq!(user.email, \"test@example.com\");\n    }\n\n    #[test]\n    fn test_user_equality() {\n        let id = Uuid::new_v4();\n        let user1 = User {\n            id,\n            username: \"same_user\".to_string(),\n            email: \"same@example.com\".to_string(),\n        };\n\n        let user2 = User {\n            id,\n            username: \"same_user\".to_string(),\n            email: \"same@example.com\".to_string(),\n        };\n\n        assert_eq!(user1, user2, \"Users with the same ID should be equal\");\n    }\n}\n```\n\n---\n\n### **Breakdown of Tests**\n1. **`test_user_creation`**  \n   - Ensures a user can be created with a UUID.\n   - Asserts that the `id` is **not nil**.\n   - Confirms `username` and `email` are assigned correctly.\n\n2. **`test_user_equality`**  \n   - Verifies that two users with the **same UUID** are considered **equal**.\n   - Useful for ensuring that ID uniqueness is correctly handled.\n\n---\n\n### **Run Tests**\nExecute:\n\n```sh\ncargo test -p shared\n```\n\nAll tests should pass! 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "1af33ead-6468-48e8-8229-de51db480a2d",
+          "request_id": "91d54c594bfe76f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "1af33ead-6468-48e8-8229-de51db480a2d",
+      "children": [
+        "ee5768fd-3e59-4923-b069-aa0f76f577c2"
+      ]
+    },
+    "ee5768fd-3e59-4923-b069-aa0f76f577c2": {
+      "id": "ee5768fd-3e59-4923-b069-aa0f76f577c2",
+      "message": {
+        "id": "ee5768fd-3e59-4923-b069-aa0f76f577c2",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741468090.280899,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "How can we show code coverage directly in the files within VS Code?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ]
+          },
+          "request_id": "91d54e6def0976f1-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "4faa7f05-ad49-4d9c-876d-2b343f738cc9",
+      "children": [
+        "a034f39c-bc53-424c-96b0-2906db252309"
+      ]
+    },
+    "a034f39c-bc53-424c-96b0-2906db252309": {
+      "id": "a034f39c-bc53-424c-96b0-2906db252309",
+      "message": {
+        "id": "a034f39c-bc53-424c-96b0-2906db252309",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741468091.470696,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "To show **code coverage** directly in files within **VS Code**, follow these steps:\n\n---\n\n## **1. Install `cargo-tarpaulin`**\nRust’s most commonly used code coverage tool is [`cargo-tarpaulin`](https://github.com/xd009642/tarpaulin). Install it with:\n\n```sh\ncargo install cargo-tarpaulin\n```\n\n---\n\n## **2. Generate Code Coverage Report**\nRun:\n\n```sh\ncargo tarpaulin --verbose --ignore-tests\n```\n\n- The `--ignore-tests` flag excludes test code itself from coverage reports.\n- Alternatively, run full coverage:\n\n```sh\ncargo tarpaulin --verbose\n```\n\nIf you want a **percentage summary only**, run:\n\n```sh\ncargo tarpaulin --summary\n```\n\n---\n\n## **3. Integrate with VS Code**\nTo display coverage **directly in your files**, install the **Cargo Tarpaulin Coverage** extension:\n1. Open **VS Code**.\n2. Go to **Extensions** (`Cmd+Shift+X`).\n3. Search for **\"Cargo Tarpaulin Coverage\"**.\n4. Install it.\n\nThis extension highlights **covered and uncovered** lines **directly in the editor**.\n\n---\n\n## **4. Enable Coverage in VS Code**\nAfter installing the extension:\n1. Open the **Command Palette** (`Cmd+Shift+P`).\n2. Search for **\"Tarpaulin: Run Code Coverage\"** and execute it.\n3. Your Rust files will now show:\n   - **Green highlights** → Covered lines\n   - **Red highlights** → Uncovered lines\n\n---\n\n## **5. (Optional) Generate HTML Report**\nIf you prefer a **visual report**, use:\n\n```sh\ncargo tarpaulin --out Html\n```\n\nThis creates a **`tarpaulin-report.html`** file inside `target/tarpaulin` that you can open in a browser.\n\n---\n\n### **Now, VS Code will show coverage inline, and you can track your test completeness! 🚀**"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "ee5768fd-3e59-4923-b069-aa0f76f577c2",
+          "request_id": "91d54e6def0976f1-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "ee5768fd-3e59-4923-b069-aa0f76f577c2",
+      "children": [
+        "24fc5ed2-8aa8-4219-8c66-5318ab028dba"
+      ]
+    },
+    "24fc5ed2-8aa8-4219-8c66-5318ab028dba": {
+      "id": "24fc5ed2-8aa8-4219-8c66-5318ab028dba",
+      "message": {
+        "id": "24fc5ed2-8aa8-4219-8c66-5318ab028dba",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {
+            "real_author": "tool:app-pairing"
+          }
+        },
+        "create_time": 1741468747.601873,
+        "update_time": null,
+        "content": {
+          "content_type": "app_pairing_content",
+          "workspaces": [
+            {
+              "id": "11457",
+              "app_id": "com.apple.Terminal",
+              "app_name": "Terminal",
+              "title": "vanna@Vannas-MacBook-Pro",
+              "content_type": "window"
+            }
+          ],
+          "context_parts": [
+            {
+              "workspace_id": "11457",
+              "text": "<truncated__content/>  Downloaded libssh2-sys v0.3.1\n  Downloaded libz-sys v1.1.21\n  Downloaded libgit2-sys v0.18.0+1.9.0\n  Downloaded 39 crates (5.9 MB) in 0.91s (largest was `libgit2-sys` at 1.9 MB)\n   Compiling proc-macro2 v1.0.94\n   Compiling unicode-ident v1.0.18\n   Compiling libc v0.2.170\n   Compiling serde v1.0.218\n   Compiling autocfg v1.4.0\n   Compiling memchr v2.7.4\n   Compiling cfg-if v1.0.0\n   Compiling stable_deref_trait v1.2.0\n   Compiling shlex v1.3.0\n   Compiling pin-project-lite v0.2.16\n   Compiling core-foundation-sys v0.8.7\n   Compiling pkg-config v0.3.32\n   Compiling once_cell v1.20.3\n   Compiling bytes v1.10.1\n   Compiling vcpkg v0.2.15\n   Compiling litemap v0.7.5\n   Compiling itoa v1.0.15\n   Compiling smallvec v1.14.0\n   Compiling writeable v0.5.5\n   Compiling slab v0.4.9\n   Compiling bitflags v2.9.0\n   Compiling futures-core v0.3.31\n   Compiling futures-sink v0.3.31\n   Compiling icu_locid_transform_data v1.5.0\n   Compiling tracing-core v0.1.33\n   Compiling futures-io v0.3.31\n   Compiling quote v1.0.39\n   Compiling semver v1.0.26\n   Compiling fnv v1.0.7\n   Compiling rustix v1.0.1\n   Compiling pin-utils v0.1.0\n   Compiling syn v2.0.99\n   Compiling futures-task v0.3.31\n   Compiling icu_properties_data v1.5.0\n   Compiling getrandom v0.3.1\n   Compiling futures-util v0.3.31\n   Compiling http v1.2.0\n   Compiling crc32fast v1.4.2\n   Compiling utf16_iter v1.0.5\n   Compiling socket2 v0.5.8\n   Compiling mio v1.0.3\n   Compiling jobserver v0.1.32\n   Compiling core-foundation v0.9.4\n   Compiling errno v0.3.10\n   Compiling cc v1.2.16\n   Compiling utf8_iter v1.0.4\n   Compiling icu_normalizer_data v1.5.0\n   Compiling tokio v1.44.0\n   Compiling write16 v1.0.0\n   Compiling httparse v1.10.1\n   Compiling http-body v1.0.1\n   Compiling security-framework-sys v2.14.0\n   Compiling percent-encoding v2.3.1\n   Compiling fastrand v2.3.0\n   Compiling try-lock v0.2.5\n   Compiling native-tls v0.2.14\n   Compiling want v0.3.1\n   Compiling form_urlencoded v1.2.1\n   Compiling security-framework v2.11.1\n   Compiling futures-channel v0.3.31\n   Compiling log v0.4.26\n   Compiling serde_json v1.0.140\n   Compiling system-configuration-sys v0.6.0\n   Compiling tempfile v3.18.0\n   Compiling unicase v2.8.1\n   Compiling ryu v1.0.20\n   Compiling tower-service v0.3.3\n   Compiling adler2 v2.0.0\n   Compiling libz-sys v1.1.21\n   Compiling openssl-sys v0.9.106\n   Compiling libssh2-sys v0.3.1\n   Compiling miniz_oxide v0.8.5\n   Compiling mime_guess v2.0.5\n   Compiling num-traits v0.2.19\n   Compiling utf8parse v0.2.2\n   Compiling equivalent v1.0.2\n   Compiling hashbrown v0.15.2\n   Compiling thiserror v2.0.12\n   Compiling synstructure v0.13.1\n   Compiling anstyle-parse v0.2.6\n   Compiling indexmap v2.7.1\n   Compiling flate2 v1.1.0\n   Compiling http-body-util v0.1.2\n   Compiling libgit2-sys v0.18.0+1.9.0\n   Compiling sync_wrapper v1.0.2\n   Compiling indexmap v1.8.2\n   Compiling aho-corasick v1.1.3\n   Compiling colorchoice v1.0.3\n   Compiling tower-layer v0.3.3\n   Compiling thiserror v1.0.69\n   Compiling regex-syntax v0.6.29\n   Compiling hyper v1.6.0\n   Compiling tokio-native-tls v0.3.1\n   Compiling regex-syntax v0.8.5\n   Compiling static_assertions v1.1.0\n   Compiling anyhow v1.0.97\n   Compiling anstyle-query v1.1.2\n   Compiling rustls-pki-types v1.11.0\n   Compiling mime v0.3.17\n   Compiling anstyle v1.0.10\n   Compiling serde_derive v1.0.218\n   Compiling zerofrom-derive v0.1.6\n   Compiling yoke-derive v0.7.5\n   Compiling zerovec-derive v0.10.3\n   Compiling displaydoc v0.2.5\n   Compiling zerofrom v0.1.6\n   Compiling icu_provider_macros v1.5.0\n   Compiling yoke v0.7.5\n   Compiling zerovec v0.10.4\n   Compiling tracing-attributes v0.1.28\n   Compiling thiserror-impl v2.0.12\n   Compiling tinystr v0.7.6\n   Compiling icu_locid v1.5.0\n   Compiling icu_collections v1.5.0\n   Compiling tracing v0.1.41\n   Compiling hyper-util v0.1.10\n   Compiling icu_provider v1.5.0\n   Compiling icu_locid_transform v1.5.0\n   Compiling camino v1.1.9\n   Compiling icu_properties v1.5.1\n   Compiling is_terminal_polyfill v1.70.1\n   Compiling anstream v0.6.18\n   Compiling rustc_version v0.4.1\n   Compiling toml_datetime v0.6.8\n   Compiling serde_spanned v0.6.8\n   Compiling serde_urlencoded v0.7.1\n   Compiling hyper-tls v0.6.0\n   Compiling regex-automata v0.4.9\n   Compiling regex-automata v0.1.10\n   Compiling thiserror-impl v1.0.69\n   Compiling icu_normalizer v1.5.0\n   Compiling idna_adapter v1.2.0\n   Compiling idna v1.0.3\n   Compiling rustls-pemfile v2.2.0\n   Compiling twox-hash v1.6.3\n   Compiling tower v0.5.2\n   Compiling url v2.5.4\n   Compiling system-configuration v0.6.1\n   Compiling gzip-header v1.0.0\n   Compiling iana-time-zone v0.1.61\n   Compiling minimal-lexical v0.2.1\n   Compiling lazy_static v1.5.0\n   Compiling llvm_profparser v0.7.1\n   Compiling heck v0.5.0\n   Compiling strsim v0.11.1\n   Compiling md5 v0.7.0\n   Compiling winnow v0.7.3\n   Compiling overload v0.1.1\n   Compiling object v0.36.7\n   Compiling adler32 v1.2.0\n   Compiling clap_lex v0.7.4\n   Compiling base64 v0.22.1\n   Compiling hashbrown v0.11.2\n   Compiling ipnet v2.11.0\n   Compiling clap_builder v4.5.31\n   Compiling reqwest v0.12.12\n   Compiling deflate v1.0.0\n   Compiling nu-ansi-term v0.46.0\n   Compiling clap_derive v4.5.28\n   Compiling toml_edit v0.22.24\n   Compiling nom v7.1.3\n   Compiling chrono v0.4.40\n   Compiling sharded-slab v0.1.7\n   Compiling regex v1.11.1\n   Compiling ruzstd v0.7.3\n   Compiling matchers v0.1.0\n   Compiling cargo-tarpaulin v0.32.2\n   Compiling cargo-platform v0.1.9\n   Compiling object v0.26.2\n   Compiling tracing-log v0.2.0\n   Compiling thread_local v1.1.8\n   Compiling humantime v2.1.0\n   Compiling leb128 v0.2.5\n   Compiling same-file v1.0.6\n   Compiling rustc-hash v1.1.0\n   Compiling fallible-iterator v0.3.0\n   Compiling walkdir v2.5.0\n   Compiling humantime-serde v1.1.1\n   Compiling tracing-subscriber v0.3.19\n   Compiling cargo_metadata v0.19.2\n   Compiling gimli v0.31.1\n   Compiling toml v0.8.20\n   Compiling clap v4.5.31\n   Compiling coveralls-api v0.7.0\n   Compiling num_cpus v1.16.0\n   Compiling quick-xml v0.37.2\n   Compiling glob v0.3.2\n   Compiling rustc-demangle v0.1.24\n   Compiling git2 v0.20.0\n    Finished `release` profile [optimized] target(s) in 39.21s\n  Installing /Users/vanna/.cargo/bin/cargo-tarpaulin\n   Installed package `cargo-tarpaulin v0.32.2` (executable `cargo-tarpaulin`)\n\n    ~/source/rusty_gpt ······················································································ 39s   sre-eks-non-prod ⎈  13:18:08  \n❯ <user__selection></user__selection>\n",
+              "textfield_id": "0",
+              "path": "vanna@Vannas-MacBook-Pro",
+              "path_hash": "e9a784ba77d2fe93745f6e3c390804e93c86a72f570a7ce0448933c45dbbeda3",
+              "annotations": null,
+              "content_type": "text",
+              "truncated_head_lines": 371,
+              "truncated_tail_lines": 0,
+              "supports_editing": false
+            }
+          ],
+          "custom_instructions": ""
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "exclusive_key": "app-pairing-whisper",
+          "is_visually_hidden_from_conversation": true,
+          "app_pairing": {
+            "type": "context",
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "id": "11457",
+                "text_fields": [
+                  {
+                    "truncated_tail_lines": 0,
+                    "id": "0",
+                    "truncated_head_lines": 371,
+                    "name": "vanna@Vannas-MacBook-Pro"
+                  }
+                ],
+                "app_id": "com.apple.Terminal",
+                "title": "vanna@Vannas-MacBook-Pro"
+              }
+            ],
+            "total_context_length": 6482
+          },
+          "request_id": "91d55e7b7ab8a326-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a034f39c-bc53-424c-96b0-2906db252309",
+      "children": [
+        "66f0067b-d30c-4f33-83b1-6039f37599f0"
+      ]
+    },
+    "66f0067b-d30c-4f33-83b1-6039f37599f0": {
+      "id": "66f0067b-d30c-4f33-83b1-6039f37599f0",
+      "message": {
+        "id": "66f0067b-d30c-4f33-83b1-6039f37599f0",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741468747.602772,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "can we make tarpaulin output an lcov file?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_id": "com.apple.Terminal",
+                "app_name": "Terminal"
+              }
+            ]
+          },
+          "request_id": "91d55e7b7ab8a326-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "24fc5ed2-8aa8-4219-8c66-5318ab028dba",
+      "children": [
+        "279012f4-b347-4959-a7a6-fd0fafe61e57"
+      ]
+    },
+    "279012f4-b347-4959-a7a6-fd0fafe61e57": {
+      "id": "279012f4-b347-4959-a7a6-fd0fafe61e57",
+      "message": {
+        "id": "279012f4-b347-4959-a7a6-fd0fafe61e57",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741468749.145237,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Yes! You can make **`cargo-tarpaulin`** output an **LCOV** file by using the `--out Lcov` option.\n\n---\n\n### **Generate LCOV Coverage Report**\nRun:\n\n```sh\ncargo tarpaulin --out Lcov\n```\n\nThis will generate a **coverage.lcov** file in your project's root directory.\n\n---\n\n### **Custom Output Path**\nIf you want to specify a different file or directory:\n\n```sh\ncargo tarpaulin --out Lcov --output-dir coverage/\n```\n\nThis will place the LCOV file inside `coverage/`.\n\n---\n\n### **Using LCOV File in VS Code**\nIf you want VS Code to **display coverage inline**, install the **Coverage Gutters** extension:\n1. Open **VS Code**.\n2. Go to **Extensions** (`Cmd+Shift+X`).\n3. Search for **\"Coverage Gutters\"** and install it.\n4. Open the Command Palette (`Cmd+Shift+P`), run:\n   ```\n   Coverage Gutters: Load Coverage File\n   ```\n5. Select **`coverage/coverage.lcov`**.\n\nNow, coverage will be shown **inline** in your Rust files!\n\n---\n\n### **Convert LCOV to HTML (Optional)**\nIf you want a **visual report**, you can use `genhtml` (part of `lcov`):\n\n```sh\nbrew install lcov  # Install LCOV if not already installed\ngenhtml -o coverage_html coverage/coverage.lcov\nopen coverage_html/index.html\n```\n\n---\n\n### **Now you have LCOV coverage in VS Code! 🚀**"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "66f0067b-d30c-4f33-83b1-6039f37599f0",
+          "request_id": "91d55e7b7ab8a326-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "66f0067b-d30c-4f33-83b1-6039f37599f0",
+      "children": [
+        "8bd587f6-5904-449b-81ca-510d3a29cade"
+      ]
+    },
+    "8bd587f6-5904-449b-81ca-510d3a29cade": {
+      "id": "8bd587f6-5904-449b-81ca-510d3a29cade",
+      "message": {
+        "id": "8bd587f6-5904-449b-81ca-510d3a29cade",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741468935.793364,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "This doesn't capture my coverage in the shared lib:\n\n❯ cargo tarpaulin --out Lcov --output-dir coverage/ --ignore-tests\n2025-03-08T21:20:37.337345Z  INFO cargo_tarpaulin::config: Creating config\n2025-03-08T21:20:37.407654Z  INFO cargo_tarpaulin: Running Tarpaulin\n2025-03-08T21:20:37.407667Z  INFO cargo_tarpaulin: Building project\n2025-03-08T21:20:37.407670Z  INFO cargo_tarpaulin::cargo: Cleaning project\n   Compiling proc-macro2 v1.0.94\n   Compiling unicode-ident v1.0.18\n   Compiling serde v1.0.218\n   Compiling libc v0.2.170\n   Compiling autocfg v1.4.0\n   Compiling getrandom v0.3.1\n   Compiling cfg-if v1.0.0\n   Compiling serde_json v1.0.140\n   Compiling core-foundation-sys v0.8.7\n   Compiling ryu v1.0.20\n   Compiling itoa v1.0.15\n   Compiling memchr v2.7.4\n   Compiling iana-time-zone v0.1.61\n   Compiling frontend v0.1.0 (/Users/vanna/Source/rusty_gpt/frontend)\n   Compiling backend v0.1.0 (/Users/vanna/Source/rusty_gpt/backend)\n   Compiling num-traits v0.2.19\n   Compiling quote v1.0.39\n   Compiling syn v2.0.99\n   Compiling serde_derive v1.0.218\n   Compiling uuid v1.15.1\n   Compiling chrono v0.4.40\n   Compiling shared v0.1.0 (/Users/vanna/Source/rusty_gpt/shared)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.93s\n2025-03-08T21:20:43.414969Z  INFO cargo_tarpaulin::process_handling: running /Users/vanna/Source/rusty_gpt/target/debug/deps/backend-1ac0b7aa348304c3\n2025-03-08T21:20:43.415073Z  INFO cargo_tarpaulin::process_handling: Setting LLVM_PROFILE_FILE\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n2025-03-08T21:20:43.569521Z  INFO cargo_tarpaulin::statemachine::instrumented: For binary: target/debug/deps/backend-1ac0b7aa348304c3\n2025-03-08T21:20:43.569533Z  INFO cargo_tarpaulin::statemachine::instrumented: Generated: target/tarpaulin/profraws/backend-1ac0b7aa348304c3_18405254493930680971_0-67366.profraw\n2025-03-08T21:20:43.569536Z  INFO cargo_tarpaulin::statemachine::instrumented: Merging coverage reports\n2025-03-08T21:20:43.569803Z  INFO cargo_tarpaulin::statemachine::instrumented: Mapping coverage data to source\n2025-03-08T21:20:43.570404Z  INFO cargo_tarpaulin::process_handling: running /Users/vanna/Source/rusty_gpt/target/debug/deps/frontend-28c96ea753a153b1\n2025-03-08T21:20:43.570510Z  INFO cargo_tarpaulin::process_handling: Setting LLVM_PROFILE_FILE\n\nrunning 1 test\ntest tests::it_works ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n2025-03-08T21:20:43.717303Z  INFO cargo_tarpaulin::statemachine::instrumented: For binary: target/debug/deps/frontend-28c96ea753a153b1\n2025-03-08T21:20:43.717312Z  INFO cargo_tarpaulin::statemachine::instrumented: Generated: target/tarpaulin/profraws/frontend-28c96ea753a153b1_7467663367813687667_0-67367.profraw\n2025-03-08T21:20:43.717314Z  INFO cargo_tarpaulin::statemachine::instrumented: Merging coverage reports\n2025-03-08T21:20:43.717556Z  INFO cargo_tarpaulin::statemachine::instrumented: Mapping coverage data to source\n2025-03-08T21:20:43.718002Z  INFO cargo_tarpaulin::process_handling: running /Users/vanna/Source/rusty_gpt/target/debug/deps/shared-0bce5a7c877c13b1\n2025-03-08T21:20:43.718081Z  INFO cargo_tarpaulin::process_handling: Setting LLVM_PROFILE_FILE\n\nrunning 5 tests\ntest models::conversation::tests::test_conversation_creation ... ok\ntest models::conversation::tests::test_conversation_empty_participants ... ok\ntest models::message::tests::test_message_creation ... ok\ntest models::user::tests::test_user_creation ... ok\ntest models::user::tests::test_user_equality ... ok\n\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n2025-03-08T21:20:43.874777Z  INFO cargo_tarpaulin::statemachine::instrumented: For binary: target/debug/deps/shared-0bce5a7c877c13b1\n2025-03-08T21:20:43.874788Z  INFO cargo_tarpaulin::statemachine::instrumented: Generated: target/tarpaulin/profraws/shared-0bce5a7c877c13b1_7773051215199763245_0-67368.profraw\n2025-03-08T21:20:43.874790Z  INFO cargo_tarpaulin::statemachine::instrumented: Merging coverage reports\n2025-03-08T21:20:43.878324Z  INFO cargo_tarpaulin::statemachine::instrumented: Mapping coverage data to source\n2025-03-08T21:20:43.894162Z  INFO cargo_tarpaulin::report: Coverage Results:\n|| Tested/Total Lines:\n|| backend/src/main.rs: 0/2 +0.00%\n|| frontend/src/lib.rs: 2/2 +0.00%\n|| \n50.00% coverage, 2/4 lines covered, +0.00% change in coverage\n"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ]
+          },
+          "request_id": "91d563136acca326-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "279012f4-b347-4959-a7a6-fd0fafe61e57",
+      "children": [
+        "fa58147f-ceb4-475f-bb9e-87953ec0ae79"
+      ]
+    },
+    "fa58147f-ceb4-475f-bb9e-87953ec0ae79": {
+      "id": "fa58147f-ceb4-475f-bb9e-87953ec0ae79",
+      "message": {
+        "id": "fa58147f-ceb4-475f-bb9e-87953ec0ae79",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741468937.095779,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "It looks like `cargo-tarpaulin` is running the tests in the `shared` crate but **not capturing the coverage results** correctly. This happens because `tarpaulin` by default only runs **binary crates** (`backend` and `frontend`) and may not properly track coverage for **library crates** like `shared`.\n\n---\n\n## **Fix: Explicitly Include `shared` in Tarpaulin**\n### **1. Run Tests with `-p shared`**\nTry explicitly running `tarpaulin` on the `shared` crate:\n\n```sh\ncargo tarpaulin -p shared --out Lcov --output-dir coverage/\n```\n\nThis should ensure `tarpaulin` includes the `shared` crate.\n\n---\n\n### **2. Run for All Crates in Workspace**\nIf you want to include **all** crates (`backend`, `frontend`, and `shared`), use:\n\n```sh\ncargo tarpaulin --workspace --out Lcov --output-dir coverage/\n```\n\nThis tells `tarpaulin` to collect coverage for **all packages** in your Rust workspace.\n\n---\n\n### **3. Check Test Visibility in `shared`**\nEnsure your tests inside `shared` are in the correct module structure. For example, in `shared/src/models/user.rs`:\n\n```rust\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn test_user_creation() {\n        let user = User {\n            id: uuid::Uuid::new_v4(),\n            username: \"test_user\".to_string(),\n            email: \"test@example.com\".to_string(),\n        };\n\n        assert_eq!(user.username, \"test_user\");\n        assert_eq!(user.email, \"test@example.com\");\n    }\n}\n```\n\nMake sure **all test functions are inside `#[cfg(test)] mod tests {}`**, otherwise they might not be recognized.\n\n---\n\n### **4. Ensure Debug Symbols Are Enabled**\nTarpaulin requires **debug symbols** to work. Double-check your **Cargo.toml**:\n\n```toml\n[profile.test]\ndebug = true\n```\n\n---\n\n### **5. Run Again and Verify Coverage**\nRun:\n\n```sh\ncargo tarpaulin --workspace --out Lcov --output-dir coverage/\n```\n\nCheck `coverage/coverage.lcov` to confirm that the **shared crate's files** are included.\n\n---\n\n### **6. (Optional) Convert LCOV to HTML for Debugging**\nIf `tarpaulin` still skips `shared`, generate an HTML report to inspect which files were covered:\n\n```sh\ngenhtml -o coverage_html coverage/coverage.lcov\nopen coverage_html/index.html\n```\n\nThis will help **visually confirm** which files were included in the coverage.\n\n---\n\n### **Now your shared library should be properly covered! 🚀**"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "8bd587f6-5904-449b-81ca-510d3a29cade",
+          "request_id": "91d563136acca326-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "8bd587f6-5904-449b-81ca-510d3a29cade",
+      "children": [
+        "bb2a352c-9abc-462c-813c-6be311cf077d"
+      ]
+    },
+    "bb2a352c-9abc-462c-813c-6be311cf077d": {
+      "id": "bb2a352c-9abc-462c-813c-6be311cf077d",
+      "message": {
+        "id": "bb2a352c-9abc-462c-813c-6be311cf077d",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741469050.571095,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Stil not including coverage from shared:\n\n❯ cargo tarpaulin --workspace --out Lcov --output-dir .coverage/\n2025-03-08T21:23:48.307288Z  INFO cargo_tarpaulin::config: Creating config\n2025-03-08T21:23:48.380400Z  INFO cargo_tarpaulin: Running Tarpaulin\n2025-03-08T21:23:48.380413Z  INFO cargo_tarpaulin: Building project\n2025-03-08T21:23:48.380416Z  INFO cargo_tarpaulin::cargo: Cleaning project\n   Compiling proc-macro2 v1.0.94\n   Compiling unicode-ident v1.0.18\n   Compiling serde v1.0.218\n   Compiling libc v0.2.170\n   Compiling autocfg v1.4.0\n   Compiling getrandom v0.3.1\n   Compiling cfg-if v1.0.0\n   Compiling core-foundation-sys v0.8.7\n   Compiling serde_json v1.0.140\n   Compiling memchr v2.7.4\n   Compiling itoa v1.0.15\n   Compiling ryu v1.0.20\n   Compiling frontend v0.1.0 (/Users/vanna/Source/rusty_gpt/frontend)\n   Compiling backend v0.1.0 (/Users/vanna/Source/rusty_gpt/backend)\n   Compiling iana-time-zone v0.1.61\n   Compiling num-traits v0.2.19\n   Compiling quote v1.0.39\n   Compiling syn v2.0.99\n   Compiling serde_derive v1.0.218\n   Compiling chrono v0.4.40\n   Compiling uuid v1.15.1\n   Compiling shared v0.1.0 (/Users/vanna/Source/rusty_gpt/shared)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.96s\n2025-03-08T21:23:54.421662Z  INFO cargo_tarpaulin::process_handling: running /Users/vanna/Source/rusty_gpt/target/debug/deps/backend-1ac0b7aa348304c3\n2025-03-08T21:23:54.421756Z  INFO cargo_tarpaulin::process_handling: Setting LLVM_PROFILE_FILE\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n2025-03-08T21:23:54.581730Z  INFO cargo_tarpaulin::statemachine::instrumented: For binary: target/debug/deps/backend-1ac0b7aa348304c3\n2025-03-08T21:23:54.581738Z  INFO cargo_tarpaulin::statemachine::instrumented: Generated: target/tarpaulin/profraws/backend-1ac0b7aa348304c3_18405254493930680971_0-74921.profraw\n2025-03-08T21:23:54.581741Z  INFO cargo_tarpaulin::statemachine::instrumented: Merging coverage reports\n2025-03-08T21:23:54.582006Z  INFO cargo_tarpaulin::statemachine::instrumented: Mapping coverage data to source\n2025-03-08T21:23:54.582450Z  INFO cargo_tarpaulin::process_handling: running /Users/vanna/Source/rusty_gpt/target/debug/deps/frontend-28c96ea753a153b1\n2025-03-08T21:23:54.582539Z  INFO cargo_tarpaulin::process_handling: Setting LLVM_PROFILE_FILE\n\nrunning 1 test\ntest tests::it_works ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n2025-03-08T21:23:54.745478Z  INFO cargo_tarpaulin::statemachine::instrumented: For binary: target/debug/deps/frontend-28c96ea753a153b1\n2025-03-08T21:23:54.745489Z  INFO cargo_tarpaulin::statemachine::instrumented: Generated: target/tarpaulin/profraws/frontend-28c96ea753a153b1_7467663367813687667_0-74922.profraw\n2025-03-08T21:23:54.745491Z  INFO cargo_tarpaulin::statemachine::instrumented: Merging coverage reports\n2025-03-08T21:23:54.745699Z  INFO cargo_tarpaulin::statemachine::instrumented: Mapping coverage data to source\n2025-03-08T21:23:54.747713Z  INFO cargo_tarpaulin::process_handling: running /Users/vanna/Source/rusty_gpt/target/debug/deps/shared-0bce5a7c877c13b1\n2025-03-08T21:23:54.748135Z  INFO cargo_tarpaulin::process_handling: Setting LLVM_PROFILE_FILE\n\nrunning 5 tests\ntest models::conversation::tests::test_conversation_creation ... ok\ntest models::conversation::tests::test_conversation_empty_participants ... ok\ntest models::message::tests::test_message_creation ... ok\ntest models::user::tests::test_user_creation ... ok\ntest models::user::tests::test_user_equality ... ok\n\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n2025-03-08T21:23:54.906383Z  INFO cargo_tarpaulin::statemachine::instrumented: For binary: target/debug/deps/shared-0bce5a7c877c13b1\n2025-03-08T21:23:54.906393Z  INFO cargo_tarpaulin::statemachine::instrumented: Generated: target/tarpaulin/profraws/shared-0bce5a7c877c13b1_7773051215199763245_0-74923.profraw\n2025-03-08T21:23:54.906395Z  INFO cargo_tarpaulin::statemachine::instrumented: Merging coverage reports\n2025-03-08T21:23:54.910131Z  INFO cargo_tarpaulin::statemachine::instrumented: Mapping coverage data to source\n2025-03-08T21:23:54.926957Z  INFO cargo_tarpaulin::report: Coverage Results:\n|| Tested/Total Lines:\n|| backend/src/main.rs: 0/2 +0.00%\n|| frontend/src/lib.rs: 2/2 +0.00%\n|| \n50.00% coverage, 2/4 lines covered, +0.00% change in coverage"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "shared_workspaces": [
+              {
+                "app_name": "Terminal",
+                "app_id": "com.apple.Terminal"
+              }
+            ],
+            "type": "user"
+          },
+          "request_id": "91d565e04e6ea326-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "fa58147f-ceb4-475f-bb9e-87953ec0ae79",
+      "children": [
+        "a0e14c78-ded9-4f12-84d7-3f11374b0f04"
+      ]
+    },
+    "a0e14c78-ded9-4f12-84d7-3f11374b0f04": {
+      "id": "a0e14c78-ded9-4f12-84d7-3f11374b0f04",
+      "message": {
+        "id": "a0e14c78-ded9-4f12-84d7-3f11374b0f04",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741469051.985927,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "It looks like `cargo-tarpaulin` is **running tests from `shared` but not capturing its coverage** in the final report. This happens because `tarpaulin` primarily instruments **binaries** and not **library crates** unless explicitly configured.\n\n---\n\n## **Fix: Force Tarpaulin to Include `shared`**\nTry **explicitly running `tarpaulin` on the `shared` crate as a library**, using `--lib`:\n\n```sh\ncargo tarpaulin -p shared --lib --out Lcov --output-dir .coverage/\n```\n\nThis ensures that:\n- `tarpaulin` instruments the **library code** in `shared`\n- Coverage from the `shared` crate gets included in the `LCOV` report\n\n---\n\n## **Fix 2: Run All Crates Including Libraries**\nIf you want **everything** (including `backend`, `frontend`, and `shared`), try:\n\n```sh\ncargo tarpaulin --workspace --lib --out Lcov --output-dir .coverage/\n```\n\n### **Why?**\n- `--lib` makes sure that `tarpaulin` measures **libraries** like `shared`, not just binaries.\n- `--workspace` ensures that it covers **all crates** in your project.\n\n---\n\n## **Fix 3: Check `Cargo.toml` for `shared`**\nEnsure `shared/Cargo.toml` is marked as a **library**, not just a dependency:\n\n```toml\n[lib]\nname = \"shared\"\npath = \"src/lib.rs\"\n```\n\nIf this section is missing, `tarpaulin` might not recognize `shared` as a testable crate.\n\n---\n\n## **Verify Coverage**\nAfter running `tarpaulin`, check if `shared` appears in the results:\n\n```sh\ncat .coverage/coverage.lcov | grep shared\n```\n\nIf no results appear, try forcing a clean run:\n\n```sh\ncargo clean\ncargo tarpaulin --workspace --lib --out Lcov --output-dir .coverage/\n```\n\n---\n\n### **Now, your `shared` crate should be properly included in the coverage report! 🚀**"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "bb2a352c-9abc-462c-813c-6be311cf077d",
+          "request_id": "91d565e04e6ea326-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "bb2a352c-9abc-462c-813c-6be311cf077d",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "a0e14c78-ded9-4f12-84d7-3f11374b0f04",
+  "plugin_ids": null,
+  "conversation_id": "67ccaef2-9aa8-800e-be58-fbe9c1493870",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [
+    "https://doc.rust-lang.org/cargo/reference/manifest.html",
+    "user.id",
+    "https://formulae.brew.sh/api/cask.jws.json",
+    "user.email",
+    "https://formulae.brew.sh/api/formula.jws.json",
+    "https://ghcr.io/v2/homebrew/core/tree/blobs/sha256:ccfac896234e1c63841b421873387c407f375af7e6db54abea549d24e3c69589",
+    "https://github.com/xd009642/tarpaulin",
+    "https://ghcr.io/v2/homebrew/core/tree/manifests/2.2.1"
+  ],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "67ccaef2-9aa8-800e-be58-fbe9c1493870"
+}

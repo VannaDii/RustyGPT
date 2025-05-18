@@ -1,0 +1,216 @@
+{
+  "title": "Introducing RAG in DAG",
+  "create_time": 1746245847.093123,
+  "update_time": 1746245857.448619,
+  "mapping": {
+    "83536f97-7bb3-4654-8b3f-156ad4fe4ec0": {
+      "id": "83536f97-7bb3-4654-8b3f-156ad4fe4ec0",
+      "message": null,
+      "parent": null,
+      "children": [
+        "1c01ce4b-2084-488d-9993-c64739bcd6b1"
+      ]
+    },
+    "1c01ce4b-2084-488d-9993-c64739bcd6b1": {
+      "id": "1c01ce4b-2084-488d-9993-c64739bcd6b1",
+      "message": {
+        "id": "1c01ce4b-2084-488d-9993-c64739bcd6b1",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "83536f97-7bb3-4654-8b3f-156ad4fe4ec0",
+      "children": [
+        "2a6cefa7-ddef-4846-b132-03c82a545142"
+      ]
+    },
+    "2a6cefa7-ddef-4846-b132-03c82a545142": {
+      "id": "2a6cefa7-ddef-4846-b132-03c82a545142",
+      "message": {
+        "id": "2a6cefa7-ddef-4846-b132-03c82a545142",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1746245847.0923784,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "1c01ce4b-2084-488d-9993-c64739bcd6b1",
+      "children": [
+        "dd4e5e6d-b310-4506-b964-86977ff60653"
+      ]
+    },
+    "dd4e5e6d-b310-4506-b964-86977ff60653": {
+      "id": "dd4e5e6d-b310-4506-b964-86977ff60653",
+      "message": {
+        "id": "dd4e5e6d-b310-4506-b964-86977ff60653",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1746245845.84975,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "What’s the ideal way to introduce rag into my dag "
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "939cf2d9f8b57684-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "2a6cefa7-ddef-4846-b132-03c82a545142",
+      "children": [
+        "d8f7e5fb-5979-4a30-b452-917a4c972922"
+      ]
+    },
+    "d8f7e5fb-5979-4a30-b452-917a4c972922": {
+      "id": "d8f7e5fb-5979-4a30-b452-917a4c972922",
+      "message": {
+        "id": "d8f7e5fb-5979-4a30-b452-917a4c972922",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1746245856.560354,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "dd4e5e6d-b310-4506-b964-86977ff60653",
+          "request_id": "939cf2d9f8b57684-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "dd4e5e6d-b310-4506-b964-86977ff60653",
+      "children": [
+        "0e0f2552-a336-4d35-b3bc-3e290505b331"
+      ]
+    },
+    "0e0f2552-a336-4d35-b3bc-3e290505b331": {
+      "id": "0e0f2552-a336-4d35-b3bc-3e290505b331",
+      "message": {
+        "id": "0e0f2552-a336-4d35-b3bc-3e290505b331",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1746245847.439216,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "The ideal way to introduce RAG (Retrieval-Augmented Generation) into your DAG (Directed Acyclic Graph) in a Rust-based system like RustyGPT depends on **when** and **how** you want retrieval to influence generation. Here's a code-first, idiomatic, and modular approach to embedding RAG into a DAG pipeline.\n\n---\n\n## **1. Define DAG Stage Types**\nYour DAG node trait should support contextual roles like retrieval, generation, and transformation:\n\n```rust\npub enum NodeType {\n    Retriever,\n    Generator,\n    ContextAugmentor,\n    Validator,\n}\n```\n\n---\n\n## **2. Design a `Retriever` Node Trait**\nIt should return context in a structured form (not raw strings):\n\n```rust\n#[async_trait]\npub trait RetrieverNode {\n    async fn retrieve(&self, input: &Prompt) -> Result<Vec<ContextChunk>>;\n}\n```\n\n---\n\n## **3. Memory-Aware Retrieval Struct**\nAssume you’re using PostgresML or pg_vector-backed memory:\n\n```rust\npub struct PgMemoryRetriever {\n    db_pool: PgPool,\n    top_k: usize,\n}\n\n#[async_trait]\nimpl RetrieverNode for PgMemoryRetriever {\n    async fn retrieve(&self, input: &Prompt) -> Result<Vec<ContextChunk>> {\n        let embedding = embed(&input.text).await?;\n        let chunks = query_similar_chunks(&self.db_pool, &embedding, self.top_k).await?;\n        Ok(chunks)\n    }\n}\n```\n\n---\n\n## **4. Integrate into DAG Execution**\nMake the retriever a preprocessing step in your DAG:\n\n```rust\nlet context_chunks = retriever_node.retrieve(&input).await?;\nlet enriched_prompt = input.with_context(context_chunks);\nlet generated = generator_node.generate(&enriched_prompt).await?;\n```\n\nThis enables deterministic, layered context routing.\n\n---\n\n## **5. DAG Node Interop**\nYou can formalize this with a DAG `Node` trait:\n\n```rust\n#[async_trait]\npub trait DagNode {\n    async fn run(&self, input: NodeInput) -> Result<NodeOutput>;\n}\n```\n\nThen wrap `RetrieverNode` and `GeneratorNode` with adaptors that implement `DagNode`.\n\n---\n\n## **Best Practices**\n- **Use early nodes** for retrieval: it should influence generation, not post-process it.\n- **Cache embeddings**: don’t re-embed identical prompts.\n- **Tag DAG nodes** with `requires_context: bool` to signal need for retrieval.\n- **Stream context chunks** if you support token streaming for long responses.\n\n---\n\n### Optional Enhancements\n- Add node-level metadata to guide retrieval scope (e.g. `topic`, `persona`, `task_type`)\n- Use specialized retrievers per domain (`MemoryRetriever`, `DocsRetriever`, `CodebaseRetriever`)\n- Wrap retrievals in observability and caching layers to reduce DB load\n\n---\n\nWant a full example DAG where RAG is a node in the pipeline?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "d8f7e5fb-5979-4a30-b452-917a4c972922",
+          "request_id": "939cf2d9f8b57684-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "d8f7e5fb-5979-4a30-b452-917a4c972922",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "0e0f2552-a336-4d35-b3bc-3e290505b331",
+  "plugin_ids": null,
+  "conversation_id": "681598d6-2d44-800e-8270-3bc8bd185179",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [
+    "https://github.com/utilityai/llama-cpp-rs",
+    "https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubcopilotinstructionsmd-file",
+    "https://github.com/users/VannaDii/projects/2/views/1||||Let",
+    "https://github.com/VannaDii/RustyGPT/issues/24"
+  ],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "681598d6-2d44-800e-8270-3bc8bd185179"
+}

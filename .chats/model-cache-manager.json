@@ -1,0 +1,213 @@
+{
+  "title": "Model Cache Manager",
+  "create_time": 1741500086.591864,
+  "update_time": 1741500116.199966,
+  "mapping": {
+    "c089461f-7fab-450d-b737-7713fcb73279": {
+      "id": "c089461f-7fab-450d-b737-7713fcb73279",
+      "message": null,
+      "parent": null,
+      "children": [
+        "7db3c090-8ac4-429a-86cd-ce2ab819c804"
+      ]
+    },
+    "7db3c090-8ac4-429a-86cd-ce2ab819c804": {
+      "id": "7db3c090-8ac4-429a-86cd-ce2ab819c804",
+      "message": {
+        "id": "7db3c090-8ac4-429a-86cd-ce2ab819c804",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "c089461f-7fab-450d-b737-7713fcb73279",
+      "children": [
+        "a445ce0d-1c4c-43c2-9820-d968c1dde3df"
+      ]
+    },
+    "a445ce0d-1c4c-43c2-9820-d968c1dde3df": {
+      "id": "a445ce0d-1c4c-43c2-9820-d968c1dde3df",
+      "message": {
+        "id": "a445ce0d-1c4c-43c2-9820-d968c1dde3df",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741500086.5914721,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "7db3c090-8ac4-429a-86cd-ce2ab819c804",
+      "children": [
+        "c2437102-56f3-48a9-a3fe-9e4e2439debb"
+      ]
+    },
+    "c2437102-56f3-48a9-a3fe-9e4e2439debb": {
+      "id": "c2437102-56f3-48a9-a3fe-9e4e2439debb",
+      "message": {
+        "id": "c2437102-56f3-48a9-a3fe-9e4e2439debb",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741500086.003574,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "We need to build a model cache to use in tasks that are the building blocks to workflows. When a workflow needs to perform a task and the task needs a model to do it, it will call the model cache which will return the loaded model synchronously, loading it if it wasn’t already. The cache needs to be able to unload models to free up memory for other models needed. The goal to never run out of memory and always load the model needed, even if it means model swapping back and forth. "
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "91d85b9299d2a3c5-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a445ce0d-1c4c-43c2-9820-d968c1dde3df",
+      "children": [
+        "018e29a1-cdb8-487a-864f-b8ec0bc646e9"
+      ]
+    },
+    "018e29a1-cdb8-487a-864f-b8ec0bc646e9": {
+      "id": "018e29a1-cdb8-487a-864f-b8ec0bc646e9",
+      "message": {
+        "id": "018e29a1-cdb8-487a-864f-b8ec0bc646e9",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741500098.6699,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "c2437102-56f3-48a9-a3fe-9e4e2439debb",
+          "request_id": "91d85b9299d2a3c5-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "c2437102-56f3-48a9-a3fe-9e4e2439debb",
+      "children": [
+        "b7da1717-82ad-4dbb-af72-47ec985bac20"
+      ]
+    },
+    "b7da1717-82ad-4dbb-af72-47ec985bac20": {
+      "id": "b7da1717-82ad-4dbb-af72-47ec985bac20",
+      "message": {
+        "id": "b7da1717-82ad-4dbb-af72-47ec985bac20",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741500086.706262,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "For this, we need to build a **model cache manager** that efficiently loads, unloads, and swaps models based on memory constraints while ensuring that a requested model is always available when needed.\n\n### **Key Requirements**\n1. **Synchronous Access** – Tasks requesting a model should block until the model is available.\n2. **Memory-Aware** – The cache must track memory usage and unload models when necessary.\n3. **Prioritization Strategy** – Models that are used more frequently should stay in memory longer.\n4. **Concurrency-Safe** – Multiple tasks should be able to request models safely.\n\n### **Architecture**\n1. **Cache Manager** – Keeps track of loaded models and their memory usage.\n2. **LRU (or Adaptive) Eviction Policy** – When memory is exceeded, remove the least recently used model or the least important one.\n3. **Model Loader** – Loads models on demand and ensures they are cached appropriately.\n4. **Memory Monitor** – Continuously tracks system memory usage to make eviction decisions.\n\n---\n\n### **Implementation in Rust**\nWe’ll use:\n- `tokio::sync::Mutex` to handle concurrent access.\n- `dashmap::DashMap` for efficient concurrent model lookup.\n- `async` tasks to handle loading/unloading asynchronously.\n\n---\n\n#### **Step 1: Define Model Cache**\nWe will use a `HashMap` to store models and track their last access time.\n\n```rust\nuse std::{\n    collections::HashMap,\n    sync::Arc,\n    time::{Duration, Instant},\n};\nuse tokio::sync::{Mutex, Notify};\nuse dashmap::DashMap;\n\nstruct Model {\n    name: String,\n    size: usize, // In MB or GB\n    last_used: Instant,\n}\n\nstruct ModelCache {\n    models: DashMap<String, Arc<Model>>, // Concurrent model storage\n    memory_limit: usize, // Max memory in MB\n    current_memory: Mutex<usize>,\n    notify: Notify, // Used to wake up an eviction task\n}\n\nimpl ModelCache {\n    pub fn new(memory_limit: usize) -> Arc<Self> {\n        Arc::new(Self {\n            models: DashMap::new(),\n            memory_limit,\n            current_memory: Mutex::new(0),\n            notify: Notify::new(),\n        })\n    }\n\n    /// Load or return an existing model\n    pub async fn get_model(&self, model_name: &str, size: usize) -> Arc<Model> {\n        if let Some(existing) = self.models.get(model_name) {\n            existing.clone()\n        } else {\n            self.load_model(model_name.to_string(), size).await\n        }\n    }\n\n    /// Load model, evicting others if necessary\n    async fn load_model(&self, model_name: String, size: usize) -> Arc<Model> {\n        let mut mem = self.current_memory.lock().await;\n        \n        // Ensure we have enough memory\n        while *mem + size > self.memory_limit {\n            self.evict_model().await;\n        }\n\n        let model = Arc::new(Model {\n            name: model_name.clone(),\n            size,\n            last_used: Instant::now(),\n        });\n\n        self.models.insert(model_name.clone(), model.clone());\n        *mem += size;\n        self.notify.notify_one(); // Wake up any waiting eviction tasks\n        model\n    }\n\n    /// Evicts the least recently used model\n    async fn evict_model(&self) {\n        let mut oldest: Option<(String, usize, Instant)> = None;\n        \n        for entry in self.models.iter() {\n            let model = entry.value();\n            if oldest.is_none() || model.last_used < oldest.unwrap().2 {\n                oldest = Some((model.name.clone(), model.size, model.last_used));\n            }\n        }\n\n        if let Some((name, size, _)) = oldest {\n            self.models.remove(&name);\n            let mut mem = self.current_memory.lock().await;\n            *mem -= size;\n        }\n    }\n}\n```\n\n---\n\n### **Step 2: Usage Example**\n```rust\n#[tokio::main]\nasync fn main() {\n    let cache = ModelCache::new(1000); // 1000MB limit\n\n    let model1 = cache.get_model(\"resnet\", 300).await;\n    println!(\"Loaded model: {}\", model1.name);\n\n    let model2 = cache.get_model(\"gpt\", 600).await;\n    println!(\"Loaded model: {}\", model2.name);\n\n    let model3 = cache.get_model(\"transformer\", 500).await;\n    println!(\"Loaded model: {}\", model3.name);\n\n    // Since memory is exceeded, least recently used model will be evicted\n}\n```\n\n---\n\n### **How it Works**\n1. **Requests a Model**\n   - If it exists in cache, return it.\n   - If not, check if there’s enough memory.\n   - If memory is insufficient, **evict** the least recently used model.\n   - Load the model and update memory usage.\n\n2. **Eviction Strategy**\n   - Least Recently Used (LRU) model gets evicted when needed.\n\n3. **Concurrency Safe**\n   - Uses `DashMap` for fast lookups.\n   - Uses `tokio::sync::Mutex` for memory tracking.\n\n---\n\n### **Next Steps**\n- **More Advanced Eviction Policies**  \n  - Prioritize models that are more expensive to reload.\n  - Keep frequently used models in memory.\n- **Asynchronous Model Loading**  \n  - Allow loading to happen in the background.\n- **Memory Monitoring Task**  \n  - Periodically check system memory and trigger eviction.\n\nWould you need the model loading to be I/O-bound (e.g., loading from disk) or compute-bound (e.g., running preprocessing)?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "018e29a1-cdb8-487a-864f-b8ec0bc646e9",
+          "request_id": "91d85b9299d2a3c5-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "018e29a1-cdb8-487a-864f-b8ec0bc646e9",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "b7da1717-82ad-4dbb-af72-47ec985bac20",
+  "plugin_ids": null,
+  "conversation_id": "67cd2eb6-3cec-800e-aecc-92c1fc659dcd",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [
+    "model.name"
+  ],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "67cd2eb6-3cec-800e-aecc-92c1fc659dcd"
+}

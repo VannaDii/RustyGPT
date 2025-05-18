@@ -1,0 +1,293 @@
+{
+  "title": "SSE for convo responses",
+  "create_time": 1741535518.55083,
+  "update_time": 1741535708.765446,
+  "mapping": {
+    "81dccd0f-6fde-46ae-9c47-f2d68017e7a5": {
+      "id": "81dccd0f-6fde-46ae-9c47-f2d68017e7a5",
+      "message": null,
+      "parent": null,
+      "children": [
+        "2c2018cd-5b66-4878-a7ab-e15c65dc09a2"
+      ]
+    },
+    "2c2018cd-5b66-4878-a7ab-e15c65dc09a2": {
+      "id": "2c2018cd-5b66-4878-a7ab-e15c65dc09a2",
+      "message": {
+        "id": "2c2018cd-5b66-4878-a7ab-e15c65dc09a2",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "81dccd0f-6fde-46ae-9c47-f2d68017e7a5",
+      "children": [
+        "409dbb66-73ab-4415-846d-70ec5245af10"
+      ]
+    },
+    "409dbb66-73ab-4415-846d-70ec5245af10": {
+      "id": "409dbb66-73ab-4415-846d-70ec5245af10",
+      "message": {
+        "id": "409dbb66-73ab-4415-846d-70ec5245af10",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741535518.549897,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "2c2018cd-5b66-4878-a7ab-e15c65dc09a2",
+      "children": [
+        "13b1a394-603e-43b0-87a5-f531977eddbb"
+      ]
+    },
+    "13b1a394-603e-43b0-87a5-f531977eddbb": {
+      "id": "13b1a394-603e-43b0-87a5-f531977eddbb",
+      "message": {
+        "id": "13b1a394-603e-43b0-87a5-f531977eddbb",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741535517.6920571,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "I think we’ll use SSE over WS, so all requests are delivered via rest api and, in conversations, responses are streamed via SSE. We’ll have to make sure the streamed responses are correlated with the conversation id, in case the client has multiple conversations. We have to make sure responses go back to the convo they’re meant for. "
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "91dbbc9aaa85dedd-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "409dbb66-73ab-4415-846d-70ec5245af10",
+      "children": [
+        "9bd61d3e-668e-4f8d-abdd-c321f7e57c59"
+      ]
+    },
+    "9bd61d3e-668e-4f8d-abdd-c321f7e57c59": {
+      "id": "9bd61d3e-668e-4f8d-abdd-c321f7e57c59",
+      "message": {
+        "id": "9bd61d3e-668e-4f8d-abdd-c321f7e57c59",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741535530.798416,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "13b1a394-603e-43b0-87a5-f531977eddbb",
+          "request_id": "91dbbc9aaa85dedd-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "13b1a394-603e-43b0-87a5-f531977eddbb",
+      "children": [
+        "1e1cb2c9-132d-4d5d-8527-7f91f31151a2"
+      ]
+    },
+    "1e1cb2c9-132d-4d5d-8527-7f91f31151a2": {
+      "id": "1e1cb2c9-132d-4d5d-8527-7f91f31151a2",
+      "message": {
+        "id": "1e1cb2c9-132d-4d5d-8527-7f91f31151a2",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741535518.864838,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "That sounds like a solid architectural decision. Using **SSE (Server-Sent Events) over WebSockets** simplifies the implementation because:\n\n1. **Statelessness:** SSE works over standard HTTP, making it easier to integrate with REST APIs and standard infrastructure (e.g., load balancers, reverse proxies).\n2. **Automatic Reconnection:** Browsers natively support automatic reconnection, reducing client-side complexity.\n3. **Lower Overhead:** SSE is a simple unidirectional stream, whereas WebSockets require more state management.\n\n### **Key Design Considerations for SSE with Multiple Conversations**\nSince multiple conversations can be active, you need a way to **route streamed responses** to the correct conversation. Here’s a structured approach:\n\n#### **1. SSE Endpoint Design**\n- Each client subscribes to **one SSE connection** for receiving all responses.\n- Responses must be tagged with a **conversation ID** so the client can route them appropriately.\n- Example SSE API:\n\n  ```rust\n  use axum::{\n      extract::{Path, State},\n      response::{sse::Event, Sse},\n      routing::get,\n      Router,\n  };\n  use futures_util::stream::{Stream, StreamExt};\n  use std::{collections::HashMap, sync::Arc};\n  use tokio::sync::Mutex;\n  use tokio_stream::wrappers::ReceiverStream;\n\n  type SharedState = Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<String>>>>;\n\n  async fn sse_handler(\n      Path(client_id): Path<String>,\n      State(state): State<SharedState>,\n  ) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {\n      let (tx, rx) = tokio::sync::mpsc::channel(10);\n      let mut state = state.lock().await;\n      state.insert(client_id.clone(), tx);\n\n      let stream = ReceiverStream::new(rx).map(|data| Ok(Event::default().data(data)));\n\n      Sse::new(stream)\n  }\n  ```\n\n#### **2. Message Delivery & Correlation**\n- Each response includes:\n  - `conversation_id`\n  - `message_id`\n  - `content`\n- Example JSON structure:\n\n  ```json\n  {\n    \"conversation_id\": \"abc123\",\n    \"message_id\": \"msg567\",\n    \"content\": \"Hello, how can I help?\"\n  }\n  ```\n\n- Modify the response stream to **tag each event with the conversation ID**:\n\n  ```rust\n  async fn send_message(state: SharedState, conversation_id: String, message: String) {\n      let state = state.lock().await;\n      if let Some(sender) = state.get(&conversation_id) {\n          let _ = sender.send(format!(r#\"{{\"conversation_id\": \"{}\", \"content\": \"{}\"}}\"#, conversation_id, message)).await;\n      }\n  }\n  ```\n\n#### **3. Client-Side Handling**\n- The client listens for SSE events and **routes messages to the correct conversation**.\n- Example JavaScript SSE client:\n\n  ```javascript\n  const eventSource = new EventSource(\"/sse/client-123\");\n\n  eventSource.onmessage = (event) => {\n      const data = JSON.parse(event.data);\n      handleIncomingMessage(data.conversation_id, data.content);\n  };\n\n  function handleIncomingMessage(conversationId, content) {\n      console.log(`Message for ${conversationId}: ${content}`);\n      // Route the message to the correct chat UI\n  }\n  ```\n\n#### **4. Ensuring Correct Routing**\n- **Each conversation request should carry a `conversation_id`.**  \n- Backend **associates the response with that `conversation_id`** and **sends it through SSE**.\n- The **frontend filters messages** to display only those that belong to the active conversation.\n\n### **Next Steps**\n- Implement message queueing (optional) for disconnected clients.\n- Consider **per-client SSE connections vs. a shared SSE endpoint** (per client is easier, but a shared connection with multiplexing may be more efficient).\n- Ensure reconnection logic is robust to avoid message loss.\n\nThis approach keeps your **REST API stateless** while allowing efficient **streaming responses**. Let me know if you want adjustments!"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "9bd61d3e-668e-4f8d-abdd-c321f7e57c59",
+          "request_id": "91dbbc9aaa85dedd-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "9bd61d3e-668e-4f8d-abdd-c321f7e57c59",
+      "children": [
+        "4008cc66-9096-44cf-965a-0cff105b10bc"
+      ]
+    },
+    "4008cc66-9096-44cf-965a-0cff105b10bc": {
+      "id": "4008cc66-9096-44cf-965a-0cff105b10bc",
+      "message": {
+        "id": "4008cc66-9096-44cf-965a-0cff105b10bc",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741535660.50532,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Since we might get partial responses from the models (via workflows and tasks), and we want to make sure we’re streaming back what we have. Make this work like it does with ChatGPT API and SSE. "
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "91dbc0168d7fdedd-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "1e1cb2c9-132d-4d5d-8527-7f91f31151a2",
+      "children": [
+        "d41a658c-9ef6-4965-bcbe-09932d486abb"
+      ]
+    },
+    "d41a658c-9ef6-4965-bcbe-09932d486abb": {
+      "id": "d41a658c-9ef6-4965-bcbe-09932d486abb",
+      "message": {
+        "id": "d41a658c-9ef6-4965-bcbe-09932d486abb",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741535661.286448,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "To replicate **ChatGPT API-style SSE streaming**, we need to ensure that:  \n\n1. **Responses are streamed in chunks** as they become available.  \n2. **Partial responses are sent immediately** to improve perceived performance.  \n3. **Responses are correlated to the correct conversation ID** so clients can handle multiple conversations correctly.  \n4. **Each message chunk carries enough context** to allow incremental UI updates.  \n\n---\n\n### **Backend Implementation (Axum + SSE)**\nWe'll structure this using **Axum, Tokio async streams, and MPSC channels** to deliver model outputs as they arrive.\n\n#### **1. Define SSE Endpoint for Streaming**\nThe client subscribes to **one SSE connection per user**. The backend sends **incremental message chunks** tagged with a conversation ID.\n\n```rust\nuse axum::{\n    extract::{Path, State},\n    response::{sse::Event, Sse},\n    routing::get,\n    Router,\n};\nuse futures_util::stream::{Stream, StreamExt};\nuse serde_json::json;\nuse std::{collections::HashMap, sync::Arc};\nuse tokio::{\n    sync::{mpsc, Mutex},\n    time::Duration,\n};\nuse tokio_stream::wrappers::ReceiverStream;\n\ntype SharedState = Arc<Mutex<HashMap<String, mpsc::Sender<String>>>>;\n\nasync fn sse_handler(\n    Path(user_id): Path<String>,\n    State(state): State<SharedState>,\n) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {\n    let (tx, rx) = mpsc::channel(10);\n    let mut state = state.lock().await;\n    state.insert(user_id.clone(), tx);\n\n    let stream = ReceiverStream::new(rx).map(|data| Ok(Event::default().data(data)));\n\n    Sse::new(stream)\n}\n```\n\n---\n\n#### **2. Send Partial Model Responses as They Arrive**\nWhen the model processes a request, **it should send partial responses as soon as they are available**.\n\n```rust\nasync fn stream_partial_response(\n    state: SharedState,\n    conversation_id: String,\n    message_id: String,\n    chunks: Vec<String>, // Simulated streaming output chunks\n) {\n    let state = state.lock().await;\n    if let Some(sender) = state.get(&conversation_id) {\n        for chunk in chunks {\n            let event_data = json!({\n                \"conversation_id\": conversation_id,\n                \"message_id\": message_id,\n                \"content\": chunk\n            })\n            .to_string();\n\n            if sender.send(event_data).await.is_err() {\n                break; // Client disconnected\n            }\n\n            tokio::time::sleep(Duration::from_millis(100)).await; // Simulate streaming delay\n        }\n    }\n}\n```\n\n---\n\n#### **3. Example Usage: Simulated Model Response Streaming**\nThis simulates a model generating a response **chunk-by-chunk**, sending each chunk immediately.\n\n```rust\n#[tokio::main]\nasync fn main() {\n    let state = Arc::new(Mutex::new(HashMap::new()));\n\n    // Simulate receiving a request and streaming responses\n    let cloned_state = state.clone();\n    tokio::spawn(async move {\n        stream_partial_response(\n            cloned_state,\n            \"conv_123\".to_string(),\n            \"msg_567\".to_string(),\n            vec![\n                \"Hello, \".to_string(),\n                \"how \".to_string(),\n                \"can I help \".to_string(),\n                \"you?\".to_string(),\n            ],\n        )\n        .await;\n    });\n\n    // Run the Axum server\n    let app = Router::new()\n        .route(\"/sse/:user_id\", get(sse_handler))\n        .with_state(state);\n\n    axum::Server::bind(&\"127.0.0.1:3000\".parse().unwrap())\n        .serve(app.into_make_service())\n        .await\n        .unwrap();\n}\n```\n\n---\n\n### **Client-Side Implementation**\nThe client should **append each incoming chunk** to the UI **in real-time**, just like ChatGPT API.\n\n```javascript\nconst eventSource = new EventSource(\"/sse/user-123\");\n\neventSource.onmessage = (event) => {\n    const data = JSON.parse(event.data);\n    appendToConversation(data.conversation_id, data.message_id, data.content);\n};\n\nfunction appendToConversation(conversationId, messageId, chunk) {\n    const messageElement = document.querySelector(`#msg-${messageId}`);\n    if (messageElement) {\n        messageElement.textContent += chunk; // Append streamed text\n    } else {\n        const newMessage = document.createElement(\"div\");\n        newMessage.id = `msg-${messageId}`;\n        newMessage.textContent = chunk;\n        document.body.appendChild(newMessage);\n    }\n}\n```\n\n---\n\n### **Key Takeaways**\n✅ **Low Latency Streaming:** Chunks are streamed **immediately** instead of buffering a full response.  \n✅ **ChatGPT-Style SSE:** Each event contains `conversation_id`, `message_id`, and `content` for incremental rendering.  \n✅ **Efficient Delivery:** Uses **Tokio async tasks** and **MPSC channels** for streaming data with minimal overhead.  \n✅ **Scalable SSE:** Each user gets one SSE connection; messages for multiple conversations can be **multiplexed** through the same connection.\n\nThis setup ensures **partial responses are streamed in real-time**, allowing the UI to **display text as it arrives**. Let me know if you need refinements!"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "4008cc66-9096-44cf-965a-0cff105b10bc",
+          "request_id": "91dbc0168d7fdedd-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "4008cc66-9096-44cf-965a-0cff105b10bc",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "d41a658c-9ef6-4965-bcbe-09932d486abb",
+  "plugin_ids": null,
+  "conversation_id": "67cdb91d-fb34-800e-8222-b1e4526faacf",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [
+    "event.data"
+  ],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "67cdb91d-fb34-800e-8222-b1e4526faacf"
+}

@@ -4,6 +4,10 @@ This document defines strict, high-quality guidelines for GitHub Copilot to foll
 
 > **Workspace Members**: See the [workspace Cargo.toml](../Cargo.toml) for crate membership and layout.
 
+# Knowledge Base
+
+The authors of this project often use AI tools for ideation and research. Conversations are stored in `.chats` folder in the project root and are JSON formatted. Use the `.chat` files for workspace context and planning activities. Draw on these conversations to inform suggestions and implementation decisions.
+
 ## Command Execution
 
 You have many tools available to you for command execution. You should primarily use the `#execute_command` tool without providing a `timeout` attribute, and ensuring the command you want to run is prefixed by a `cd` command that specifies the correct directory for the command to execute successfully. This ensures that the command runs in the appropriate context and can access the necessary resources.
@@ -11,12 +15,12 @@ You have many tools available to you for command execution. You should primarily
 ### Example Commands
 
 ```sh
-cd ~/Source/tubarr && cargo check
+cd ~/Source/rusty_gpt && cargo check
 ```
 
 ```json
 {
-  "command": "cd ~/Source/tubarr && cargo check"
+  "command": "cd ~/Source/rusty_gpt && cargo check"
 }
 ```
 

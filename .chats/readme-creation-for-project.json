@@ -1,0 +1,694 @@
+{
+  "title": "README creation for project",
+  "create_time": 1741482195.426627,
+  "update_time": 1741482537.877545,
+  "mapping": {
+    "48afcb58-3f89-4524-a1f9-96e13c2b7bde": {
+      "id": "48afcb58-3f89-4524-a1f9-96e13c2b7bde",
+      "message": null,
+      "parent": null,
+      "children": [
+        "a68a99a7-d068-488c-8573-16c3efe9397d"
+      ]
+    },
+    "a68a99a7-d068-488c-8573-16c3efe9397d": {
+      "id": "a68a99a7-d068-488c-8573-16c3efe9397d",
+      "message": {
+        "id": "a68a99a7-d068-488c-8573-16c3efe9397d",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "48afcb58-3f89-4524-a1f9-96e13c2b7bde",
+      "children": [
+        "c345b5f1-38b9-4d22-9a56-7b33f1038fd4"
+      ]
+    },
+    "c345b5f1-38b9-4d22-9a56-7b33f1038fd4": {
+      "id": "c345b5f1-38b9-4d22-9a56-7b33f1038fd4",
+      "message": {
+        "id": "c345b5f1-38b9-4d22-9a56-7b33f1038fd4",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741482195.4252737,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a68a99a7-d068-488c-8573-16c3efe9397d",
+      "children": [
+        "09d7acda-6583-4921-ace0-1d5dbbeffd3c"
+      ]
+    },
+    "09d7acda-6583-4921-ace0-1d5dbbeffd3c": {
+      "id": "09d7acda-6583-4921-ace0-1d5dbbeffd3c",
+      "message": {
+        "id": "09d7acda-6583-4921-ace0-1d5dbbeffd3c",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {
+            "real_author": "tool:app-pairing"
+          }
+        },
+        "create_time": 1741482193.911381,
+        "update_time": null,
+        "content": {
+          "content_type": "app_pairing_content",
+          "workspaces": [
+            {
+              "id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+              "app_id": "com.microsoft.VSCode",
+              "app_name": "Code",
+              "title": "README.md — rusty_gpt",
+              "content_type": "window"
+            }
+          ],
+          "context_parts": [
+            {
+              "workspace_id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+              "text": "\n",
+              "textfield_id": "0",
+              "path": "/Users/vanna/Source/rusty_gpt/README.md",
+              "path_hash": "9af0bae4746f2a8682a743a7d09398d14772892774f9845ae862328df11a05ad",
+              "annotations": null,
+              "content_type": "text",
+              "truncated_head_lines": 0,
+              "truncated_tail_lines": 0,
+              "supports_editing": true
+            }
+          ],
+          "custom_instructions": ""
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "total_context_length": 1,
+            "type": "context",
+            "shared_workspaces": [
+              {
+                "text_fields": [
+                  {
+                    "id": "/Users/vanna/Source/rusty_gpt/README.md",
+                    "truncated_tail_lines": 0,
+                    "truncated_head_lines": 0,
+                    "name": "README.md"
+                  }
+                ],
+                "app_id": "com.microsoft.VSCode",
+                "id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+                "app_name": "Code",
+                "title": "README.md — rusty_gpt"
+              }
+            ]
+          },
+          "is_visually_hidden_from_conversation": true,
+          "exclusive_key": "app-pairing-whisper",
+          "request_id": "91d6a6c24c54759a-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "c345b5f1-38b9-4d22-9a56-7b33f1038fd4",
+      "children": [
+        "41f30d31-ff8e-404c-a86b-7c0ca995671c"
+      ]
+    },
+    "41f30d31-ff8e-404c-a86b-7c0ca995671c": {
+      "id": "41f30d31-ff8e-404c-a86b-7c0ca995671c",
+      "message": {
+        "id": "41f30d31-ff8e-404c-a86b-7c0ca995671c",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741482193.9218888,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Using all of our chats, solutions, and code in this project, write a README.md file for the project"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "shared_workspaces": [
+              {
+                "app_id": "com.microsoft.VSCode",
+                "app_name": "Code"
+              }
+            ],
+            "type": "user"
+          },
+          "request_id": "91d6a6c24c54759a-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "09d7acda-6583-4921-ace0-1d5dbbeffd3c",
+      "children": [
+        "dc0d1fb8-fb0e-4a18-b8ed-e1645a049b0d"
+      ]
+    },
+    "dc0d1fb8-fb0e-4a18-b8ed-e1645a049b0d": {
+      "id": "dc0d1fb8-fb0e-4a18-b8ed-e1645a049b0d",
+      "message": {
+        "id": "dc0d1fb8-fb0e-4a18-b8ed-e1645a049b0d",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741482209.502192,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "41f30d31-ff8e-404c-a86b-7c0ca995671c",
+          "request_id": "91d6a6c24c54759a-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "41f30d31-ff8e-404c-a86b-7c0ca995671c",
+      "children": [
+        "4ec83ff4-42bb-4dd8-9a08-f12c931ea24b"
+      ]
+    },
+    "4ec83ff4-42bb-4dd8-9a08-f12c931ea24b": {
+      "id": "4ec83ff4-42bb-4dd8-9a08-f12c931ea24b",
+      "message": {
+        "id": "4ec83ff4-42bb-4dd8-9a08-f12c931ea24b",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741482197.334566,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "<message>\n- Create a `README.md` file in the `rusty_gpt` project with the following content:\n\n```markdown\n# Getting Rusty\n\n## Overview\n\n**Getting Rusty** is a learning-driven Rust project focused on mastering Rust for building efficient, scalable backend systems. The project explores **Axum** for API development, **PostgreSQL** for database management, and **AI model integration** in Rust.\n\n## Features\n\n- **RESTful API** using **Axum** for high-performance web services.\n- **PostgreSQL integration** with stored procedures for secure, efficient database access.\n- **OAuth authentication** via Apple and GitHub (never Google or Meta).\n- **AI model integration** using local inference engines.\n- **Docker Compose setup** for seamless environment management.\n- **Unit-tested architecture** ensuring reliability and maintainability.\n\n## Project Goals\n\n- Achieve proficiency in Rust for backend development.\n- Build scalable and maintainable REST APIs.\n- Implement secure user authentication and authorization.\n- Integrate AI models into server-side applications.\n- Maintain a structured, best-practice-driven Rust codebase.\n\n## Tech Stack\n\n- **Programming Language:** Rust\n- **Web Framework:** Axum\n- **Database:** PostgreSQL\n- **Authentication:** Local accounts & OAuth (Apple, GitHub)\n- **Containerization:** Docker Compose\n- **Testing:** Unit tests for API and database interactions\n- **AI Models:** Local inference, no external API dependencies\n\n## Setup & Installation\n\n1. **Clone the Repository**\n   ```sh\n   git clone https://github.com/yourusername/rusty_gpt.git\n   cd rusty_gpt\n   ```\n\n2. **Install Dependencies**\n   - Ensure you have Rust installed ([Rustup](https://rustup.rs/)).\n   - Install Docker and Docker Compose.\n   - Configure environment variables (see `.env.example`).\n\n3. **Run the Project**\n   ```sh\n   docker-compose up --build\n   ```\n\n4. **Run Tests**\n   ```sh\n   cargo test\n   ```\n\n## API Documentation\n\n- OpenAPI Spec available at `/swagger` when the server is running.\n- Endpoints follow REST best practices.\n\n## Contributing\n\nThis is an evolving project focused on learning and best practices. Contributions and suggestions are welcome!\n\n## License\n\nMIT License. See `LICENSE` for details.\n```\n</message>"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": false,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200007
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "dc0d1fb8-fb0e-4a18-b8ed-e1645a049b0d",
+          "request_id": "91d6a6c24c54759a-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "oboe.edit_file",
+        "channel": null
+      },
+      "parent": "dc0d1fb8-fb0e-4a18-b8ed-e1645a049b0d",
+      "children": [
+        "a0662433-9059-43a5-aa2c-710e2681a006"
+      ]
+    },
+    "a0662433-9059-43a5-aa2c-710e2681a006": {
+      "id": "a0662433-9059-43a5-aa2c-710e2681a006",
+      "message": {
+        "id": "a0662433-9059-43a5-aa2c-710e2681a006",
+        "author": {
+          "role": "tool",
+          "name": "oboe",
+          "metadata": {}
+        },
+        "create_time": 1741482229.277734,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "The following changes were successfully sent to the user. No need to reiterate any file changes.\n\n*** Begin Patch\n*** Update File: 0\n \n+# Getting Rusty\n \n+## Overview\n+\n+**Getting Rusty** is a learning-driven Rust project focused on mastering Rust for building efficient, scalable backend systems. The project explores **Axum** for API development, **PostgreSQL** for database management, and **AI model integration** in Rust.\n+\n+## Features\n+\n+- **RESTful API** using **Axum** for high-performance web services.\n+- **PostgreSQL integration** with stored procedures for secure, efficient database access.\n+- **OAuth authentication** via Apple and GitHub (never Google or Meta).\n+- **AI model integration** using local inference engines.\n+- **Docker Compose setup** for seamless environment management.\n+- **Unit-tested architecture** ensuring reliability and maintainability.\n+\n+## Project Goals\n+\n+- Achieve proficiency in Rust for backend development.\n+- Build scalable and maintainable REST APIs.\n+- Implement secure user authentication and authorization.\n+- Integrate AI models into server-side applications.\n+- Maintain a structured, best-practice-driven Rust codebase.\n+\n+## Tech Stack\n+\n+- **Programming Language:** Rust\n+- **Web Framework:** Axum\n+- **Database:** PostgreSQL\n+- **Authentication:** Local accounts & OAuth (Apple, GitHub)\n+- **Containerization:** Docker Compose\n+- **Testing:** Unit tests for API and database interactions\n+- **AI Models:** Local inference, no external API dependencies\n+\n+## Setup & Installation\n+\n+1. **Clone the Repository**\n+   ```sh\n+   git clone https://github.com/yourusername/rusty_gpt.git\n+   cd rusty_gpt\n+   ```\n+\n+2. **Install Dependencies**\n+   - Ensure you have Rust installed ([Rustup](https://rustup.rs/)).\n+   - Install Docker and Docker Compose.\n+   - Configure environment variables (see `.env.example`).\n+\n+3. **Run the Project**\n+   ```sh\n+   docker-compose up --build\n+   ```\n+\n+4. **Run Tests**\n+   ```sh\n+   cargo test\n+   ```\n+\n+## API Documentation\n+\n+- OpenAPI Spec available at `/swagger` when the server is running.\n+- Endpoints follow REST best practices.\n+\n+## Contributing\n+\n+This is an evolving project focused on learning and best practices. Contributions and suggestions are welcome!\n+\n+## License\n+\n+MIT License. See `LICENSE` for details.\n+\n*** End of File\n*** End Patch"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 0.0,
+        "metadata": {
+          "desktop_context_patch": {
+            "patch": {
+              "version": "diff_v4",
+              "files": [
+                {
+                  "file_id": "0",
+                  "file_path": "/Users/vanna/Source/rusty_gpt/README.md",
+                  "path_hash": "9af0bae4746f2a8682a743a7d09398d14772892774f9845ae862328df11a05ad",
+                  "workspace_id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+                  "patches": [
+                    "*** Begin Patch\n*** Update File: 0\n \n+# Getting Rusty\n \n+## Overview\n+\n+**Getting Rusty** is a learning-driven Rust project focused on mastering Rust for building efficient, scalable backend systems. The project explores **Axum** for API development, **PostgreSQL** for database management, and **AI model integration** in Rust.\n+\n+## Features\n+\n+- **RESTful API** using **Axum** for high-performance web services.\n+- **PostgreSQL integration** with stored procedures for secure, efficient database access.\n+- **OAuth authentication** via Apple and GitHub (never Google or Meta).\n+- **AI model integration** using local inference engines.\n+- **Docker Compose setup** for seamless environment management.\n+- **Unit-tested architecture** ensuring reliability and maintainability.\n+\n+## Project Goals\n+\n+- Achieve proficiency in Rust for backend development.\n+- Build scalable and maintainable REST APIs.\n+- Implement secure user authentication and authorization.\n+- Integrate AI models into server-side applications.\n+- Maintain a structured, best-practice-driven Rust codebase.\n+\n+## Tech Stack\n+\n+- **Programming Language:** Rust\n+- **Web Framework:** Axum\n+- **Database:** PostgreSQL\n+- **Authentication:** Local accounts & OAuth (Apple, GitHub)\n+- **Containerization:** Docker Compose\n+- **Testing:** Unit tests for API and database interactions\n+- **AI Models:** Local inference, no external API dependencies\n+\n+## Setup & Installation\n+\n+1. **Clone the Repository**\n+   ```sh\n+   git clone https://github.com/yourusername/rusty_gpt.git\n+   cd rusty_gpt\n+   ```\n+\n+2. **Install Dependencies**\n+   - Ensure you have Rust installed ([Rustup](https://rustup.rs/)).\n+   - Install Docker and Docker Compose.\n+   - Configure environment variables (see `.env.example`).\n+\n+3. **Run the Project**\n+   ```sh\n+   docker-compose up --build\n+   ```\n+\n+4. **Run Tests**\n+   ```sh\n+   cargo test\n+   ```\n+\n+## API Documentation\n+\n+- OpenAPI Spec available at `/swagger` when the server is running.\n+- Endpoints follow REST best practices.\n+\n+## Contributing\n+\n+This is an evolving project focused on learning and best practices. Contributions and suggestions are welcome!\n+\n+## License\n+\n+MIT License. See `LICENSE` for details.\n+\n*** End of File\n*** End Patch"
+                  ],
+                  "original": "\n",
+                  "truncated_head_lines": 0
+                }
+              ]
+            },
+            "workspaces": [
+              {
+                "id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+                "app_id": "com.microsoft.VSCode",
+                "app_name": "Code",
+                "title": "README.md — rusty_gpt",
+                "content_type": "window"
+              }
+            ],
+            "auto_apply": false,
+            "errors": []
+          },
+          "is_visually_hidden_from_conversation": true,
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "4ec83ff4-42bb-4dd8-9a08-f12c931ea24b",
+          "request_id": "91d6a6c24c54759a-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "4ec83ff4-42bb-4dd8-9a08-f12c931ea24b",
+      "children": [
+        "f23c0380-b752-49d2-ab93-b4d871f27506"
+      ]
+    },
+    "f23c0380-b752-49d2-ab93-b4d871f27506": {
+      "id": "f23c0380-b752-49d2-ab93-b4d871f27506",
+      "message": {
+        "id": "f23c0380-b752-49d2-ab93-b4d871f27506",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741482228.679758,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "The `README.md` file has been created with a structured overview of the **Getting Rusty** project, including its goals, tech stack, setup instructions, and API documentation. Let me know if you need any modifications or additional details! 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "a0662433-9059-43a5-aa2c-710e2681a006",
+          "request_id": "91d6a6c24c54759a-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a0662433-9059-43a5-aa2c-710e2681a006",
+      "children": [
+        "5bfb55ca-a328-4d99-b85a-b541f1e78750"
+      ]
+    },
+    "5bfb55ca-a328-4d99-b85a-b541f1e78750": {
+      "id": "5bfb55ca-a328-4d99-b85a-b541f1e78750",
+      "message": {
+        "id": "5bfb55ca-a328-4d99-b85a-b541f1e78750",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {
+            "real_author": "tool:app-pairing"
+          }
+        },
+        "create_time": 1741482525.29177,
+        "update_time": null,
+        "content": {
+          "content_type": "app_pairing_content",
+          "workspaces": [
+            {
+              "id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+              "app_id": "com.microsoft.VSCode",
+              "app_name": "Code",
+              "title": "LICENSE — rusty_gpt",
+              "content_type": "window"
+            }
+          ],
+          "context_parts": [
+            {
+              "workspace_id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+              "text": "\n",
+              "textfield_id": "0",
+              "path": "/Users/vanna/Source/rusty_gpt/LICENSE",
+              "path_hash": "1f6c234d6ea74a15980ee3c14839f14839be1604193d58818a645391fbe8498e",
+              "annotations": null,
+              "content_type": "text",
+              "truncated_head_lines": 0,
+              "truncated_tail_lines": 0,
+              "supports_editing": true
+            }
+          ],
+          "custom_instructions": ""
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true,
+          "exclusive_key": "app-pairing-whisper",
+          "app_pairing": {
+            "type": "context",
+            "shared_workspaces": [
+              {
+                "id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+                "app_name": "Code",
+                "app_id": "com.microsoft.VSCode",
+                "title": "LICENSE — rusty_gpt",
+                "text_fields": [
+                  {
+                    "truncated_tail_lines": 0,
+                    "truncated_head_lines": 0,
+                    "id": "/Users/vanna/Source/rusty_gpt/LICENSE",
+                    "name": "LICENSE"
+                  }
+                ]
+              }
+            ],
+            "total_context_length": 1
+          },
+          "request_id": "91d6aed8ddc9b9da-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "f23c0380-b752-49d2-ab93-b4d871f27506",
+      "children": [
+        "cb8e5517-7708-472f-aadc-b44e2f928077"
+      ]
+    },
+    "cb8e5517-7708-472f-aadc-b44e2f928077": {
+      "id": "cb8e5517-7708-472f-aadc-b44e2f928077",
+      "message": {
+        "id": "cb8e5517-7708-472f-aadc-b44e2f928077",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741482525.292232,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Since you mentioned a LICENSE file, go ahead and provide an MIT license file for the project"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "app_pairing": {
+            "type": "user",
+            "shared_workspaces": [
+              {
+                "app_name": "Code",
+                "app_id": "com.microsoft.VSCode"
+              }
+            ]
+          },
+          "request_id": "91d6aed8ddc9b9da-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "5bfb55ca-a328-4d99-b85a-b541f1e78750",
+      "children": [
+        "ab3a8ef5-76cd-488a-bd7a-9507729f3435"
+      ]
+    },
+    "ab3a8ef5-76cd-488a-bd7a-9507729f3435": {
+      "id": "ab3a8ef5-76cd-488a-bd7a-9507729f3435",
+      "message": {
+        "id": "ab3a8ef5-76cd-488a-bd7a-9507729f3435",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741482526.553806,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "<message>\n- Create a `LICENSE` file in the `rusty_gpt` project with the following content:\n\n```plaintext\nMIT License\n\nCopyright (c) 2025 Vanna\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n```\n</message>"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": false,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200007
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "cb8e5517-7708-472f-aadc-b44e2f928077",
+          "request_id": "91d6aed8ddc9b9da-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "oboe.edit_file",
+        "channel": null
+      },
+      "parent": "cb8e5517-7708-472f-aadc-b44e2f928077",
+      "children": [
+        "79feefc2-76b0-4c1f-b1c2-dbc064b93d47"
+      ]
+    },
+    "79feefc2-76b0-4c1f-b1c2-dbc064b93d47": {
+      "id": "79feefc2-76b0-4c1f-b1c2-dbc064b93d47",
+      "message": {
+        "id": "79feefc2-76b0-4c1f-b1c2-dbc064b93d47",
+        "author": {
+          "role": "tool",
+          "name": "oboe",
+          "metadata": {}
+        },
+        "create_time": 1741482537.118064,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "The following changes were successfully sent to the user. No need to reiterate any file changes.\n\n*** Begin Patch\n*** Update File: 0\n+LICENSE\n \n+MIT License\n \n+Copyright (c) 2025 Vanna\n+\n+Permission is hereby granted, free of charge, to any person obtaining a copy\n+of this software and associated documentation files (the \"Software\"), to deal\n+in the Software without restriction, including without limitation the rights\n+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n+copies of the Software, and to permit persons to whom the Software is\n+furnished to do so, subject to the following conditions:\n+\n+The above copyright notice and this permission notice shall be included in all\n+copies or substantial portions of the Software.\n+\n+THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n+SOFTWARE.\n+\n*** End of File\n*** End Patch"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 0.0,
+        "metadata": {
+          "desktop_context_patch": {
+            "patch": {
+              "version": "diff_v4",
+              "files": [
+                {
+                  "file_id": "0",
+                  "file_path": "/Users/vanna/Source/rusty_gpt/LICENSE",
+                  "path_hash": "1f6c234d6ea74a15980ee3c14839f14839be1604193d58818a645391fbe8498e",
+                  "workspace_id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+                  "patches": [
+                    "*** Begin Patch\n*** Update File: 0\n+LICENSE\n \n+MIT License\n \n+Copyright (c) 2025 Vanna\n+\n+Permission is hereby granted, free of charge, to any person obtaining a copy\n+of this software and associated documentation files (the \"Software\"), to deal\n+in the Software without restriction, including without limitation the rights\n+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n+copies of the Software, and to permit persons to whom the Software is\n+furnished to do so, subject to the following conditions:\n+\n+The above copyright notice and this permission notice shall be included in all\n+copies or substantial portions of the Software.\n+\n+THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n+SOFTWARE.\n+\n*** End of File\n*** End Patch"
+                  ],
+                  "original": "\n",
+                  "truncated_head_lines": 0
+                }
+              ]
+            },
+            "workspaces": [
+              {
+                "id": "Visual Studio Code-f2777feb-8e5e-403d-ac5d-76480eced6b3",
+                "app_id": "com.microsoft.VSCode",
+                "app_name": "Code",
+                "title": "LICENSE — rusty_gpt",
+                "content_type": "window"
+              }
+            ],
+            "auto_apply": false,
+            "errors": []
+          },
+          "is_visually_hidden_from_conversation": true,
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "ab3a8ef5-76cd-488a-bd7a-9507729f3435",
+          "request_id": "91d6aed8ddc9b9da-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "ab3a8ef5-76cd-488a-bd7a-9507729f3435",
+      "children": [
+        "8dd59607-09db-4775-bf09-fac6d7e4e323"
+      ]
+    },
+    "8dd59607-09db-4775-bf09-fac6d7e4e323": {
+      "id": "8dd59607-09db-4775-bf09-fac6d7e4e323",
+      "message": {
+        "id": "8dd59607-09db-4775-bf09-fac6d7e4e323",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741482535.955774,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "The MIT license file has been created for the project. Let me know if you need any modifications! 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "79feefc2-76b0-4c1f-b1c2-dbc064b93d47",
+          "request_id": "91d6aed8ddc9b9da-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "79feefc2-76b0-4c1f-b1c2-dbc064b93d47",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "8dd59607-09db-4775-bf09-fac6d7e4e323",
+  "plugin_ids": null,
+  "conversation_id": "67cce8d2-6504-800e-b2fe-85e90cbe7030",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [
+    "https://github.com/yourusername/rusty_gpt.git",
+    "https://rustup.rs/"
+  ],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "67cce8d2-6504-800e-b2fe-85e90cbe7030"
+}

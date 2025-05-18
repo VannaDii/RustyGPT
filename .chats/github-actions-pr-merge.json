@@ -1,0 +1,383 @@
+{
+  "title": "GitHub Actions PR Merge",
+  "create_time": 1741961293.634739,
+  "update_time": 1742057635.502932,
+  "mapping": {
+    "a1f6808f-7665-4177-a832-c8dad6e08682": {
+      "id": "a1f6808f-7665-4177-a832-c8dad6e08682",
+      "message": null,
+      "parent": null,
+      "children": [
+        "a02bcc8c-a267-40c8-92ec-6daab42e9d61"
+      ]
+    },
+    "a02bcc8c-a267-40c8-92ec-6daab42e9d61": {
+      "id": "a02bcc8c-a267-40c8-92ec-6daab42e9d61",
+      "message": {
+        "id": "a02bcc8c-a267-40c8-92ec-6daab42e9d61",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a1f6808f-7665-4177-a832-c8dad6e08682",
+      "children": [
+        "c2f22ee7-a99b-484b-a4e3-27c8f968ed6d"
+      ]
+    },
+    "c2f22ee7-a99b-484b-a4e3-27c8f968ed6d": {
+      "id": "c2f22ee7-a99b-484b-a4e3-27c8f968ed6d",
+      "message": {
+        "id": "c2f22ee7-a99b-484b-a4e3-27c8f968ed6d",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741961293.634092,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "a02bcc8c-a267-40c8-92ec-6daab42e9d61",
+      "children": [
+        "635c05c1-24fb-4c84-80e5-4f95c8dbfe6a"
+      ]
+    },
+    "635c05c1-24fb-4c84-80e5-4f95c8dbfe6a": {
+      "id": "635c05c1-24fb-4c84-80e5-4f95c8dbfe6a",
+      "message": {
+        "id": "635c05c1-24fb-4c84-80e5-4f95c8dbfe6a",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741961292.522975,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Is there a comparable package to npm's `heroicons` for rust and yew?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "92045780396a8a73-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "c2f22ee7-a99b-484b-a4e3-27c8f968ed6d",
+      "children": [
+        "1d56b48b-f72d-438c-8511-ac7e171dbbf8"
+      ]
+    },
+    "1d56b48b-f72d-438c-8511-ac7e171dbbf8": {
+      "id": "1d56b48b-f72d-438c-8511-ac7e171dbbf8",
+      "message": {
+        "id": "1d56b48b-f72d-438c-8511-ac7e171dbbf8",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741961306.225787,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "635c05c1-24fb-4c84-80e5-4f95c8dbfe6a",
+          "request_id": "92045780396a8a73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "635c05c1-24fb-4c84-80e5-4f95c8dbfe6a",
+      "children": [
+        "0c494228-0862-4906-abba-7a4e16e4671c"
+      ]
+    },
+    "0c494228-0862-4906-abba-7a4e16e4671c": {
+      "id": "0c494228-0862-4906-abba-7a4e16e4671c",
+      "message": {
+        "id": "0c494228-0862-4906-abba-7a4e16e4671c",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1741961294.18981,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Yes, there is a Rust/Yew equivalent to npm's `heroicons`. You can use the [`yew_icons`](https://crates.io/crates/yew_icons) crate, which provides access to a variety of icon sets, including **Heroicons**.\n\n### How to Use `yew_icons`\n1. Add the dependency to your `Cargo.toml`:\n   ```toml\n   [dependencies]\n   yew = { version = \"0.21\", features = [\"csr\"] }\n   yew_icons = \"0.7\"\n   ```\n\n2. Import and use Heroicons in your Yew components:\n   ```rust\n   use yew::prelude::*;\n   use yew_icons::{Icon, IconId};\n\n   #[function_component(MyComponent)]\n   fn my_component() -> Html {\n       html! {\n           <Icon icon_id={IconId::HeroiconsOutlineHome} class=\"h-6 w-6 text-gray-500\" />\n       }\n   }\n   ```\n\n### Features:\n- Supports multiple icon sets, including **Heroicons, Bootstrap Icons, Feather, Font Awesome, and more**.\n- You can control size, color, and styling via Tailwind classes or CSS.\n\nIf you're specifically looking for **only Heroicons**, you can also check out [`leptos_heroicons`](https://crates.io/crates/leptos_heroicons), but that’s designed for **Leptos**, not Yew.\n\nWould you like an example integrating this into your **Axum + Yew** project?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "1d56b48b-f72d-438c-8511-ac7e171dbbf8",
+          "request_id": "92045780396a8a73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "1d56b48b-f72d-438c-8511-ac7e171dbbf8",
+      "children": [
+        "68bbf026-7e97-4a1d-a2b9-15825c110304"
+      ]
+    },
+    "68bbf026-7e97-4a1d-a2b9-15825c110304": {
+      "id": "68bbf026-7e97-4a1d-a2b9-15825c110304",
+      "message": {
+        "id": "68bbf026-7e97-4a1d-a2b9-15825c110304",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1742057574.308347,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Help me solve this GitHub Actions issue:\n\n\n  gh pr merge --auto --merge \"$PR_URL\"\n  shell: /usr/bin/bash -e {0}\n  env:\n    CARGO_TERM_COLOR: always\n    PR_URL: https://github.com/VannaDii/RustyGPT/pull/9\n    GITHUB_TOKEN: ***\nGraphQL: Resource not accessible by integration (mergePullRequest)"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "920d86217e16ded9-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null,
+          "paragen_variants_info": {
+            "type": "num_variants_in_stream",
+            "num_variants_in_stream": 2,
+            "display_treatment": "skippable",
+            "conversation_id": "67d4384c-eac0-800e-9b0a-afd16b8d54f9"
+          }
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "0c494228-0862-4906-abba-7a4e16e4671c",
+      "children": [
+        "4fa86f01-da27-46c9-b951-3d14f4bc0de1",
+        "f84550a9-5b4f-46a7-80bc-0613a6d89d6a"
+      ]
+    },
+    "4fa86f01-da27-46c9-b951-3d14f4bc0de1": {
+      "id": "4fa86f01-da27-46c9-b951-3d14f4bc0de1",
+      "message": {
+        "id": "4fa86f01-da27-46c9-b951-3d14f4bc0de1",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1742057587.565723,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "rebase_system_message": true,
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "68bbf026-7e97-4a1d-a2b9-15825c110304",
+          "request_id": "920d86217e16ded9-SEA",
+          "timestamp_": "absolute",
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "68bbf026-7e97-4a1d-a2b9-15825c110304",
+      "children": [
+        "c7c498c5-2e7f-4c2b-9b5d-fce84f208145"
+      ]
+    },
+    "c7c498c5-2e7f-4c2b-9b5d-fce84f208145": {
+      "id": "c7c498c5-2e7f-4c2b-9b5d-fce84f208145",
+      "message": {
+        "id": "c7c498c5-2e7f-4c2b-9b5d-fce84f208145",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1742057575.726629,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "The `GraphQL: Resource not accessible by integration (mergePullRequest)` error in GitHub Actions typically means that the `GITHUB_TOKEN` does not have sufficient permissions to perform the merge action.\n\n### Possible Causes & Fixes:\n1. **Insufficient Permissions for `GITHUB_TOKEN`**  \n   By default, the `GITHUB_TOKEN` used in GitHub Actions **only has read/write permissions on the repository** but does **not** have permission to merge pull requests unless explicitly granted.\n\n   **Fix:** Modify the `permissions` block in your workflow YAML file to explicitly grant `GITHUB_TOKEN` the required permissions:\n   ```yaml\n   permissions:\n     pull-requests: write\n     contents: write\n   ```\n\n2. **Using a Personal Access Token (PAT) Instead of `GITHUB_TOKEN`**  \n   If modifying permissions doesn't work, GitHub's default `GITHUB_TOKEN` might not be enough to merge PRs via the API. Instead, use a **Personal Access Token (PAT)** with the necessary scopes (`repo` scope for private repos or `public_repo` for public repos).\n\n   **Steps to fix:**\n   - Generate a **Personal Access Token (PAT)** with the `repo` or `public_repo` scope.\n   - Store it as a **GitHub Actions Secret** (e.g., `GH_PAT`).\n   - Modify your workflow to use the PAT instead:\n     ```yaml\n     env:\n       GITHUB_TOKEN: ${{ secrets.GH_PAT }}\n     ```\n\n3. **Use a Different Merge Strategy**\n   If `--merge` is causing issues, try switching to `--squash` or `--rebase`:\n   ```bash\n   gh pr merge --auto --squash \"$PR_URL\"\n   ```\n\n4. **Confirm That `GITHUB_TOKEN` is Set Correctly**\n   Add a debug step to verify that `GITHUB_TOKEN` exists (without exposing it):\n   ```yaml\n   - run: echo \"Token length: ${#GITHUB_TOKEN}\"\n   ```\n\n---\n\n### TL;DR:\n- **First,** add `permissions: pull-requests: write` to your workflow.\n- **If that fails,** use a PAT instead of `GITHUB_TOKEN` for merging PRs.\n- **Try `--squash`** instead of `--merge` if it's a merge method issue.\n- **Ensure `GITHUB_TOKEN` is properly set** by debugging its presence.\n\nLet me know what the current setup is in your workflow, and we can debug further! 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "augmented_paragen_prompt_label": null,
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "4fa86f01-da27-46c9-b951-3d14f4bc0de1",
+          "request_id": "920d86217e16ded9-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "4fa86f01-da27-46c9-b951-3d14f4bc0de1",
+      "children": []
+    },
+    "f84550a9-5b4f-46a7-80bc-0613a6d89d6a": {
+      "id": "f84550a9-5b4f-46a7-80bc-0613a6d89d6a",
+      "message": {
+        "id": "f84550a9-5b4f-46a7-80bc-0613a6d89d6a",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1742057575.698322,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "The error **\"GraphQL: Resource not accessible by integration (mergePullRequest)\"** in your GitHub Actions workflow usually indicates a **permissions issue** with the GitHub token being used.\n\n### Steps to Fix:\n1. **Check GitHub Token Permissions**  \n   GitHub Actions use the default `GITHUB_TOKEN`, which has **limited permissions** by default. Ensure your workflow has `write` access to the repository and pull requests.\n\n   Update your workflow file (`.github/workflows/your-workflow.yml`) to explicitly request **write** permissions:\n   ```yaml\n   permissions:\n     contents: write\n     pull-requests: write\n   ```\n\n2. **Use a Personal Access Token (PAT) Instead of `GITHUB_TOKEN`**  \n   The default `GITHUB_TOKEN` **cannot trigger a PR merge** if branch protection rules are enabled. Instead, generate a **Personal Access Token (PAT)** with `repo` and `pull_requests: write` scope:\n\n   - Go to **GitHub → Settings → Developer Settings → Personal Access Tokens**.\n   - Generate a **fine-grained token** (recommended) or a **classic token** with at least:\n     - `contents: write`\n     - `pull-requests: write`\n   - Store it as a **GitHub Actions secret** (e.g., `GH_PAT`).\n\n   Then update your workflow:\n   ```yaml\n   env:\n     GITHUB_TOKEN: ${{ secrets.GH_PAT }}\n   ```\n\n3. **Verify the PR URL and Context**  \n   Ensure that the `PR_URL` is correct and you are using it properly. If merging within an **organization-owned repository**, check:\n   - If `GITHUB_TOKEN` has enough permissions (it might need a repo admin to enable write permissions).\n   - If the GitHub App running the workflow has permission to merge PRs.\n\n4. **Try Using `gh pr merge` with a PAT Directly**  \n   If you're using a PAT, you can test manually in your local terminal:\n   ```bash\n   export GH_TOKEN=your_personal_access_token\n   gh pr merge --auto --merge https://github.com/VannaDii/RustyGPT/pull/9\n   ```\n\n   If this works locally but not in Actions, it's almost certainly a permissions issue with `GITHUB_TOKEN`.\n\n#### **Summary of Fix**\n- **Best fix:** Use `permissions: write` in the workflow and try again.\n- If `GITHUB_TOKEN` still fails, use a **PAT** with `repo` scope.\n- Double-check branch protection rules (e.g., required reviews).\n\nLet me know if you're still stuck! 🚀"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "68bbf026-7e97-4a1d-a2b9-15825c110304",
+          "request_id": "920d86217e16ded9-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "68bbf026-7e97-4a1d-a2b9-15825c110304",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "c7c498c5-2e7f-4c2b-9b5d-fce84f208145",
+  "plugin_ids": null,
+  "conversation_id": "67d4384c-eac0-800e-9b0a-afd16b8d54f9",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [
+    "https://github.com/VannaDii/RustyGPT/pull/9"
+  ],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "67d4384c-eac0-800e-9b0a-afd16b8d54f9"
+}

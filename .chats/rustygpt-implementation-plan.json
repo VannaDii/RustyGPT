@@ -1,0 +1,572 @@
+{
+  "title": "RustyGPT Implementation Plan",
+  "create_time": 1744498746.549086,
+  "update_time": 1744499442.394072,
+  "mapping": {
+    "137aa96a-a2ef-4201-84f2-c2e4b73ad29d": {
+      "id": "137aa96a-a2ef-4201-84f2-c2e4b73ad29d",
+      "message": null,
+      "parent": null,
+      "children": [
+        "f24e6b16-1252-45ce-b471-79608326e14e"
+      ]
+    },
+    "f24e6b16-1252-45ce-b471-79608326e14e": {
+      "id": "f24e6b16-1252-45ce-b471-79608326e14e",
+      "message": {
+        "id": "f24e6b16-1252-45ce-b471-79608326e14e",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": null,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 0.0,
+        "metadata": {
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "137aa96a-a2ef-4201-84f2-c2e4b73ad29d",
+      "children": [
+        "c0ef5549-a9e3-4aa6-b50a-f18ba165b268"
+      ]
+    },
+    "c0ef5549-a9e3-4aa6-b50a-f18ba165b268": {
+      "id": "c0ef5549-a9e3-4aa6-b50a-f18ba165b268",
+      "message": {
+        "id": "c0ef5549-a9e3-4aa6-b50a-f18ba165b268",
+        "author": {
+          "role": "system",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744498746.548768,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "attachments": [],
+          "is_visually_hidden_from_conversation": true
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "f24e6b16-1252-45ce-b471-79608326e14e",
+      "children": [
+        "0a450ad1-1830-462d-9341-5778599acc2b"
+      ]
+    },
+    "0a450ad1-1830-462d-9341-5778599acc2b": {
+      "id": "0a450ad1-1830-462d-9341-5778599acc2b",
+      "message": {
+        "id": "0a450ad1-1830-462d-9341-5778599acc2b",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744498745.774488,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Using all the knowledge in this project and all our conversations so far about RustyGPT give me a comprehensive implementation plan for the entire thing, everything we've talked about, don't skip any details. Format this in markdown as a TODO-style nested list. Be very very thurough!!"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "92f6550b6d12eb73-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "c0ef5549-a9e3-4aa6-b50a-f18ba165b268",
+      "children": [
+        "59ae5e47-9ab3-42b3-b483-b719295f4fb6"
+      ]
+    },
+    "59ae5e47-9ab3-42b3-b483-b719295f4fb6": {
+      "id": "59ae5e47-9ab3-42b3-b483-b719295f4fb6",
+      "message": {
+        "id": "59ae5e47-9ab3-42b3-b483-b719295f4fb6",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744498758.594955,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "0a450ad1-1830-462d-9341-5778599acc2b",
+          "request_id": "92f6550b6d12eb73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "0a450ad1-1830-462d-9341-5778599acc2b",
+      "children": [
+        "49e60931-6e67-489b-b638-1ac1e96dc2b1"
+      ]
+    },
+    "49e60931-6e67-489b-b638-1ac1e96dc2b1": {
+      "id": "49e60931-6e67-489b-b638-1ac1e96dc2b1",
+      "message": {
+        "id": "49e60931-6e67-489b-b638-1ac1e96dc2b1",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744498747.344637,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Vanna wants a comprehensive implementation plan for the entire RustyGPT project in TODO-style markdown format that includes all previously discussed features and architecture."
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": false,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200007
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "59ae5e47-9ab3-42b3-b483-b719295f4fb6",
+          "request_id": "92f6550b6d12eb73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "bio",
+        "channel": null
+      },
+      "parent": "59ae5e47-9ab3-42b3-b483-b719295f4fb6",
+      "children": [
+        "643c1035-05d9-43bf-99ce-eeeb6bd830cf"
+      ]
+    },
+    "643c1035-05d9-43bf-99ce-eeeb6bd830cf": {
+      "id": "643c1035-05d9-43bf-99ce-eeeb6bd830cf",
+      "message": {
+        "id": "643c1035-05d9-43bf-99ce-eeeb6bd830cf",
+        "author": {
+          "role": "tool",
+          "name": "bio",
+          "metadata": {}
+        },
+        "create_time": 1744498758.59509,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Model set context updated."
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "49e60931-6e67-489b-b638-1ac1e96dc2b1",
+          "request_id": "92f6550b6d12eb73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "assistant",
+        "channel": null
+      },
+      "parent": "49e60931-6e67-489b-b638-1ac1e96dc2b1",
+      "children": [
+        "ec8c0f96-fba0-4bc3-ba81-7b635e7ded0b"
+      ]
+    },
+    "ec8c0f96-fba0-4bc3-ba81-7b635e7ded0b": {
+      "id": "ec8c0f96-fba0-4bc3-ba81-7b635e7ded0b",
+      "message": {
+        "id": "ec8c0f96-fba0-4bc3-ba81-7b635e7ded0b",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744498753.924115,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Absolutely. Below is a comprehensive, TODO-style implementation plan for the entire RustyGPT project, capturing all architecture decisions, backend/frontend features, AI integration, developer experience enhancements, local-first design, and system-level goals we've discussed.\n\n---\n\n# ✅ RustyGPT — Full Implementation Plan (TODO Checklist)\n\n> A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrates local models, PostgreSQL, OAuth (Apple/GitHub), SSE streaming, stored procedures, and AI tools for survival, conversation, and reasoning.\n\n---\n\n## 📦 1. Project Structure & Workspace\n\n- [ ] Set up `Cargo.toml` workspace with following crates:\n  - [x] `rustygpt-common`: shared types, traits, and helpers\n  - [ ] `rustygpt-api`: Axum REST API\n  - [ ] `rustygpt-frontend`: Yew app (SPA, WASM)\n  - [ ] `rustygpt-model`: AI/LLM interaction layer (local model bindings)\n  - [ ] `rustygpt-db`: PostgreSQL integration and stored procedure bindings\n  - [ ] `rustygpt-index`: indexing layer for books, files, and survival knowledge\n  - [ ] `rustygpt-utils`: CLI helpers and tooling\n- [ ] Add `Makefile` or `justfile` for standard dev workflows\n- [ ] Create `.cargo/config.toml` with target-specific settings (WASM, build flags)\n\n---\n\n## 🚀 2. Backend (Axum)\n\n- [ ] Setup Axum project with tower, tracing, dotenvy, etc.\n- [ ] Use `utoipa` or `paperclip` for OpenAPI docs\n- [ ] Define route tree with modular organization:\n  - [ ] `/auth`: login, signup, logout\n  - [ ] `/chat`: create conversation, stream messages (SSE)\n  - [ ] `/search`: query indexed docs\n  - [ ] `/admin`: system and model config endpoints\n- [ ] Define `AppState` with:\n  - [ ] Shared config, secrets, db pool, cache, LLM handle\n- [ ] Add middleware:\n  - [ ] Request tracing\n  - [ ] Auth via cookie/JWT\n  - [ ] CORS, compression\n- [ ] SSE support for streaming AI responses\n- [ ] All response bodies use `#[derive(Serialize)]` and unified `ApiResponse<T>`\n\n---\n\n## 🛂 3. Authentication & Accounts\n\n- [ ] Auth via:\n  - [x] Local email+password\n  - [ ] Apple Sign In (JWT + redirect flow)\n  - [ ] GitHub OAuth (preferred over Google/Facebook)\n- [ ] PostgreSQL stored procedures for:\n  - [ ] Create user, login, validate session\n  - [ ] Link external identity\n  - [ ] Get current user from session token\n- [ ] Secure password hashing (argon2)\n- [ ] Issue JWT (short-lived) and HTTP-only cookie (refresh)\n\n---\n\n## 🧠 4. AI Model Integration (LLM)\n\n- [ ] Support local model backends:\n  - [x] `Ollama` (GPT4All, Mistral, etc.)\n  - [ ] `OpenWebUI` proxy integration\n  - [ ] `ComfyUI` for image generation and chaining\n- [ ] Stream responses token-by-token over SSE\n- [ ] Wrap model APIs with a trait-based abstraction:\n  ```rust\n  pub trait LlmEngine {\n      async fn stream_response(&self, input: LlmInput) -> Pin<Box<dyn Stream<Item = LlmToken>>>;\n  }\n  ```\n- [ ] Cache prompt completions and embeddings for reuse\n- [ ] Plug into `rustygpt-index` for contextual augmentation\n\n---\n\n## 📚 5. File, Book, and Knowledge Indexing\n\n- [ ] `rustygpt-index` supports:\n  - [ ] EPUB parser for survival and homesteading books\n  - [ ] Markdown/HTML/Text parsing for chat-augmented reference\n  - [ ] Custom embedding model or `llama-index`-style summarizer\n  - [ ] Tokenizer + vector store (use `tantivy` or `qdrant` via local)\n- [ ] Watch directory (`/array/data/epubs`) and reindex on change\n- [ ] Store chunked embeddings with metadata in local DB\n\n---\n\n## 🧪 6. Testing & Coverage\n\n- [ ] All crates require 90%+ coverage:\n  - [ ] Use `cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html`\n- [ ] Use `mockall` and `assert-json-diff` for REST endpoint testing\n- [ ] Validate SSE streams with integration tests\n- [ ] WASM unit tests for frontend logic\n\n---\n\n## 🖥️ 7. Frontend (Yew)\n\n- [ ] Setup Yew + Trunk + TailwindCSS\n- [ ] Pages:\n  - [ ] Auth (Sign In / Sign Up / OAuth)\n  - [ ] Chat UI (like ChatGPT, thread explorer)\n  - [ ] Index search interface\n  - [ ] Admin / settings view\n- [ ] Components:\n  - [ ] ChatBox with streaming tokens\n  - [ ] Thread view for branching conversations\n  - [ ] Message controls (move to thread, pin, tag, etc.)\n- [ ] Pull types from `rustygpt-common` with `wasm-bindgen` or shared crate\n\n---\n\n## 📦 8. Dockerized Environment\n\n- [x] Use Docker Compose for dev:\n  - [x] `rustygpt-api`\n  - [x] `rustygpt-frontend`\n  - [x] PostgreSQL with mounted SQL for stored procedures\n  - [x] `ollama` with model volume\n  - [ ] Add `OpenWebUI` container\n  - [ ] `comfyui` for local image generation\n- [ ] Mount `/array/data/books` and `/array/data/media`\n- [ ] Enable `--gpus=all` for NVIDIA containers\n\n---\n\n## 🧰 9. Tooling & Developer Experience\n\n- [ ] GitHub Copilot instructions in `COPILOT_INSTRUCTIONS.md`\n  - [x] Enforce idiomatic Rust, lifetime safety, memory correctness\n  - [x] Add docstring formatting with type linking\n  - [ ] Unified semver and crate version management\n- [ ] `dev.md` for common workflows\n- [ ] `scripts/` for model management, DB seed, etc.\n\n---\n\n## 💬 10. Conversation Explorer Architecture\n\n- [ ] Messages:\n  - [ ] Belong to a `Conversation`\n  - [ ] Can branch (parent_id optional)\n  - [ ] Store message type: user/system/AI\n- [ ] UI features:\n  - [ ] Branching tree display (thread explorer)\n  - [ ] Message thread summary (optional)\n  - [ ] Move message to another thread\n- [ ] LLM thread-level summarization\n- [ ] Auto-thread detection on abrupt topic shifts\n- [ ] Option to “pull” a subthread back into main context\n\n---\n\n## 🧠 11. Critical Thinking Enhancements\n\n- [ ] Prompt templates:\n  - [ ] Socratic questioning\n  - [ ] Devil’s advocate\n  - [ ] Chain-of-thought forcing\n- [ ] Conversation type system:\n  - [ ] `Reflective`, `Analytical`, `Research`, `Practical`, etc.\n- [ ] Epistemic controls:\n  - [ ] Confidence rating sliders on response\n  - [ ] Assumption identification\n\n---\n\n## 🛡️ 12. Privacy & Offline Use\n\n- [x] No external APIs for inference\n- [ ] All models run locally (Ollama, ComfyUI)\n- [ ] No telemetry or call-home code\n- [ ] `OpenWebUI` for local interface to models\n- [ ] All user data stays on disk (Postgres, JSON, or local FS)\n\n---\n\n## 🔒 13. Authorization & Roles\n\n- [ ] Basic roles: `admin`, `user`, `read-only`\n- [ ] Admin endpoints protected by role middleware\n- [ ] Users can only access their own chats/files unless shared\n\n---\n\n## 🧠 14. AI Prompt Enrichment & Memory\n\n- [ ] Message-level memory cache (opt-in)\n- [ ] Thread memory summary regeneration (on change)\n- [ ] Prompt enrichment:\n  - [ ] Inject relevant document snippets\n  - [ ] Inject user-defined tags or glossary\n  - [ ] Summarize long threads before prompting model\n\n---\n\n## 🖼️ 15. Image Generation via ComfyUI\n\n- [ ] Connect `rustygpt-api` to `ComfyUI` via HTTP/REST or socket\n- [ ] Stream job status via SSE\n- [ ] Model configuration endpoints\n- [ ] Save generated image metadata to indexed chat messages\n\n---\n\n## 🏕️ 16. Survival Mode & Homesteading Corpus\n\n- [x] Directory of offline-first EPUB books on survival\n- [ ] Index key sections by topic (water, heating, first aid, etc.)\n- [ ] Keyword extraction with embeddings\n- [ ] “Survival mode” preset: offline + only indexed data access\n\n---\n\n## 📑 17. Content Moderation & Guardrails\n\n- [ ] Local rule-based filtering (no cloud moderation)\n- [ ] Flag unsafe or recursive prompts\n- [ ] Prompt rewriter / clarifier module\n\n---\n\n## 🧩 18. Optional Features / Future Work\n\n- [ ] Raven bonding and familiar conversation logic 🤭\n- [ ] Home assistant module integration\n- [ ] Plugin framework for third-party LLMs or tools\n- [ ] Offline Whisper integration for voice-to-text\n- [ ] Real-time local voice synthesis (e.g. `coqui-tts`)\n\n---\n\n## ✅ 19. Milestone Tracking\n\n- [ ] ✅ Milestone 1: Workspace & Project Skeleton\n- [ ] 🔲 Milestone 2: Auth & API routes\n- [ ] 🔲 Milestone 3: Frontend MVP\n- [ ] 🔲 Milestone 4: LLM integration + SSE streaming\n- [ ] 🔲 Milestone 5: Indexing & search\n- [ ] 🔲 Milestone 6: Critical thinking tools\n- [ ] 🔲 Milestone 7: Offline survival mode\n- [ ] 🔲 Milestone 8: AI image generation & chat threading\n\n---\n\nWant this broken up into GitHub project boards or milestone-linked PR strategy next?"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "643c1035-05d9-43bf-99ce-eeeb6bd830cf",
+          "request_id": "92f6550b6d12eb73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "643c1035-05d9-43bf-99ce-eeeb6bd830cf",
+      "children": [
+        "307409cd-0add-481f-9a53-847995fd794b"
+      ]
+    },
+    "307409cd-0add-481f-9a53-847995fd794b": {
+      "id": "307409cd-0add-481f-9a53-847995fd794b",
+      "message": {
+        "id": "307409cd-0add-481f-9a53-847995fd794b",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744499016.45373,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "This is great and I LOVE the humor and emoji!! I do need the items to have a markdown style checkbox like `- [ ]` if you don't mind"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "92f65ba968cfeb73-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "ec8c0f96-fba0-4bc3-ba81-7b635e7ded0b",
+      "children": [
+        "e70e1b7d-051b-4810-9066-9b6b30937195"
+      ]
+    },
+    "e70e1b7d-051b-4810-9066-9b6b30937195": {
+      "id": "e70e1b7d-051b-4810-9066-9b6b30937195",
+      "message": {
+        "id": "e70e1b7d-051b-4810-9066-9b6b30937195",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744499029.633904,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            ""
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "307409cd-0add-481f-9a53-847995fd794b",
+          "request_id": "92f65ba968cfeb73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "307409cd-0add-481f-9a53-847995fd794b",
+      "children": [
+        "4e41dfdb-4f66-47eb-ae38-133b560723dd"
+      ]
+    },
+    "4e41dfdb-4f66-47eb-ae38-133b560723dd": {
+      "id": "4e41dfdb-4f66-47eb-ae38-133b560723dd",
+      "message": {
+        "id": "4e41dfdb-4f66-47eb-ae38-133b560723dd",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744499017.732876,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "I got you! Here's the same full implementation plan for RustyGPT with proper `- [ ]` markdown-style checkboxes for every item, preserving the humor and emoji energy you liked:\n\n---\n\n# ✅ RustyGPT — Full Implementation Plan (TODO Checklist)\n\n> A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrates local models, PostgreSQL, OAuth (Apple/GitHub), SSE streaming, stored procedures, and AI tools for survival, conversation, and reasoning.\n\n---\n\n## 📦 1. Project Structure & Workspace\n\n- [ ] Set up `Cargo.toml` workspace with the following crates:\n  - [ ] `rustygpt-common`: shared types, traits, helpers\n  - [ ] `rustygpt-api`: Axum REST API\n  - [ ] `rustygpt-frontend`: Yew SPA (WASM)\n  - [ ] `rustygpt-model`: AI/LLM backend layer\n  - [ ] `rustygpt-db`: PostgreSQL + stored procedure layer\n  - [ ] `rustygpt-index`: document, file, and book indexer\n  - [ ] `rustygpt-utils`: CLI + scripts\n- [ ] Add `Makefile` or `justfile` for common workflows\n- [ ] Create `.cargo/config.toml` for WASM and perf settings\n\n---\n\n## 🚀 2. Backend (Axum)\n\n- [ ] Set up Axum with tower, tracing, dotenvy\n- [ ] Use `utoipa` or `paperclip` for OpenAPI docs\n- [ ] Define route tree:\n  - [ ] `/auth`: local + external login\n  - [ ] `/chat`: conversation/threading\n  - [ ] `/search`: document + book embeddings\n  - [ ] `/admin`: model + system config\n- [ ] AppState includes:\n  - [ ] Config\n  - [ ] DB pool\n  - [ ] Cache\n  - [ ] LLM handle\n- [ ] Middleware:\n  - [ ] Tracing\n  - [ ] Auth cookie/JWT\n  - [ ] CORS + compression\n- [ ] SSE streaming endpoint (chat streaming, generation)\n\n---\n\n## 🛂 3. Authentication & Accounts\n\n- [ ] Local login:\n  - [ ] Email + password (argon2 hash)\n- [ ] External login:\n  - [ ] Apple Sign-In\n  - [ ] GitHub OAuth\n- [ ] PostgreSQL stored procs for:\n  - [ ] Create/login user\n  - [ ] Validate session\n  - [ ] Link OAuth identities\n- [ ] Issue short-lived JWT + secure refresh cookie\n\n---\n\n## 🧠 4. AI Model Integration (LLM)\n\n- [ ] Support:\n  - [ ] `ollama` models\n  - [ ] `open-webui` bridge\n  - [ ] `comfyui` for images\n- [ ] Wrap engine calls with trait:\n  ```rust\n  trait LlmEngine {\n      async fn stream_response(&self, input: LlmInput) -> Pin<Box<dyn Stream<Item = LlmToken>>>;\n  }\n  ```\n- [ ] SSE stream tokens to frontend\n- [ ] Cache completions and embeddings\n\n---\n\n## 📚 5. File, Book, and Knowledge Indexing\n\n- [ ] `rustygpt-index`:\n  - [ ] Parse EPUBs (survival docs)\n  - [ ] Extract markdown/html/txt chunks\n  - [ ] Tokenize + embed\n  - [ ] Use `tantivy` or local `qdrant`\n- [ ] Watch folder and re-index on change\n- [ ] Store embeddings + metadata in DB\n\n---\n\n## 🧪 6. Testing & Coverage\n\n- [ ] Add `cargo llvm-cov` to workflow\n  - [ ] Command: `cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html`\n- [ ] Unit tests for:\n  - [ ] API handlers\n  - [ ] SSE output\n  - [ ] Stored proc bindings\n- [ ] WASM test coverage for Yew logic\n\n---\n\n## 🖥️ 7. Frontend (Yew)\n\n- [ ] Setup with Trunk + TailwindCSS\n- [ ] Pages:\n  - [ ] Login / Register / OAuth\n  - [ ] Chat\n  - [ ] Admin\n  - [ ] Search interface\n- [ ] Components:\n  - [ ] Chat window\n  - [ ] Streaming tokens\n  - [ ] Threaded messages\n- [ ] Use `rustygpt-common` for shared types\n\n---\n\n## 📦 8. Dockerized Environment\n\n- [ ] Compose stack:\n  - [ ] `rustygpt-api`\n  - [ ] `rustygpt-frontend`\n  - [ ] PostgreSQL w/ stored proc mounts\n  - [ ] `ollama` w/ local models\n  - [ ] `open-webui`\n  - [ ] `comfyui` image generation\n- [ ] Mount:\n  - [ ] `/array/data/books`\n  - [ ] `/array/data/media`\n- [ ] Use `--gpus=all` for GPU containers\n\n---\n\n## 🧰 9. Tooling & Dev Experience\n\n- [ ] `COPILOT_INSTRUCTIONS.md`:\n  - [ ] Idiomatic Rust only\n  - [ ] Explicit type references in docstrings\n  - [ ] Avoid cloning unless required\n  - [ ] Semver management across crates\n- [ ] `dev.md`:\n  - [ ] Run/start/reset/test\n- [ ] Scripts for:\n  - [ ] Seed DB\n  - [ ] Download models\n  - [ ] Lint & check\n\n---\n\n## 💬 10. Conversation Explorer\n\n- [ ] Message model:\n  - [ ] `parent_id`, `thread_id`, `message_type`\n- [ ] Threading support in UI:\n  - [ ] Display branches\n  - [ ] Auto-thread detection on topic change\n  - [ ] Pull message back to main\n- [ ] LLM summarization of threads\n- [ ] Admin tagging and controls\n\n---\n\n## 🧠 11. Critical Thinking Tools\n\n- [ ] Prompt styles:\n  - [ ] Socratic\n  - [ ] Devil's Advocate\n  - [ ] Chain of Thought\n- [ ] Message rating tools:\n  - [ ] Confidence sliders\n  - [ ] Flag assumptions\n- [ ] Conversation types:\n  - [ ] Reflective / Practical / Analytical\n\n---\n\n## 🛡️ 12. Privacy & Offline Use\n\n- [ ] No cloud inference\n- [ ] All models local:\n  - [ ] Ollama\n  - [ ] WebUI\n  - [ ] ComfyUI\n- [ ] No telemetry ever\n- [ ] All data stored on disk\n- [ ] Offline-only mode\n\n---\n\n## 🔒 13. Roles & Permissions\n\n- [ ] Roles:\n  - [ ] `admin`, `user`, `readonly`\n- [ ] Auth middleware for:\n  - [ ] Admin endpoints\n  - [ ] Message ownership enforcement\n\n---\n\n## 🧠 14. Prompt Enrichment & Memory\n\n- [ ] Per-thread summaries\n- [ ] Token-limited memory injection\n- [ ] Enrich prompt with:\n  - [ ] Glossary\n  - [ ] Prior message embedding hits\n  - [ ] System instructions (role-based)\n\n---\n\n## 🖼️ 15. ComfyUI Image Generation\n\n- [ ] Submit jobs via HTTP/socket\n- [ ] Stream job state to frontend via SSE\n- [ ] UI for:\n  - [ ] Prompts\n  - [ ] Image history\n- [ ] Embed image refs in chat\n\n---\n\n## 🏕️ 16. Survival Mode (Books + AI)\n\n- [ ] Index survival EPUBs by topic\n- [ ] Add tags: water, shelter, medicine, etc.\n- [ ] Search only indexed docs (no LLM inference)\n- [ ] \"Offline survival mode\" toggle\n\n---\n\n## 📑 17. Moderation & Guardrails\n\n- [ ] Rule-based local moderation\n- [ ] Unsafe topic detection (non-cloud)\n- [ ] Prompt rewriter / clarification engine\n\n---\n\n## 🧩 18. Optional / Bonus Features\n\n- [ ] Raven companion memory model (🪶 Ogg & Vorbis)\n- [ ] Smart home local API (HomeKit / HA bridge)\n- [ ] Whisper for voice input\n- [ ] Coqui TTS for offline voice output\n- [ ] Plugin system for AI tools (e.g. codegen, debugger)\n\n---\n\n## ✅ 19. Milestones\n\n- [ ] Milestone 1: Workspace + Skeleton\n- [ ] Milestone 2: Auth, DB, API basics\n- [ ] Milestone 3: Yew + WASM Frontend\n- [ ] Milestone 4: LLM Integration + SSE\n- [ ] Milestone 5: File & Book Indexing\n- [ ] Milestone 6: Conversation Explorer\n- [ ] Milestone 7: Survival & Offline Mode\n- [ ] Milestone 8: Image + Voice + Thread Summaries\n\n---\n\nLet me know if you want this converted into GitHub issues or Kanban-style board JSON next 👷‍♀️"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "e70e1b7d-051b-4810-9066-9b6b30937195",
+          "request_id": "92f65ba968cfeb73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "e70e1b7d-051b-4810-9066-9b6b30937195",
+      "children": [
+        "c46980fa-1b41-406e-9606-30f2ad3499dc"
+      ]
+    },
+    "c46980fa-1b41-406e-9606-30f2ad3499dc": {
+      "id": "c46980fa-1b41-406e-9606-30f2ad3499dc",
+      "message": {
+        "id": "c46980fa-1b41-406e-9606-30f2ad3499dc",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744499211.2455668,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Just one minor issue. I need this in markdown"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "92f6606c1b5ceb73-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "4e41dfdb-4f66-47eb-ae38-133b560723dd",
+      "children": [
+        "5b3b5860-063b-4f7f-98a4-09165565f07e"
+      ]
+    },
+    "5b3b5860-063b-4f7f-98a4-09165565f07e": {
+      "id": "5b3b5860-063b-4f7f-98a4-09165565f07e",
+      "message": {
+        "id": "5b3b5860-063b-4f7f-98a4-09165565f07e",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744499213.053305,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Absolutely, here’s the **Markdown-formatted version** of the complete RustyGPT implementation plan with checkbox items, emoji, humor, and no formatting issues:\n\n---\n\n```md\n# ✅ RustyGPT — Full Implementation Plan (TODO Checklist)\n\n> A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrates local models, PostgreSQL, OAuth (Apple/GitHub), SSE streaming, stored procedures, and AI tools for survival, conversation, and reasoning.\n\n---\n\n## 📦 1. Project Structure & Workspace\n\n- [ ] Set up `Cargo.toml` workspace with the following crates:\n  - [ ] `rustygpt-common`: shared types, traits, helpers\n  - [ ] `rustygpt-api`: Axum REST API\n  - [ ] `rustygpt-frontend`: Yew SPA (WASM)\n  - [ ] `rustygpt-model`: AI/LLM backend layer\n  - [ ] `rustygpt-db`: PostgreSQL + stored procedure layer\n  - [ ] `rustygpt-index`: document, file, and book indexer\n  - [ ] `rustygpt-utils`: CLI + scripts\n- [ ] Add `Makefile` or `justfile` for common workflows\n- [ ] Create `.cargo/config.toml` for WASM and perf settings\n\n---\n\n## 🚀 2. Backend (Axum)\n\n- [ ] Set up Axum with tower, tracing, dotenvy\n- [ ] Use `utoipa` or `paperclip` for OpenAPI docs\n- [ ] Define route tree:\n  - [ ] `/auth`: local + external login\n  - [ ] `/chat`: conversation/threading\n  - [ ] `/search`: document + book embeddings\n  - [ ] `/admin`: model + system config\n- [ ] AppState includes:\n  - [ ] Config\n  - [ ] DB pool\n  - [ ] Cache\n  - [ ] LLM handle\n- [ ] Middleware:\n  - [ ] Tracing\n  - [ ] Auth cookie/JWT\n  - [ ] CORS + compression\n- [ ] SSE streaming endpoint (chat streaming, generation)\n\n---\n\n## 🛂 3. Authentication & Accounts\n\n- [ ] Local login:\n  - [ ] Email + password (argon2 hash)\n- [ ] External login:\n  - [ ] Apple Sign-In\n  - [ ] GitHub OAuth\n- [ ] PostgreSQL stored procs for:\n  - [ ] Create/login user\n  - [ ] Validate session\n  - [ ] Link OAuth identities\n- [ ] Issue short-lived JWT + secure refresh cookie\n\n---\n\n## 🧠 4. AI Model Integration (LLM)\n\n- [ ] Support:\n  - [ ] `ollama` models\n  - [ ] `open-webui` bridge\n  - [ ] `comfyui` for images\n- [ ] Wrap engine calls with trait:\n  ```rust\n  trait LlmEngine {\n      async fn stream_response(&self, input: LlmInput) -> Pin<Box<dyn Stream<Item = LlmToken>>>;\n  }\n  ```\n- [ ] SSE stream tokens to frontend\n- [ ] Cache completions and embeddings\n\n---\n\n## 📚 5. File, Book, and Knowledge Indexing\n\n- [ ] `rustygpt-index`:\n  - [ ] Parse EPUBs (survival docs)\n  - [ ] Extract markdown/html/txt chunks\n  - [ ] Tokenize + embed\n  - [ ] Use `tantivy` or local `qdrant`\n- [ ] Watch folder and re-index on change\n- [ ] Store embeddings + metadata in DB\n\n---\n\n## 🧪 6. Testing & Coverage\n\n- [ ] Add `cargo llvm-cov` to workflow\n  - [ ] Command: `cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html`\n- [ ] Unit tests for:\n  - [ ] API handlers\n  - [ ] SSE output\n  - [ ] Stored proc bindings\n- [ ] WASM test coverage for Yew logic\n\n---\n\n## 🖥️ 7. Frontend (Yew)\n\n- [ ] Setup with Trunk + TailwindCSS\n- [ ] Pages:\n  - [ ] Login / Register / OAuth\n  - [ ] Chat\n  - [ ] Admin\n  - [ ] Search interface\n- [ ] Components:\n  - [ ] Chat window\n  - [ ] Streaming tokens\n  - [ ] Threaded messages\n- [ ] Use `rustygpt-common` for shared types\n\n---\n\n## 📦 8. Dockerized Environment\n\n- [ ] Compose stack:\n  - [ ] `rustygpt-api`\n  - [ ] `rustygpt-frontend`\n  - [ ] PostgreSQL w/ stored proc mounts\n  - [ ] `ollama` w/ local models\n  - [ ] `open-webui`\n  - [ ] `comfyui` image generation\n- [ ] Mount:\n  - [ ] `/array/data/books`\n  - [ ] `/array/data/media`\n- [ ] Use `--gpus=all` for GPU containers\n\n---\n\n## 🧰 9. Tooling & Dev Experience\n\n- [ ] `COPILOT_INSTRUCTIONS.md`:\n  - [ ] Idiomatic Rust only\n  - [ ] Explicit type references in docstrings\n  - [ ] Avoid cloning unless required\n  - [ ] Semver management across crates\n- [ ] `dev.md`:\n  - [ ] Run/start/reset/test\n- [ ] Scripts for:\n  - [ ] Seed DB\n  - [ ] Download models\n  - [ ] Lint & check\n\n---\n\n## 💬 10. Conversation Explorer\n\n- [ ] Message model:\n  - [ ] `parent_id`, `thread_id`, `message_type`\n- [ ] Threading support in UI:\n  - [ ] Display branches\n  - [ ] Auto-thread detection on topic change\n  - [ ] Pull message back to main\n- [ ] LLM summarization of threads\n- [ ] Admin tagging and controls\n\n---\n\n## 🧠 11. Critical Thinking Tools\n\n- [ ] Prompt styles:\n  - [ ] Socratic\n  - [ ] Devil's Advocate\n  - [ ] Chain of Thought\n- [ ] Message rating tools:\n  - [ ] Confidence sliders\n  - [ ] Flag assumptions\n- [ ] Conversation types:\n  - [ ] Reflective / Practical / Analytical\n\n---\n\n## 🛡️ 12. Privacy & Offline Use\n\n- [ ] No cloud inference\n- [ ] All models local:\n  - [ ] Ollama\n  - [ ] WebUI\n  - [ ] ComfyUI\n- [ ] No telemetry ever\n- [ ] All data stored on disk\n- [ ] Offline-only mode\n\n---\n\n## 🔒 13. Roles & Permissions\n\n- [ ] Roles:\n  - [ ] `admin`, `user`, `readonly`\n- [ ] Auth middleware for:\n  - [ ] Admin endpoints\n  - [ ] Message ownership enforcement\n\n---\n\n## 🧠 14. Prompt Enrichment & Memory\n\n- [ ] Per-thread summaries\n- [ ] Token-limited memory injection\n- [ ] Enrich prompt with:\n  - [ ] Glossary\n  - [ ] Prior message embedding hits\n  - [ ] System instructions (role-based)\n\n---\n\n## 🖼️ 15. ComfyUI Image Generation\n\n- [ ] Submit jobs via HTTP/socket\n- [ ] Stream job state to frontend via SSE\n- [ ] UI for:\n  - [ ] Prompts\n  - [ ] Image history\n- [ ] Embed image refs in chat\n\n---\n\n## 🏕️ 16. Survival Mode (Books + AI)\n\n- [ ] Index survival EPUBs by topic\n- [ ] Add tags: water, shelter, medicine, etc.\n- [ ] Search only indexed docs (no LLM inference)\n- [ ] \"Offline survival mode\" toggle\n\n---\n\n## 📑 17. Moderation & Guardrails\n\n- [ ] Rule-based local moderation\n- [ ] Unsafe topic detection (non-cloud)\n- [ ] Prompt rewriter / clarification engine\n\n---\n\n## 🧩 18. Optional / Bonus Features\n\n- [ ] Raven companion memory model (🪶 Ogg & Vorbis)\n- [ ] Smart home local API (HomeKit / HA bridge)\n- [ ] Whisper for voice input\n- [ ] Coqui TTS for offline voice output\n- [ ] Plugin system for AI tools (e.g. codegen, debugger)\n\n---\n\n## ✅ 19. Milestones\n\n- [ ] Milestone 1: Workspace + Skeleton\n- [ ] Milestone 2: Auth, DB, API basics\n- [ ] Milestone 3: Yew + WASM Frontend\n- [ ] Milestone 4: LLM Integration + SSE\n- [ ] Milestone 5: File & Book Indexing\n- [ ] Milestone 6: Conversation Explorer\n- [ ] Milestone 7: Survival & Offline Mode\n- [ ] Milestone 8: Image + Voice + Thread Summaries\n```\n\n---\n\nIf you'd like this version dropped into a GitHub issue or converted into a `project.yml` for automation next, I can prep that too."
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "c46980fa-1b41-406e-9606-30f2ad3499dc",
+          "request_id": "92f6606c1b5ceb73-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "c46980fa-1b41-406e-9606-30f2ad3499dc",
+      "children": [
+        "afd95b2a-94e7-4f29-9edc-7a6013d734f2"
+      ]
+    },
+    "afd95b2a-94e7-4f29-9edc-7a6013d734f2": {
+      "id": "afd95b2a-94e7-4f29-9edc-7a6013d734f2",
+      "message": {
+        "id": "afd95b2a-94e7-4f29-9edc-7a6013d734f2",
+        "author": {
+          "role": "user",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744499418.578366,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "About halfway you switched the format on me to \n```\n🧪 6. Testing & Coverage • Add cargo llvm-cov to workflow • Command: cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html • Unit tests for: • API handlers • SSE output • Stored proc bindings • WASM test coverage for Yew logic\n```\n\nTry again and use a consistent format all the way thru in markdown format representing a nested TODO list"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": null,
+        "weight": 1.0,
+        "metadata": {
+          "request_id": "92f6657af94e754b-SEA",
+          "message_source": null,
+          "timestamp_": "absolute",
+          "message_type": null
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "5b3b5860-063b-4f7f-98a4-09165565f07e",
+      "children": [
+        "aa0aeafd-1f24-4649-a861-a68845e964be"
+      ]
+    },
+    "aa0aeafd-1f24-4649-a861-a68845e964be": {
+      "id": "aa0aeafd-1f24-4649-a861-a68845e964be",
+      "message": {
+        "id": "aa0aeafd-1f24-4649-a861-a68845e964be",
+        "author": {
+          "role": "assistant",
+          "name": null,
+          "metadata": {}
+        },
+        "create_time": 1744499419.964449,
+        "update_time": null,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Perfect catch — here’s the **fully consistent**, cleanly nested Markdown TODO list for the entire RustyGPT project. All bullet levels are properly formatted as `- [ ]` nested TODOs and maintain emoji and clarity throughout.\n\n---\n\n```md\n# ✅ RustyGPT — Full Implementation Plan (TODO Checklist)\n\n> A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrates local models, PostgreSQL, OAuth (Apple/GitHub), SSE streaming, stored procedures, and AI tools for survival, conversation, and reasoning.\n\n---\n\n## 📦 1. Project Structure & Workspace\n\n- [ ] Set up `Cargo.toml` workspace with crates\n  - [ ] `rustygpt-common`\n  - [ ] `rustygpt-api`\n  - [ ] `rustygpt-frontend`\n  - [ ] `rustygpt-model`\n  - [ ] `rustygpt-db`\n  - [ ] `rustygpt-index`\n  - [ ] `rustygpt-utils`\n- [ ] Add `Makefile` or `justfile`\n- [ ] Add `.cargo/config.toml` for targets\n\n---\n\n## 🚀 2. Backend (Axum)\n\n- [ ] Setup Axum API project\n- [ ] Add OpenAPI support via `utoipa` or `paperclip`\n- [ ] Define route tree\n  - [ ] `/auth`\n  - [ ] `/chat`\n  - [ ] `/search`\n  - [ ] `/admin`\n- [ ] Define `AppState`\n  - [ ] Config\n  - [ ] DB pool\n  - [ ] Cache\n  - [ ] LLM handle\n- [ ] Add middleware\n  - [ ] Tracing\n  - [ ] Auth (JWT / Cookie)\n  - [ ] CORS\n  - [ ] Compression\n- [ ] Implement SSE streaming endpoint\n\n---\n\n## 🛂 3. Authentication & Accounts\n\n- [ ] Local login\n  - [ ] Email + password (argon2)\n- [ ] External auth\n  - [ ] Apple Sign In\n  - [ ] GitHub OAuth\n- [ ] Stored procedures in Postgres\n  - [ ] Create user\n  - [ ] Login\n  - [ ] Validate session\n  - [ ] Link OAuth identity\n- [ ] Token handling\n  - [ ] Short-lived JWT\n  - [ ] Secure refresh cookie\n\n---\n\n## 🧠 4. AI Model Integration (LLM)\n\n- [ ] Add local model backends\n  - [ ] `ollama`\n  - [ ] `open-webui`\n  - [ ] `comfyui`\n- [ ] Define trait abstraction for engine\n- [ ] Stream completions over SSE\n- [ ] Cache completions and embeddings\n\n---\n\n## 📚 5. File, Book, and Knowledge Indexing\n\n- [ ] Create `rustygpt-index`\n- [ ] Add parsers\n  - [ ] EPUB\n  - [ ] Markdown\n  - [ ] Plain text\n- [ ] Chunk + embed content\n- [ ] Store metadata in DB\n- [ ] Use local vector DB (`tantivy` or `qdrant`)\n- [ ] Watch file directory for changes\n\n---\n\n## 🧪 6. Testing & Coverage\n\n- [ ] Add `cargo llvm-cov` to workflow\n  - [ ] Command: `cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html`\n- [ ] Write unit tests\n  - [ ] API routes\n  - [ ] SSE stream\n  - [ ] Stored procedures\n- [ ] Add Yew tests for frontend logic\n- [ ] Target 90%+ coverage in all crates\n\n---\n\n## 🖥️ 7. Frontend (Yew)\n\n- [ ] Set up Yew project\n- [ ] Integrate TailwindCSS + Trunk\n- [ ] Implement pages\n  - [ ] Auth (Sign In, Sign Up)\n  - [ ] Chat\n  - [ ] Search\n  - [ ] Admin\n- [ ] Build components\n  - [ ] ChatBox\n  - [ ] Streaming tokens\n  - [ ] Threaded view\n- [ ] Use shared types via `rustygpt-common`\n\n---\n\n## 📦 8. Dockerized Environment\n\n- [ ] Define Docker Compose stack\n  - [ ] `rustygpt-api`\n  - [ ] `rustygpt-frontend`\n  - [ ] `postgres`\n  - [ ] `ollama`\n  - [ ] `open-webui`\n  - [ ] `comfyui`\n- [ ] Mount volumes\n  - [ ] `/array/data/books`\n  - [ ] `/array/data/media`\n- [ ] Enable GPU pass-through\n\n---\n\n## 🧰 9. Tooling & Dev Experience\n\n- [ ] Add `COPILOT_INSTRUCTIONS.md`\n  - [ ] Idiomatic Rust enforcement\n  - [ ] Explicit type links in docstrings\n  - [ ] No unnecessary clones\n  - [ ] Crate version synchronization\n- [ ] Add `dev.md`\n  - [ ] Common commands\n- [ ] Add CLI tools or scripts\n  - [ ] DB seed\n  - [ ] Model download\n  - [ ] Lint / check / coverage\n\n---\n\n## 💬 10. Conversation Explorer\n\n- [ ] Message model\n  - [ ] `thread_id`\n  - [ ] `parent_id`\n  - [ ] `message_type`\n- [ ] Frontend features\n  - [ ] Display message branches\n  - [ ] Expand/collapse threads\n  - [ ] Move to thread\n- [ ] Thread summarization\n- [ ] Auto-thread detection on topic shift\n\n---\n\n## 🧠 11. Critical Thinking Tools\n\n- [ ] Prompt styles\n  - [ ] Socratic\n  - [ ] Devil's Advocate\n  - [ ] Chain of Thought\n- [ ] Add response rating UI\n  - [ ] Confidence sliders\n  - [ ] Flag assumptions\n- [ ] Classify conversation type\n  - [ ] Reflective\n  - [ ] Analytical\n  - [ ] Practical\n\n---\n\n## 🛡️ 12. Privacy & Offline Use\n\n- [ ] Run all inference locally\n- [ ] No cloud dependencies\n- [ ] Store all data locally\n- [ ] Offer \"offline survival mode\"\n\n---\n\n## 🔒 13. Roles & Permissions\n\n- [ ] Define roles\n  - [ ] Admin\n  - [ ] User\n  - [ ] Read-only\n- [ ] Protect endpoints with role-based guards\n- [ ] Enforce message access control\n\n---\n\n## 🧠 14. Prompt Enrichment & Memory\n\n- [ ] Generate thread summaries\n- [ ] Token-bounded memory injection\n- [ ] Enrich prompts with:\n  - [ ] Glossary\n  - [ ] System instructions\n  - [ ] Relevant prior messages\n\n---\n\n## 🖼️ 15. ComfyUI Image Generation\n\n- [ ] Send job to ComfyUI\n- [ ] Monitor job via socket or REST\n- [ ] Stream updates via SSE\n- [ ] Display:\n  - [ ] Prompt UI\n  - [ ] Image history\n- [ ] Link generated images to messages\n\n---\n\n## 🏕️ 16. Survival Mode (Books + AI)\n\n- [ ] Index survival content\n  - [ ] Water\n  - [ ] Food\n  - [ ] Shelter\n  - [ ] First aid\n- [ ] Tag & classify content\n- [ ] Enable offline-only interaction\n- [ ] Disable internet LLM access when offline mode is active\n\n---\n\n## 📑 17. Moderation & Guardrails\n\n- [ ] Add local-only moderation engine\n- [ ] Detect unsafe prompts\n- [ ] Rewrite or clarify problematic inputs\n\n---\n\n## 🧩 18. Optional / Bonus Features\n\n- [ ] Raven companions (Ogg & Vorbis 🪶)\n- [ ] Local smart home API (EcoFlow, HomeKit, HA)\n- [ ] Whisper (speech-to-text)\n- [ ] Coqui TTS (text-to-speech)\n- [ ] Plugin system for extending AI agents\n\n---\n\n## ✅ 19. Milestones\n\n- [ ] Milestone 1: Project scaffold + workspace\n- [ ] Milestone 2: Auth & DB\n- [ ] Milestone 3: Frontend MVP\n- [ ] Milestone 4: Local LLM Integration\n- [ ] Milestone 5: Book Indexing\n- [ ] Milestone 6: Threaded Conversation Explorer\n- [ ] Milestone 7: Survival Mode\n- [ ] Milestone 8: Image + Voice + Summaries\n```\n\n---\n\nLet me know if you want this:\n- Converted into a GitHub issue template\n- Broken into milestone-specific files\n- Turned into a Kanban board or GitHub Projects automation\n\nReady to build 🛠️"
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "weight": 1.0,
+        "metadata": {
+          "finish_details": {
+            "type": "stop",
+            "stop_tokens": [
+              200002
+            ]
+          },
+          "is_complete": true,
+          "citations": [],
+          "content_references": [],
+          "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+          "message_type": null,
+          "model_slug": "gpt-4o",
+          "default_model_slug": "gpt-4o",
+          "parent_id": "afd95b2a-94e7-4f29-9edc-7a6013d734f2",
+          "request_id": "92f6657af94e754b-SEA",
+          "timestamp_": "absolute"
+        },
+        "recipient": "all",
+        "channel": null
+      },
+      "parent": "afd95b2a-94e7-4f29-9edc-7a6013d734f2",
+      "children": []
+    }
+  },
+  "moderation_results": [],
+  "current_node": "aa0aeafd-1f24-4649-a861-a68845e964be",
+  "plugin_ids": null,
+  "conversation_id": "67faf03a-367c-800e-8622-8f9f7148ab68",
+  "conversation_template_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_id": "g-p-67cc7f57b614819197a4fa9e793b0e47",
+  "gizmo_type": "snorlax",
+  "is_archived": false,
+  "is_starred": null,
+  "safe_urls": [
+    "https://github.com/mvdnes/zip-rs",
+    "https://www.sesame.com"
+  ],
+  "blocked_urls": [],
+  "default_model_slug": "gpt-4o",
+  "conversation_origin": null,
+  "voice": null,
+  "async_status": null,
+  "disabled_tool_ids": [],
+  "is_do_not_remember": null,
+  "memory_scope": "global_enabled",
+  "id": "67faf03a-367c-800e-8622-8f9f7148ab68"
+}
