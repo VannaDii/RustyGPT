@@ -961,6 +961,337 @@ sequenceDiagram
 
 This streaming architecture ensures efficient, real-time AI responses while maintaining reliability, scalability, and proper resource management across the entire system.
 
+## Performance Monitoring and Tracing
+
+The RustyGPT system implements a sophisticated performance monitoring and tracing strategy that ensures efficient operation, maintains high reliability, and facilitates debugging across all components. This strategy is designed to be vendor-agnostic, easily configurable, and capable of integrating with various observability platforms.
+
+### Core Tracing Philosophy
+
+The tracing implementation follows these key principles:
+
+1. **Structured Logging**: All events are captured as structured data rather than plain text, enabling efficient filtering, searching, and analysis.
+2. **Contextual Enrichment**: Each log event contains contextual metadata (user IDs, request IDs, component names) to facilitate debugging and request correlation.
+3. **Adaptive Verbosity**: Logging levels are dynamically adjustable per component without service restarts.
+4. **Minimal Overhead**: Performance impact is kept minimal through sampling and buffering strategies.
+5. **Flexibility**: The design is monitoring-stack agnostic, allowing integration with various analytics systems.
+
+### Telemetry Abstraction Layer
+
+The system uses a dedicated abstraction layer (`rustygpt-telemetry`) that provides a unified interface for all tracing and metrics collection, regardless of the chosen backend:
+
+```rust
+// rustygpt-shared/src/telemetry/mod.rs
+pub trait TracingBackend: Send + Sync {
+    fn init(&self) -> Result<(), Error>;
+    fn shutdown(&self);
+    fn set_level(&self, target: &str, level: Level);
+}
+
+pub struct TelemetryConfig {
+    pub service_name: String,
+    pub environment: String,
+    pub backend_type: BackendType,
+    pub log_level: Level,
+}
+
+pub enum BackendType {
+    Console,
+    Json,
+    OpenTelemetry { endpoint: String },
+    Datadog { api_key: String },
+    Prometheus { endpoint: String },
+}
+```
+
+This abstraction allows switching between development-friendly console output and production-oriented structured logging without code changes.
+
+### Instrumentation with Derive Macros
+
+To minimize boilerplate code, RustyGPT provides custom derive macros for instrumenting functions and methods:
+
+```rust
+// Example of using the derive macro for instrumentation
+#[derive(Instrument)]
+#[instrument(level = "debug", fields(entity_count = "input.len()"))]
+pub async fn process_entities(input: Vec<Entity>) -> Result<(), Error> {
+    // Function body is automatically wrapped in a span with the specified fields
+    let result = do_work(&input).await?;
+    Ok(result)
+}
+```
+
+The derive macro automatically creates spans, records timing information, captures input parameters (configurable), and handles error cases appropriately.
+
+### HTTP Request Tracing
+
+The system implements HTTP middleware for comprehensive request lifecycle tracing using Tower's `TraceLayer`, enhanced with configurable backends:
+
+```rust
+// Enhanced tracer with configurable backends
+pub fn create_trace_layer(config: &TelemetryConfig) -> TraceLayerType {
+    let level = match config.environment.as_str() {
+        "production" => Level::INFO,
+        _ => Level::DEBUG,
+    };
+
+    TraceLayer::new_for_http()
+        .make_span_with(DefaultMakeSpan::new().level(level))
+        .on_request(on_request_handler)
+        .on_response(on_response_handler)
+        .on_failure(on_failure_handler)
+}
+```
+
+This middleware provides:
+- Request/response timing
+- Status code tracking
+- Error correlation
+- HTTP method and path information
+- User and session context propagation
+
+### DAG Node Performance Metrics
+
+Each node in the Reasoning DAG tracks and reports comprehensive performance metrics:
+
+```rust
+// DAG node performance tracking
+#[instrument(skip(context, node))]
+pub async fn execute_node(node: &dyn Node, context: &mut Context) -> Result<()> {
+    let start = Instant::now();
+
+    // Record metrics during execution
+    let mut metrics = NodeMetrics::new();
+    let result = node.process(context, &mut metrics).await;
+
+    // Record performance metrics
+    let duration = start.elapsed();
+    info!(
+        node_type = %node.node_type(),
+        duration_ms = duration.as_millis() as u64,
+        entity_count = metrics.total_entities(),
+        "Node execution completed"
+    );
+
+    result
+}
+```
+
+This approach enables:
+- Identification of performance bottlenecks
+- Tracking of resource consumption patterns
+- Historical performance analysis
+- Anomaly detection across the processing pipeline
+
+### Metrics Collection and Aggregation
+
+The system defines a centralized registry for metrics collection that supports various metric types:
+
+```rust
+// Define metrics for collection
+pub struct MetricsRegistry {
+    registry: Arc<Registry>,
+    counters: DashMap<String, Counter>,
+    histograms: DashMap<String, Histogram>,
+    gauges: DashMap<String, Gauge>,
+}
+
+impl MetricsRegistry {
+    pub fn global() -> &'static Self {
+        static INSTANCE: OnceLock<MetricsRegistry> = OnceLock::new();
+        INSTANCE.get_or_init(|| MetricsRegistry::new())
+    }
+
+    pub fn counter(&self, name: &str) -> Counter {
+        self.counters
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                Counter::with_opts(Opts::new(name, ""))
+                    .expect("Failed to create counter")
+            })
+            .clone()
+    }
+
+    // Similar methods for histograms and gauges...
+}
+```
+
+Critical metrics tracked include:
+1. **Request Latency**: End-to-end processing time
+2. **Database Operation Timing**: Query execution duration
+3. **Node Processing Time**: Time spent in each DAG node
+4. **Memory Usage**: Heap and cache memory consumption
+5. **Entity Counts**: Number of entities processed per request
+6. **Cache Hit Rates**: Success rates for various caching layers
+
+### Error Tracking and Correlation
+
+The system implements a contextual error handling approach that preserves tracing information:
+
+```rust
+pub async fn handle_request_with_tracing<F, Fut, R, E>(
+    request_id: Uuid,
+    user_id: Option<String>,
+    f: F,
+) -> Result<R, TracedError<E>>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<R, E>>,
+    E: std::error::Error + Send + 'static,
+{
+    Span::current()
+        .record("request_id", &field::display(request_id))
+        .record("user_id", &field::display(user_id.unwrap_or_default()));
+
+    match f().await {
+        Ok(result) => Ok(result),
+        Err(err) => {
+            let traced_error = TracedError {
+                error: err,
+                request_id,
+                timestamp: Utc::now(),
+                span_context: get_current_span_context(),
+            };
+
+            error!(
+                error = %traced_error,
+                "Request failed"
+            );
+
+            Err(traced_error)
+        }
+    }
+}
+```
+
+This approach enables:
+- Root cause analysis through span context
+- Request correlation across microservices
+- Error aggregation and pattern identification
+- User impact assessment
+
+### OpenTelemetry Integration
+
+For integrating with external monitoring platforms, the system supports OpenTelemetry:
+
+```rust
+pub fn configure_opentelemetry(config: &TelemetryConfig) -> Result<(), Error> {
+    let tracer = opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(&config.opentelemetry_endpoint)
+        )
+        .with_trace_config(
+            trace::config()
+                .with_sampler(Sampler::TraceIdRatioBased(0.1))
+                .with_resource(Resource::new(vec![
+                    KeyValue::new("service.name", config.service_name),
+                    KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+                    KeyValue::new("deployment.environment", config.environment),
+                ]))
+        )
+        .install_batch(opentelemetry::runtime::Tokio)?;
+
+    // Register the tracer in the global registry
+    global::set_tracer_provider(tracer);
+
+    Ok(())
+}
+```
+
+### Adaptive Sampling and Filtering
+
+To minimize performance impact in production, the system implements adaptive sampling:
+
+```rust
+pub struct AdaptiveSampler {
+    base_sample_rate: f64,
+    current_sample_rate: AtomicF64,
+    system_load: AtomicF64,
+    last_adjustment: AtomicU64,
+}
+
+impl AdaptiveSampler {
+    pub fn should_sample(&self) -> bool {
+        self.update_sample_rate_if_needed();
+        random::<f64>() < self.current_sample_rate.load(Ordering::Relaxed)
+    }
+
+    fn update_sample_rate_if_needed(&self) {
+        // Periodically check system load and adjust sampling rate
+        let now = Instant::now().elapsed().as_secs();
+        let last = self.last_adjustment.load(Ordering::Relaxed);
+
+        if now - last > 30 {
+            if self.last_adjustment.compare_exchange(last, now, Ordering::AcqRel, Ordering::Relaxed).is_ok() {
+                let load = get_system_load();
+                let new_rate = match load {
+                    l if l > 0.8 => self.base_sample_rate * 0.2, // High load: reduce sampling
+                    l if l > 0.5 => self.base_sample_rate * 0.6, // Medium load: moderate sampling
+                    _ => self.base_sample_rate,                  // Light load: full sampling
+                };
+
+                self.current_sample_rate.store(new_rate, Ordering::Relaxed);
+            }
+        }
+    }
+}
+```
+
+### Health Checks and Readiness Probes
+
+For integration with container orchestration systems, the application exposes health endpoints:
+
+```rust
+#[derive(Debug, Serialize)]
+struct HealthStatus {
+    status: String,
+    version: String,
+    uptime_seconds: u64,
+    node_status: HashMap<String, String>,
+    db_connection_pool: PoolStatus,
+}
+
+async fn health_check_handler(State(app_state): State<AppState>) -> Json<HealthStatus> {
+    let start_time = app_state.start_time.elapsed().as_secs();
+    let pool_status = check_db_pool_health(&app_state.db_pool).await;
+    let node_status = check_node_registry_health(&app_state.node_registry).await;
+
+    Json(HealthStatus {
+        status: if pool_status.is_healthy && node_status.values().all(|s| s == "OK") {
+            "healthy".to_string()
+        } else {
+            "degraded".to_string()
+        },
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        uptime_seconds: start_time,
+        node_status,
+        db_connection_pool: pool_status,
+    })
+}
+```
+
+### Development Experience
+
+The monitoring and tracing system provides a smooth development experience:
+
+1. **Local Console Output**: In development environments, logs are formatted for readability with colors and structured formatting.
+2. **Hot Reload for Trace Levels**: Trace levels can be adjusted at runtime through environment variables or API calls.
+3. **Visualization Tools**: Tools for visualizing trace data, including span trees and timeline views.
+4. **Testing Helpers**: Utilities for capturing and asserting on trace output during tests.
+
+### Continuous Improvement
+
+The system includes mechanisms for continuous improvement of the monitoring capability:
+
+1. **Anomaly Detection**: Automated detection of performance outliers
+2. **Trend Analysis**: Tracking of key metrics over time to identify regressions
+3. **Self-Monitoring**: The tracing system itself is monitored for performance impact
+4. **Configuration Tuning**: Automated adjustment of sampling rates and verbosity based on system load
+
+By implementing this comprehensive performance monitoring and tracing strategy, RustyGPT ensures optimal system behavior, rapid issue detection and resolution, and continuous performance improvement as the platform evolves.
+
 ## Testing and Quality Strategy
 
 The RustyGPT project implements a comprehensive testing and quality assurance strategy that emphasizes code correctness, performance, and maintainability across all components of the system. This approach ensures high reliability while supporting the rapid development cycles needed for the complex reasoning and entity management capabilities of the platform.
