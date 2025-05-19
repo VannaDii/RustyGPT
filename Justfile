@@ -2,17 +2,21 @@
 default: check
 
 install:
-    @echo "Installing Rust components and targets..."
-    rustup component add clippy rustfmt
-    rustup target add wasm32-unknown-unknown
+    @echo "🔧 Installing cargo tools in parallel…"
+    # throttle to # of cores for fastest builds
+    export CARGO_NET_JOBS="$(nproc)"
+    cargo install --locked --jobs $(nproc) \
+        sqlx-cli \
+        trunk \
+        cargo-audit \
+        wasm-opt \
+        wasm-bindgen-cli \
+        cargo-llvm-cov
 
-    @echo "Installing cargo tools..."
-    cargo install sqlx-cli trunk cargo-audit wasm-opt wasm-bindgen-cli cargo-llvm-cov
+    @echo "🐙 Setting up git hooks…"
+    scripts/install-hooks.sh
 
-    @echo "Installing git hooks..."
-    ./scripts/install-hooks.sh
-
-    @echo "Installation complete!"
+    @echo "✅ All done!"
 
 # Recipe to start both frontend and backend watchers concurrently
 dev:
