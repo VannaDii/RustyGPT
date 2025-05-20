@@ -14,7 +14,7 @@ fetch:
 # Recipe to install all the necessary tools and dependencies
 install:
     export CARGO_NET_JOBS="$(nproc)"
-    cargo install --locked --jobs $(nproc) \
+    cargo install --locked --jobs $(nproc) --force \
         sqlx-cli \
         trunk \
         cargo-audit \
