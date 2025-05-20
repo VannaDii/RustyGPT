@@ -5,7 +5,7 @@ install:
     @echo "🔧 Installing cargo tools in parallel…"
     # throttle to # of cores for fastest builds
     export CARGO_NET_JOBS="$(nproc)"
-    cargo install --locked --jobs $(nproc) \
+    cargo install --quiet --jobs $(nproc) \
         sqlx-cli \
         trunk \
         cargo-audit \
