@@ -371,6 +371,709 @@ CREATE INDEX idx_relationship_path ON relationships USING GIST (path);
 - Rank entities by relevance and simplicity.
 - Use the fewest computational steps to achieve an accurate response.
 
+## Node Orchestration Details
+
+The system orchestrates nodes within the DAG using a sophisticated approach that balances performance with reasoning depth. This orchestration framework is designed to efficiently manage computational resources while delivering accurate, contextually appropriate responses.
+
+### Entity Prioritization Strategy
+
+The system implements a multi-tier prioritization strategy to ensure efficient reasoning while maintaining accuracy. Simple entity matching is always prioritized before complex reasoning:
+
+1. **Exact Match Prioritization**: Direct entity name matches receive highest priority, processed immediately as they represent explicit user intent with highest confidence.
+
+2. **Similarity Cascade**: When exact matches aren't found, the system cascades through increasingly complex similarity checks:
+   - Cached embeddings for frequently accessed entities (fast retrieval)
+   - Attribute-based similarity using lightweight vector comparisons
+   - Full embedding-based similarity as a fallback
+
+3. **Context-Aware Complexity Throttling**: The orchestrator maintains a "complexity budget" for each reasoning task, preventing unnecessary computational expense:
+   - Simple, direct questions receive minimal complexity allocation
+   - Nuanced queries progressively unlock deeper reasoning paths
+   - Response time targets adjust the complexity ceiling dynamically
+
+4. **Parallel vs. Sequential Processing**: Entity identification tasks may run in parallel, while relationship traversal requires sequential processing to maintain contextual coherence.
+
+### Contextual Escalation Mechanics
+
+Contextual escalation allows the system to adapt its reasoning depth to conversation complexity:
+
+1. **Conversation State Tracking**: The system monitors:
+   - Topic complexity indicators (technical terms, conceptual density)
+   - User expertise signals (terminology usage, question sophistication)
+   - Temporal context patterns (increasing depth over multiple exchanges)
+
+2. **Progressive Disclosure**: Information is revealed in layers of increasing complexity:
+   - Initial responses focus on core concepts with simplified relationships
+   - Follow-up queries trigger deeper graph traversal for related entities
+   - Technical depth increases as conversation demonstrates user comprehension
+
+3. **Discourse Markers**: Specific signals trigger escalation:
+   - "Why" and "How" questions escalate reasoning depth
+   - Requests for evidence increase citation density
+   - Domain-specific terminology activates specialized nodes
+
+4. **Throttling Recovery**: If the conversation returns to casual or summary-level discussion, the system gracefully de-escalates to preserve computational efficiency.
+
+### Dynamic Workflow Adaptation
+
+The DAG workflow dynamically adapts to both conversation context and system conditions:
+
+1. **Conditional Node Activation**: Not all nodes activate for every request:
+   - Entity Identification and Slot Resolution are always active
+   - Relationship Traversal depth varies by query complexity
+   - Meta-Reasoning activates only for complex, multi-hop reasoning
+   - Pruning intensity adjusts based on system load
+
+2. **Feedback-Driven Reconfiguration**:
+   - User clarification requests trigger enhanced Relationship Traversal
+   - Confusion indicators activate additional Meta-Reasoning passes
+   - Satisfaction signals reinforce successful reasoning paths
+   - Generation quality metrics influence future node parameter settings
+
+3. **Resource-Aware Execution**:
+   - CPU/memory constraints adjust reasoning depth dynamically
+   - High-priority queries receive resource prioritization
+   - Background processes handle non-time-critical reasoning expansion
+   - Adaptive timeout management prevents resource starvation
+
+4. **A/B Reasoning**: For uncertain relationships, the system may:
+   - Generate multiple candidate reasoning paths
+   - Evaluate coherence and relevance metrics for each
+   - Select optimal output or request clarification
+   - Record successful patterns to optimize future workflows
+
+### Inter-Node Communication Framework
+
+Nodes communicate and share context through structured protocols:
+
+1. **Shared Context Object**: All nodes operate on a mutable context object that includes:
+   - Entity reference registry with confidence scores
+   - Relationship graph with traversal history
+   - Attribute slot values and resolution status
+   - Query-specific metadata and constraints
+
+2. **Event-Based Signaling**: Nodes emit events that trigger conditional processing:
+   - Entity resolution events trigger dependent slot filling
+   - Confidence threshold events activate deeper reasoning
+   - Completion events signal downstream nodes
+   - Error events trigger fallback strategies
+
+3. **Context Checkpointing**: To support reasoning exploration:
+   - The DAG maintains multiple context snapshots
+   - Speculative reasoning branches operate on isolated contexts
+   - Successful reasoning paths merge changes back to main context
+   - Failed reasoning paths are discarded without context pollution
+
+4. **Metadata Enrichment**: Each node enriches the shared context with:
+   - Processing telemetry (time spent, entities explored)
+   - Confidence metrics for decisions made
+   - Alternative candidates with scores (for fallback)
+   - Citations and provenance data for outputs
+
+This layered communication approach ensures nodes maintain coherent, shared understanding while operating independently, creating a balance between modularity and contextual awareness essential for complex reasoning tasks.
+
+### Use Cases and Implementations
+
+To illustrate how these orchestration strategies work in practice, let's examine specific use cases for each major aspect of the node orchestration system.
+
+#### Entity Prioritization in Action: Climate Research Query
+
+Consider a user query about "climate change effects on agriculture in the Mediterranean region." Here's how entity prioritization unfolds:
+
+```mermaid
+flowchart TD
+    Input["Query: climate change effects on agriculture in Mediterranean region"]
+
+    subgraph "Tier 1: Exact Match Identification"
+        EM1["Match 'Climate Change' Entity"]
+        EM2["Match 'Agriculture' Entity"]
+        EM3["Match 'Mediterranean' Entity"]
+    end
+
+    subgraph "Tier 2: Similarity Matching (if needed)"
+        SM1["Similar to 'Farming' (95% match)"]
+        SM2["Similar to 'Climate Impact' (92% match)"]
+        SM3["Similar to 'Mediterranean Basin' (98% match)"]
+    end
+
+    subgraph "Tier 3: Relationship Traversal (selective)"
+        RT1["Climate Change → Rising Temperatures"]
+        RT2["Agriculture → Crop Yield"]
+        RT3["Mediterranean → Drought Risk"]
+        RT4["Climate Change → Precipitation Patterns → Agriculture"]
+    end
+
+    Input --> EM1
+    Input --> EM2
+    Input --> EM3
+
+    EM1 -.-> |Found exact match| SL1["Slot Resolution (Climate Change)"]
+    EM2 -.-> |Found exact match| SL2["Slot Resolution (Agriculture)"]
+    EM3 -.-> |Found exact match| SL3["Slot Resolution (Mediterranean)"]
+
+    EM1 -.-> |No exact match| SM1
+    EM2 -.-> |No exact match| SM2
+    EM3 -.-> |No exact match| SM3
+
+    SL1 --> RT1
+    SL2 --> RT2
+    SL3 --> RT3
+    RT1 & RT2 --> RT4
+
+    RT1 & RT2 & RT3 & RT4 --> Response["Reasoning Response"]
+
+    classDef exact fill:#d1e7dd,stroke:#198754;
+    classDef similar fill:#fff3cd,stroke:#ffc107;
+    classDef complex fill:#f8d7da,stroke:#dc3545;
+    classDef output fill:#cff4fc,stroke:#0dcaf0;
+
+    class EM1,EM2,EM3,SL1,SL2,SL3 exact;
+    class SM1,SM2,SM3 similar;
+    class RT1,RT2,RT3,RT4 complex;
+    class Response output;
+```
+
+**Implementation Example**:
+
+```rust
+/// Orchestrates entity prioritization for a user query
+pub async fn prioritize_entities(
+    query: &str,
+    context: &mut ReasoningContext,
+    db: &DatabasePool,
+) -> Result<Vec<EntityMatch>, Error> {
+    let tokens = tokenize(query);
+    let mut matches = Vec::new();
+
+    // Tier 1: Exact entity matches (highest priority)
+    let exact_matches = find_exact_entity_matches(&tokens, db).await?;
+    for entity in exact_matches {
+        matches.push(EntityMatch {
+            entity,
+            confidence: context.config.exact_match_confidence, // Always 1.0 for exact matches
+            match_type: MatchType::Exact,
+        });
+        context.complexity_budget -= context.config.exact_match_cost; // Exact matches use minimal budget
+    }
+
+    // If we have sufficient exact matches and within budget, return early
+    if matches.len() >= context.config.sufficient_exact_matches &&
+       context.complexity_remaining() > context.complexity_threshold {
+        return Ok(matches);
+    }
+
+    // Tier 2: Similarity-based matches (medium priority)
+    if context.allow_similarity_matching() {
+        let embedding = generate_embedding(query).await?;
+        let similar_entities = find_similar_entities(
+            &embedding,
+            context.similarity_threshold,
+            db
+        ).await?;
+
+        for entity in similar_entities {
+            matches.push(EntityMatch {
+                entity,
+                confidence: entity.similarity_score,
+                match_type: MatchType::Similar,
+            });
+            context.complexity_budget -= context.config.similarity_match_cost; // Similarity matches use moderate budget
+        }
+    }
+
+    // Tier 3: Only perform complex relationship traversal if necessary
+    if matches.is_empty() || context.requires_deep_reasoning() {
+        let related_entities = find_related_entities(&matches, context, db).await?;
+        for entity in related_entities {
+            matches.push(EntityMatch {
+                entity,
+                confidence: entity.relationship_confidence,
+                match_type: MatchType::RelationshipDerived,
+            });
+            context.complexity_budget -= context.config.relationship_traversal_cost; // Complex traversal uses significant budget
+        }
+    }
+
+    // Sort by confidence and deduplicate
+    matches.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+    matches.dedup_by(|a, b| a.entity.id == b.entity.id);
+
+    Ok(matches)
+}
+```
+
+**Benefits**:
+- Exact matches are processed first, providing immediate high-confidence results for simple queries
+- Computational resources are conserved by only performing deeper, more expensive matches when necessary
+- The system dynamically adjusts processing depth based on query complexity and available budget
+- Early termination prevents unnecessary computation for straightforward requests
+
+#### Contextual Escalation Example: Progressive Technical Conversation
+
+This example illustrates how the system handles a conversation about quantum computing that progressively increases in technical depth:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant System
+    participant Simple as Simple Reasoning
+    participant Complex as Complex Reasoning
+
+    Note over User,System: Conversation Begins (Low Complexity)
+    User->>System: What is quantum computing?
+    System->>Simple: Process basic definition query
+    Simple->>System: Basic quantum computing definition
+    System->>User: Basic explanation with simplified concepts
+
+    Note over User,System: Complexity Level Increases
+    User->>System: How does quantum entanglement work?
+    System->>Simple: Try simple reasoning
+    Simple-->>System: Confidence below threshold (0.65)
+    System->>Complex: Activate deeper technical reasoning
+    Complex->>System: Technical explanation with proper terminology
+    System->>User: Technical explanation with visual analogies
+
+    Note over User,System: High Technical Complexity
+    User->>System: Explain the relationship between quantum decoherence and error correction in quantum algorithms
+    System->>Complex: High complexity detected (0.85)
+    Complex->>System: Full technical explanation with mathematical concepts
+    System->>User: Detailed technical response with references
+
+    Note over User,System: Return to Simpler Topic
+    User->>System: Thanks, can you summarize what we discussed?
+    System->>Simple: De-escalation detected (topic shift)
+    Simple->>System: Summary of discussion
+    System->>User: Simplified summary with key points
+```
+
+**Implementation Example**:
+
+```rust
+/// Tracks conversation complexity and manages escalation
+pub struct ConversationEscalationManager {
+    /// History of complexity scores for recent messages
+    complexity_history: VecDeque<f32>,
+    /// Current technical depth level (0.0-1.0)
+    current_depth: f32,
+    /// Detected user expertise level (0.0-1.0)
+    user_expertise: f32,
+    /// Specialized domain contexts activated
+    active_domains: HashSet<String>,
+    /// Configuration parameters for escalation behavior
+    config: EscalationConfig,
+}
+
+impl ConversationEscalationManager {
+    /// Processes new message and determines if escalation is needed
+    pub fn process_message(&mut self, message: &str) -> EscalationDecision {
+        // Analyze message complexity
+        let complexity_score = self.analyze_complexity(message);
+        self.complexity_history.push_back(complexity_score);
+        if self.complexity_history.len() > self.config.history_size {
+            self.complexity_history.pop_front();
+        }
+
+        // Detect topic signals that trigger escalation
+        let contains_why = message.to_lowercase().contains("why");
+        let contains_how = message.to_lowercase().contains("how");
+        let technical_terms = extract_technical_terms(message);
+
+        // Update user expertise model based on terminology usage
+        if !technical_terms.is_empty() {
+            self.user_expertise = (self.user_expertise * self.config.expertise_decay_factor) +
+                                 (technical_terms.len() as f32 * self.config.term_expertise_weight)
+                                 .min(self.config.max_expertise_gain);
+        }
+
+        // Track specialized domains
+        for domain in detect_domains(message) {
+            self.active_domains.insert(domain);
+        }
+
+        // Calculate trend (increasing/decreasing complexity)
+        let trend = self.calculate_complexity_trend();
+
+        // Make escalation decision
+        if complexity_score > self.config.high_complexity_threshold ||
+           self.user_expertise > self.config.expertise_threshold ||
+           (trend > self.config.positive_trend_threshold &&
+            self.current_depth > self.config.depth_trend_threshold) ||
+           (contains_why && contains_how) {
+            // Escalate reasoning depth
+            self.current_depth = (self.current_depth + self.config.depth_escalation_step)
+                                .min(self.config.max_depth);
+            EscalationDecision::Escalate(self.current_depth)
+        } else if trend < self.config.negative_trend_threshold || is_summary_request(message) {
+            // De-escalate if complexity is decreasing or summary requested
+            self.current_depth = (self.current_depth - self.config.depth_deescalation_step)
+                               .max(self.config.min_depth);
+            EscalationDecision::Deescalate(self.current_depth)
+        } else {
+            // Maintain current depth
+            EscalationDecision::Maintain(self.current_depth)
+        }
+    }
+
+    /// Calculates if complexity is trending up or down
+    fn calculate_complexity_trend(&self) -> f32 {
+        if self.complexity_history.len() < self.config.min_history_for_trend {
+            return 0.0;
+        }
+
+        // Simple linear regression on recent complexity scores
+        // Returns positive value for increasing trend, negative for decreasing
+        // ...implementation details...
+        0.1 // Placeholder return
+    }
+}
+```
+
+**Benefits**:
+- Conversation naturally progresses from simple to complex reasoning as needed
+- System recognizes user expertise and adjusts technical depth accordingly
+- Computational resources are allocated efficiently based on task complexity
+- Users receive appropriate level of detail for their knowledge level and inquiry type
+
+#### Dynamic Workflow Adaptation: Complex Health Query
+
+This example demonstrates how the workflow adapts to a complex query about "the relationship between gut microbiome and mental health," requiring conditional node activation and deep reasoning:
+
+```mermaid
+flowchart TD
+    subgraph "User Query Processing"
+        Q["Query: relationship between gut microbiome and mental health"]
+        Q --> CP["Complexity Probe (Score: 0.82)"]
+        CP --> ND["Node Dispatcher"]
+    end
+
+    subgraph "Primary Processing Path"
+        ND --> |Always Active| EI["Entity Identification"]
+        EI --> |Always Active| SR["Slot Resolution"]
+        SR --> |Complexity > 0.7| RT["Relationship Traversal"]
+        RT --> |"Multi-domain query detected"| MR["Meta-Reasoning"]
+    end
+
+    subgraph "Conditional Processing"
+        MR --> |"Path complexity > threshold"| AF{"Ambiguity Found?"}
+        AF -->|"Yes (multiple pathways)"| AB["A/B Testing"]
+        AF -->|"No (clear path)"| PR["Pruning"]
+        AB --> |"Best path selected"| PR
+    end
+
+    subgraph "Response Generation"
+        PR --> GN["Generation"]
+        GN --> |"Knowledge gap detected"| RAG["RAG Integration"]
+        RAG --> FG["Final Generation"]
+    end
+
+    subgraph "Feedback Loop"
+        FG --> |"Response quality metrics"| FL["Feedback Logger"]
+        FL -.-> |"Updates priority weights"| ND
+    end
+
+    %% Node status indicators
+    class EI,SR active;
+    class RT,MR,PR,GN,RAG activeConditional;
+    class AB special;
+
+    classDef active fill:#d1e7dd,stroke:#198754;
+    classDef activeConditional fill:#fff3cd,stroke:#ffc107;
+    classDef inactive fill:#f8d7da,stroke:#dc3545;
+    classDef special fill:#e2e3e5,stroke:#6c757d;
+```
+
+**Implementation Example**:
+
+```rust
+/// Dynamically configures and executes the reasoning workflow
+pub async fn execute_adaptive_workflow(
+    query: &str,
+    context: &mut Context,
+    config: &WorkflowConfig,
+) -> Result<ReasoningResponse, WorkflowError> {
+    // 1. Analyze query complexity
+    let complexity = analyze_query_complexity(query);
+
+    // 2. Configure conditional node activation
+    let mut workflow = WorkflowBuilder::new();
+
+    // Core nodes (always active)
+    workflow.add_node(EntityIdentificationNode::new(config.entity_config.clone()));
+    workflow.add_node(SlotResolutionNode::new(config.slot_config.clone()));
+
+    // Conditionally active nodes based on complexity
+    if complexity > config.relationship_activation_threshold {
+        let depth = calculate_relationship_depth(
+            complexity,
+            config.min_relationship_depth,
+            config.max_relationship_depth,
+            config.relationship_depth_factor
+        );
+
+        workflow.add_node(RelationshipTraversalNode::new(
+            config.relationship_config.with_depth(depth)
+        ));
+    }
+
+    if complexity > config.meta_reasoning_threshold || query_crosses_domains(query).await {
+        workflow.add_node(MetaReasoningNode::new(config.meta_config.clone()));
+    }
+
+    // Resource-aware node configuration
+    let system_load = get_system_load().await;
+    let pruning_config = if system_load > config.high_load_threshold {
+        // Under high load, prune more aggressively
+        config.pruning_config.with_threshold(config.high_load_pruning_threshold)
+    } else {
+        config.pruning_config.clone()
+    };
+    workflow.add_node(PruningNode::new(pruning_config));
+
+    // Always include generation nodes
+    workflow.add_node(GenerationNode::new(config.generation_config.clone()));
+
+    // Only add RAG when needed
+    if detect_knowledge_gap_likelihood(query, context).await > config.rag_activation_threshold {
+        workflow.add_node(RagIntegrationNode::new(config.rag_config.clone()));
+    }
+
+    // 3. Execute workflow
+    let dag = workflow.build()?;
+    let mut executor = WorkflowExecutor::new(dag, context);
+    let result = executor.execute().await?;
+
+    // 4. Record execution metrics for feedback loop
+    context.metrics_collector.record_workflow_execution(
+        &result.executed_nodes,
+        result.execution_time,
+        result.reasoning_depth
+    );
+
+    Ok(result.response)
+}
+
+/// Calculate the relationship traversal depth based on query complexity
+fn calculate_relationship_depth(
+    complexity: f32,
+    min_depth: usize,
+    max_depth: usize,
+    depth_factor: f32
+) -> usize {
+    min_depth + ((complexity * depth_factor) as usize).min(max_depth - min_depth)
+}
+
+/// Determines which domains are covered by the query
+async fn query_crosses_domains(query: &str) -> bool {
+    let domains = detect_domains(query).await;
+    domains.len() > 1
+}
+
+/// Estimates if the query might require external knowledge
+async fn detect_knowledge_gap_likelihood(
+    query: &str,
+    context: &Context
+) -> f32 {
+    // Check if similar queries needed RAG in the past
+    let historical_rag_usage = context
+        .history
+        .query_similar_with_rag_usage(query)
+        .await
+        .unwrap_or(context.config.default_historical_rag_usage);
+
+    // Check if entities in query are well-represented in database
+    let entities = context.entity_store.find_matching_entities(query).await;
+    let entity_coverage = calculate_entity_coverage(&entities);
+
+    // Return weighted likelihood with configurable weights
+    (historical_rag_usage * context.config.historical_rag_weight) +
+    (entity_coverage * context.config.entity_coverage_weight)
+}
+```
+
+**Benefits**:
+- The workflow automatically adapts to query complexity, activating only necessary nodes
+- System resources are allocated intelligently based on both query needs and system load
+- Previous query patterns inform future node activation through feedback learning
+- Cross-domain queries trigger additional meta-reasoning for coherence
+
+#### Inter-Node Communication: Medical Diagnosis Example
+
+This example demonstrates how nodes communicate and share context during a complex reasoning task about potential medical diagnoses:
+
+```mermaid
+sequenceDiagram
+    participant EI as Entity Identification
+    participant SR as Slot Resolution
+    participant RT as Relationship Traversal
+    participant MR as Meta-Reasoning
+    participant PR as Pruning
+    participant GN as Generation
+
+    Note over EI,GN: Initial Context Object (Empty)
+
+    EI->>+SR: Context{entities: [Symptoms, Fever, Cough]}
+
+    Note over SR: Event: EntitiesIdentified
+    Note over SR: Updates slots with confidence scores
+
+    SR->>+RT: Context{entities, slots: {duration: "3 days", severity: "mild"}}
+
+    Note over RT: Event: SlotsResolved(threshold_confidence=0.82)
+    Note over RT: Creates context checkpoint before exploration
+
+    RT->>RT: Explores branch A (viral infection)
+    Note over RT: Checkpoint A: viral infection path
+
+    RT->>RT: Explores branch B (bacterial infection)
+    Note over RT: Checkpoint B: bacterial infection path
+
+    RT->>+MR: Context{A, B, relationship_paths: [...]}
+
+    Note over MR: Event: RelationshipsTraversed
+    Note over MR: Validates path coherence
+
+    MR->>MR: Compare paths A and B
+    Note over MR: Meta-analysis favors path A (87% confidence)
+
+    MR->>+PR: Context{selected_path: A, confidence: 0.87, evidence: [...]}
+
+    Note over PR: Event: PathValidated
+
+    PR->>PR: Prunes path B entities
+    PR->>PR: Retains key relationships from B as alternatives
+
+    PR->>+GN: Context{pruned_entities, primary_path, alternatives}
+
+    Note over GN: Event: ContextPruned
+
+    GN->>GN: Generate response with primary + alternatives
+    GN->>GN: Include confidence levels and key evidence
+
+    Note over GN: Final Response Generated
+```
+
+**Implementation Example**:
+
+```rust
+/// A central communication bus that enables nodes to share context
+pub struct NodeEventBus {
+    /// Listeners for different event types
+    listeners: HashMap<EventType, Vec<Box<dyn EventListener>>>,
+    /// The shared context object being passed between nodes
+    context: Arc<RwLock<ReasoningContext>>,
+    /// A store of context checkpoints for speculative reasoning
+    checkpoints: HashMap<String, Arc<ReasoningContext>>,
+}
+
+impl NodeEventBus {
+    /// Register a node as a listener for specific events
+    pub fn register_listener<T: EventListener + 'static>(
+        &mut self,
+        event_type: EventType,
+        listener: T,
+    ) {
+        self.listeners
+            .entry(event_type)
+            .or_insert_with(Vec::new)
+            .push(Box::new(listener));
+    }
+
+    /// Publish an event to all registered listeners
+    pub async fn publish(&self, event: Event) -> Result<(), BusError> {
+        let listeners = self.listeners.get(&event.event_type).cloned();
+
+        if let Some(listeners) = listeners {
+            let context = self.context.read().await;
+
+            for listener in listeners {
+                listener.on_event(&event, &context).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Create a context checkpoint for speculative reasoning
+    pub async fn create_checkpoint(&mut self, checkpoint_id: &str) -> Result<(), BusError> {
+        let context = self.context.read().await;
+        let checkpoint = context.clone();
+
+        self.checkpoints.insert(checkpoint_id.to_string(), Arc::new(checkpoint));
+        Ok(())
+    }
+
+    /// Merge a checkpoint back into the main context
+    pub async fn merge_checkpoint(&mut self, checkpoint_id: &str) -> Result<(), BusError> {
+        let checkpoint = self.checkpoints.get(checkpoint_id)
+            .ok_or(BusError::CheckpointNotFound(checkpoint_id.to_string()))?;
+
+        let mut context = self.context.write().await;
+        context.merge_from(checkpoint);
+
+        Ok(())
+    }
+
+    /// Discard a checkpoint without merging
+    pub fn discard_checkpoint(&mut self, checkpoint_id: &str) {
+        self.checkpoints.remove(checkpoint_id);
+    }
+}
+
+/// Context object passed between nodes containing reasoning state
+#[derive(Clone, Debug)]
+pub struct ReasoningContext {
+    /// Currently identified entities with confidence scores
+    entities: HashMap<EntityId, (Entity, f32)>,
+    /// Resolved slots for each entity
+    slots: HashMap<EntityId, HashMap<SlotName, (SlotValue, f32)>>,
+    /// Discovered relationship paths
+    relationships: Vec<RelationshipPath>,
+    /// Processing metadata and telemetry
+    metadata: HashMap<String, Value>,
+}
+
+impl ReasoningContext {
+    /// Merge data from another context into this one
+    pub fn merge_from(&mut self, other: &ReasoningContext) {
+        // Merge entities with higher confidence scores taking precedence
+        for (id, (entity, confidence)) in &other.entities {
+            if let Some((_, existing_confidence)) = self.entities.get(id) {
+                if confidence > existing_confidence {
+                    self.entities.insert(*id, (entity.clone(), *confidence));
+                }
+            } else {
+                self.entities.insert(*id, (entity.clone(), *confidence));
+            }
+        }
+
+        // Similar merging for slots and relationships
+        // ...
+
+        // Merge metadata with custom strategies per key
+        for (key, value) in &other.metadata {
+            if let Some(merge_strategy) = get_metadata_merge_strategy(key) {
+                self.metadata.insert(
+                    key.clone(),
+                    merge_strategy.merge(
+                        self.metadata.get(key),
+                        Some(value)
+                    )
+                );
+            } else {
+                self.metadata.insert(key.clone(), value.clone());
+            }
+        }
+    }
+}
+```
+
+**Benefits**:
+- Event-based communication enables loose coupling between nodes
+- Shared context object ensures all nodes work with consistent information
+- Checkpointing enables speculative reasoning without risking context pollution
+- Explicit event types allow nodes to selectively process only relevant state changes
+- Merge strategies ensure coherent combination of different reasoning branches
+
 ## Project Structure
 
 RustyGPT follows a clean architecture with clear separation of concerns:
@@ -901,69 +1604,9 @@ enum GenerationStatus {
 }
 ```
 
-### Performance Considerations
+### Performance Monitoring and Tracing
 
-The streaming implementation employs several optimizations:
-
-1. **Connection Pooling**: The server maintains a pool of database connections
-2. **Backpressure Handling**: Channel-based streaming with configurable buffer sizes
-3. **Resource Limits**: Per-client and global limits on concurrent connections
-4. **Monitoring**: Instrumented with tracing for performance analysis
-
-### Security Measures
-
-Security is ensured through:
-
-1. **Authentication**: JWT validation on connection establishment
-2. **Authorization**: Conversation ownership verification
-3. **Rate Limiting**: Per-user limits on connection frequency
-4. **Payload Validation**: Input sanitization and output escaping
-
-### Sequence Diagram
-
-The following diagram illustrates the complete streaming flow:
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Server
-    participant Model
-    participant DB
-
-    Client->>Server: POST /api/conversations
-    Server->>DB: Create conversation
-    DB-->>Server: Conversation ID
-    Server-->>Client: Conversation ID
-
-    Client->>Server: GET /api/conversations/{id}/stream
-    Server-->>Client: SSE Connection Established
-    Server-->>Client: Configuration Data
-
-    Server->>Model: Generate(prompt)
-    loop Token Generation
-        Model-->>Server: Next token
-        Server-->>Client: SSE token event
-    end
-
-    alt Generation Completes
-        Model-->>Server: Generation complete
-        Server-->>Client: SSE complete event
-        Server->>DB: Store complete response
-    else Error Occurs
-        Model-->>Server: Error
-        Server-->>Client: SSE error event
-        Server->>DB: Log error
-    end
-
-    Client->>Server: Close connection
-    Server->>Model: Cancel generation (if in progress)
-```
-
-This streaming architecture ensures efficient, real-time AI responses while maintaining reliability, scalability, and proper resource management across the entire system.
-
-## Performance Monitoring and Tracing
-
-The RustyGPT system implements a sophisticated performance monitoring and tracing strategy that ensures efficient operation, maintains high reliability, and facilitates debugging across all components. This strategy is designed to be vendor-agnostic, easily configurable, and capable of integrating with various observability platforms.
+The RustyGPT system implements a sophisticated performance monitoring and tracing strategy that ensures efficient operation, maintains high reliability, and facilitates debugging across all components. This approach is designed to be vendor-agnostic, easily configurable, and capable of integrating with various observability platforms.
 
 ### Core Tracing Philosophy
 
@@ -1465,7 +2108,7 @@ Key aspects:
 
 #### End-to-End Testing
 
-End-to-end tests validate complete user scenarios across the entire system stack:
+End-to-end tests validate complete user scenarios across the entire system:
 
 ```rust
 // tests/e2e/conversation_test.rs
