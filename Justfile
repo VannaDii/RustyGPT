@@ -23,6 +23,18 @@ install:
         cargo-llvm-cov
     scripts/install-hooks.sh
 
+# Recipe to install all the necessary tools and dependencies OFFLINE
+install-offline:
+    export CARGO_NET_JOBS="$(nproc)"
+    cargo install --offline --jobs $(nproc) \
+        sqlx-cli \
+        trunk \
+        cargo-audit \
+        wasm-opt \
+        wasm-bindgen-cli \
+        cargo-llvm-cov
+    scripts/install-hooks.sh
+
 # Recipe to start both frontend and backend watchers concurrently
 dev:
     cargo run --manifest-path rustygpt-tools/confuse/Cargo.toml -- "server@./rustygpt-server:just watch-server" "client@./rustygpt-web:trunk watch"
