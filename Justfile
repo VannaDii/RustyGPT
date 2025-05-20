@@ -1,22 +1,27 @@
 # Default recipe (runs when you just run "just" with no arguments)
 default: check
 
+fetch:
+    @echo "🔄 Fetching all dependencies…"
+    cargo fetch --manifest-path ./Cargo.toml
+    cargo fetch --manifest-path ./rustygpt-cli/Cargo.toml
+    cargo fetch --manifest-path ./rustygpt-server/Cargo.toml
+    cargo fetch --manifest-path ./rustygpt-shared/Cargo.toml
+    cargo fetch --manifest-path ./rustygpt-tools/confuse/Cargo.toml
+    cargo fetch --manifest-path ./rustygpt-tools/i18n-agent/Cargo.toml
+    cargo fetch --manifest-path ./rustygpt-web/Cargo.toml
+
+# Recipe to install all the necessary tools and dependencies
 install:
-    @echo "🔧 Installing cargo tools in parallel…"
-    # throttle to # of cores for fastest builds
     export CARGO_NET_JOBS="$(nproc)"
-    cargo install --quiet --jobs $(nproc) \
+    cargo install --jobs $(nproc) \
         sqlx-cli \
         trunk \
         cargo-audit \
         wasm-opt \
         wasm-bindgen-cli \
         cargo-llvm-cov
-
-    @echo "🐙 Setting up git hooks…"
     scripts/install-hooks.sh
-
-    @echo "✅ All done!"
 
 # Recipe to start both frontend and backend watchers concurrently
 dev:
