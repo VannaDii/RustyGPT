@@ -298,6 +298,647 @@ CREATE INDEX idx_entity_attribute ON entity_attribute_link (entity_id, attribute
 CREATE INDEX idx_relationship_path ON relationships USING GIST (path);
 ```
 
+## Database Optimization and Management
+
+The RustyGPT system relies heavily on PostgreSQL for efficient data storage, retrieval, and complex relationship management. This section outlines advanced database optimization strategies, management approaches, and patterns for maintaining high performance at scale.
+
+### PostgreSQL ltree Extension
+
+The `ltree` extension is central to our hierarchical data management strategy, enabling efficient traversal of relationship trees and taxonomies. This extension provides specialized operators and functions for working with tree structures stored as materialized paths.
+
+#### ltree Usage Patterns
+
+```mermaid
+flowchart TD
+    Root["Root Entity (root)"]
+    A["Category A (root.category_a)"]
+    B["Category B (root.category_b)"]
+    A1["Item A1 (root.category_a.item_a1)"]
+    A2["Item A2 (root.category_a.item_a2)"]
+    B1["Item B1 (root.category_b.item_b1)"]
+    B2["Item B2 (root.category_b.item_b2)"]
+    B2A["Sub-item B2A (root.category_b.item_b2.subitem_b2a)"]
+
+    Root --> A
+    Root --> B
+    A --> A1
+    A --> A2
+    B --> B1
+    B --> B2
+    B2 --> B2A
+
+    classDef root fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef category fill:#bbf,stroke:#333,stroke-width:1px;
+    classDef item fill:#dfd,stroke:#333,stroke-width:1px;
+    classDef subitem fill:#ffd,stroke:#333,stroke-width:1px;
+
+    class Root root;
+    class A,B category;
+    class A1,A2,B1,B2 item;
+    class B2A subitem;
+```
+
+Our entity relationships leverage the hierarchical ltree structure through the `path` column in the `relationships` table. This enables several powerful query patterns:
+
+1. **Ancestor Queries**: Find all parent relationships (using the `@>` operator)
+    ```sql
+    -- Find all ancestors of a specific entity relationship
+    SELECT * FROM relationships
+    WHERE path @> 'root.category_b.item_b2.subitem_b2a';
+    ```
+
+2. **Descendant Queries**: Find all child relationships (using the `<@` operator)
+    ```sql
+    -- Find all descendants of Category B
+    SELECT * FROM relationships
+    WHERE path <@ 'root.category_b';
+    ```
+
+3. **Path Matching**: Find relationships matching specific patterns
+    ```sql
+    -- Find all items in any category (using wildcards)
+    SELECT * FROM relationships
+    WHERE path ~ 'root.*.item_*';
+    ```
+
+#### Extended ltree Stored Procedures
+
+Additional stored procedures that leverage ltree functionality:
+
+```sql
+CREATE OR REPLACE FUNCTION find_relationship_ancestors(target_path ltree)
+RETURNS TABLE(relationship_id INT, path ltree, entity_id_1 INT, entity_id_2 INT, relationship_type TEXT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT r.relationship_id, r.path, r.entity_id_1, r.entity_id_2, r.relationship_type
+    FROM relationships r
+    WHERE r.path @> target_path
+    ORDER BY nlevel(r.path);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION find_relationship_descendants(parent_path ltree)
+RETURNS TABLE(relationship_id INT, path ltree, entity_id_1 INT, entity_id_2 INT, relationship_type TEXT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT r.relationship_id, r.path, r.entity_id_1, r.entity_id_2, r.relationship_type
+    FROM relationships r
+    WHERE r.path <@ parent_path
+    ORDER BY nlevel(r.path);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION find_relationship_siblings(entity_path ltree)
+RETURNS TABLE(relationship_id INT, path ltree, entity_id_1 INT, entity_id_2 INT, relationship_type TEXT) AS $$
+DECLARE
+    parent_path ltree;
+BEGIN
+    -- Extract parent path
+    SELECT subpath(entity_path, 0, nlevel(entity_path) - 1) INTO parent_path;
+
+    RETURN QUERY
+    SELECT r.relationship_id, r.path, r.entity_id_1, r.entity_id_2, r.relationship_type
+    FROM relationships r
+    WHERE
+        r.path <@ parent_path AND
+        nlevel(r.path) = nlevel(entity_path) AND
+        r.path != entity_path
+    ORDER BY r.path;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Vector Search Optimization
+
+The embedding vectors stored in the `entities` and `external_resources` tables are critical for semantic similarity searches. PostgreSQL's vector extension enables efficient nearest-neighbor searches, but requires careful optimization.
+
+#### Embedding Index Strategies
+
+We implement several techniques to optimize vector searches:
+
+1. **IVFFlat Indexing**: The primary index on embeddings uses the IVFFlat (Inverted File with Flat Compression) algorithm, which divides the vector space into clusters:
+
+    ```sql
+    -- Create optimized vector index with custom parameters
+    CREATE INDEX idx_entity_embedding_optimized ON entities
+    USING ivfflat (embedding vector_l2_ops)
+    WITH (lists = 100);  -- Number of clusters
+    ```
+
+2. **Approximate Nearest Neighbor (ANN) Search**: For improved performance, especially with large datasets, we use approximate rather than exact nearest-neighbor search:
+
+    ```sql
+    -- Find similar entities with efficient ANN search
+    CREATE OR REPLACE FUNCTION find_similar_entities_ann(
+        input_embedding VECTOR(768),
+        similarity_threshold FLOAT,
+        max_results INT,
+        search_quality FLOAT DEFAULT 0.9
+    ) RETURNS TABLE(entity_id INT, name TEXT, similarity FLOAT) AS $$
+    BEGIN
+        SET LOCAL ivfflat.probes = GREATEST(1, LEAST(100, CEIL(search_quality * 100)));
+
+        RETURN QUERY
+        SELECT e.entity_id, e.name, (1 - (e.embedding <=> input_embedding)) AS similarity
+        FROM entities e
+        WHERE (1 - (e.embedding <=> input_embedding)) > similarity_threshold
+        ORDER BY similarity DESC
+        LIMIT max_results;
+    END;
+    $$ LANGUAGE plpgsql;
+    ```
+
+3. **Hybrid Search**: Combining exact text matching with vector similarity for optimal results:
+
+    ```sql
+    CREATE OR REPLACE FUNCTION hybrid_entity_search(
+        search_text TEXT,
+        input_embedding VECTOR(768),
+        text_weight FLOAT DEFAULT 0.3,
+        vector_weight FLOAT DEFAULT 0.7,
+        max_results INT DEFAULT 20,
+        language TEXT DEFAULT 'english'
+    ) RETURNS TABLE(entity_id INT, name TEXT, score FLOAT) AS $$
+    BEGIN
+        RETURN QUERY
+        WITH text_matches AS (
+            SELECT
+                e.entity_id,
+                e.name,
+                ts_rank_cd(to_tsvector(language, e.name), to_tsquery(language, search_text)) AS text_score
+            FROM entities e
+            WHERE to_tsvector(language, e.name) @@ to_tsquery(language, search_text)
+        ),
+        vector_matches AS (
+            SELECT
+                e.entity_id,
+                e.name,
+                (1 - (e.embedding <=> input_embedding)) AS vector_score
+            FROM entities e
+            ORDER BY vector_score DESC
+            LIMIT max_results * 2
+        )
+        SELECT
+            COALESCE(t.entity_id, v.entity_id) AS entity_id,
+            COALESCE(t.name, v.name) AS name,
+            (COALESCE(t.text_score, 0) * text_weight +
+             COALESCE(v.vector_score, 0) * vector_weight) AS score
+        FROM text_matches t
+        FULL OUTER JOIN vector_matches v ON t.entity_id = v.entity_id
+        ORDER BY score DESC
+        LIMIT max_results;
+    END;
+    $$ LANGUAGE plpgsql;
+    ```
+
+#### Embedding Maintenance Procedures
+
+Managing vector embeddings efficiently is critical for system performance. The following procedures handle embedding updates and maintenance:
+
+```sql
+-- Update entity embeddings while maintaining historical references
+CREATE OR REPLACE FUNCTION update_entity_embedding(
+    target_entity_id INT,
+    new_embedding VECTOR(768)
+) RETURNS VOID AS $$
+DECLARE
+    old_embedding VECTOR(768);
+BEGIN
+    -- Save old embedding for reference
+    SELECT embedding INTO old_embedding FROM entities WHERE entity_id = target_entity_id;
+
+    -- Create embedding history record
+    INSERT INTO embedding_history (
+        entity_id,
+        previous_embedding,
+        change_date
+    ) VALUES (
+        target_entity_id,
+        old_embedding,
+        NOW()
+    );
+
+    -- Update entity with new embedding
+    UPDATE entities
+    SET
+        embedding = new_embedding,
+        updated_at = NOW()
+    WHERE entity_id = target_entity_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Additional table needed for embedding history
+-- CREATE TABLE embedding_history (
+--     history_id SERIAL PRIMARY KEY,
+--     entity_id INT REFERENCES entities(entity_id),
+--     previous_embedding VECTOR(768),
+--     change_date TIMESTAMP NOT NULL DEFAULT NOW()
+-- );
+
+-- Rebase all embeddings after model change
+CREATE OR REPLACE FUNCTION rebase_all_embeddings(
+    model_version TEXT
+) RETURNS INT AS $$
+DECLARE
+    entities_updated INT := 0;
+    entity_record RECORD;
+BEGIN
+    -- Create embedding model version record
+    INSERT INTO embedding_model_versions (
+        version_name,
+        applied_date
+    ) VALUES (
+        model_version,
+        NOW()
+    );
+
+    -- Record will be updated by the external Rust code
+    -- that processes each entity and updates its embedding
+
+    RETURN entities_updated;
+
+    -- Note: Actual rebasing implementation happens in Rust code
+    -- This function mainly creates the tracking record
+END;
+$$ LANGUAGE plpgsql;
+
+-- Additional table needed for model version tracking
+-- CREATE TABLE embedding_model_versions (
+--     version_id SERIAL PRIMARY KEY,
+--     version_name TEXT NOT NULL,
+--     applied_date TIMESTAMP NOT NULL,
+--     entities_processed INT DEFAULT 0,
+--     status TEXT DEFAULT 'in_progress'
+-- );
+```
+
+### Advanced Entity Relationships Management
+
+Managing complex entity relationships efficiently requires specialized procedures:
+
+```sql
+-- Find multi-hop relationships between entities with confidence scoring
+CREATE OR REPLACE FUNCTION find_entity_connection_paths(
+    start_entity_id INT,
+    end_entity_id INT,
+    max_hops INT DEFAULT 3
+) RETURNS TABLE(
+    path_entities INT[],
+    path_relationships TEXT[],
+    confidence FLOAT
+) AS $$
+DECLARE
+    hop INT;
+BEGIN
+    -- Initialize temporary tables for path finding
+    CREATE TEMPORARY TABLE IF NOT EXISTS temp_paths (
+        id SERIAL PRIMARY KEY,
+        entity_path INT[],
+        relationship_path TEXT[],
+        path_confidence FLOAT
+    ) ON COMMIT DROP;
+
+    -- Start with the source entity
+    INSERT INTO temp_paths (entity_path, relationship_path, path_confidence)
+    VALUES (ARRAY[start_entity_id], ARRAY[]::TEXT[], 1.0);
+
+    -- Iteratively build paths up to max_hops
+    FOR hop IN 1..max_hops LOOP
+        -- Extend existing paths by one relationship
+        INSERT INTO temp_paths (entity_path, relationship_path, path_confidence)
+        SELECT
+            tp.entity_path || r.entity_id_2,
+            tp.relationship_path || r.relationship_type,
+            tp.path_confidence * r.weight
+        FROM temp_paths tp
+        JOIN relationships r ON r.entity_id_1 = tp.entity_path[array_length(tp.entity_path, 1)]
+        WHERE
+            r.entity_id_2 != ALL(tp.entity_path) AND  -- Prevent cycles
+            array_length(tp.entity_path, 1) = hop;    -- Only extend paths of current hop length
+    END LOOP;
+
+    -- Return paths that reach the target entity, ordered by confidence
+    RETURN QUERY
+    SELECT
+        tp.entity_path,
+        tp.relationship_path,
+        tp.path_confidence
+    FROM temp_paths tp
+    WHERE
+        tp.entity_path[array_length(tp.entity_path, 1)] = end_entity_id AND
+        array_length(tp.entity_path, 1) > 1
+    ORDER BY tp.path_confidence DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Find entities connected by specific relationship patterns
+CREATE OR REPLACE FUNCTION find_entities_by_relationship_pattern(
+    relationship_types TEXT[]
+) RETURNS TABLE(
+    start_entity_id INT,
+    start_entity_name TEXT,
+    end_entity_id INT,
+    end_entity_name TEXT,
+    path_confidence FLOAT
+) AS $$
+BEGIN
+    RETURN QUERY
+    WITH relevant_paths AS (
+        SELECT
+            r1.entity_id_1,
+            r1.entity_id_2 AS intermediate_id,
+            r2.entity_id_2,
+            r1.weight * r2.weight AS combined_weight
+        FROM relationships r1
+        JOIN relationships r2 ON r1.entity_id_2 = r2.entity_id_1
+        WHERE
+            r1.relationship_type = relationship_types[1] AND
+            r2.relationship_type = relationship_types[2]
+    )
+    SELECT
+        rp.entity_id_1,
+        e1.name,
+        rp.entity_id_2,
+        e2.name,
+        rp.combined_weight
+    FROM relevant_paths rp
+    JOIN entities e1 ON rp.entity_id_1 = e1.entity_id
+    JOIN entities e2 ON rp.entity_id_2 = e2.entity_id
+    ORDER BY rp.combined_weight DESC;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Database Schema Evolution and Management
+
+The RustyGPT system employs a structured approach to database schema evolution to ensure seamless updates without disrupting the running system.
+
+#### Migration Management Workflow
+
+```mermaid
+flowchart TD
+    title["Database Schema Evolution Workflow"]
+
+    subgraph Development
+        Dev["Develop Schema Changes"]
+        SQL["Create Migration SQL"]
+        Test["Test Migration"]
+    end
+
+    subgraph Validation
+        Review["Peer Review"]
+        TestEnv["Apply to Test Environment"]
+        Verify["Verify Functionality"]
+    end
+
+    subgraph Deployment
+        VersionControl["Store in Version Control"]
+        CI["CI Pipeline Validation"]
+        Backup["Backup Production Database"]
+        Apply["Apply Migration"]
+        PostVerify["Post-Deployment Verification"]
+    end
+
+    Dev --> SQL
+    SQL --> Test
+    Test --> Review
+    Review --> TestEnv
+    TestEnv --> Verify
+    Verify --> VersionControl
+    VersionControl --> CI
+    CI --> Backup
+    Backup --> Apply
+    Apply --> PostVerify
+
+    classDef dev fill:#d1e7dd,stroke:#198754;
+    classDef val fill:#fff3cd,stroke:#ffc107;
+    classDef dep fill:#f8d7da,stroke:#dc3545;
+
+    class Dev,SQL,Test dev;
+    class Review,TestEnv,Verify val;
+    class VersionControl,CI,Backup,Apply,PostVerify dep;
+```
+
+#### Version Control and Tracking
+
+Each schema migration is versioned and tracked in the database itself:
+
+```sql
+-- Schema version tracking table
+CREATE TABLE schema_migrations (
+    version VARCHAR(50) PRIMARY KEY,
+    applied_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    description TEXT,
+    script_hash VARCHAR(64),  -- SHA-256 hash of migration script for integrity verification
+    applied_by VARCHAR(100)
+);
+
+-- Function to record a successful migration
+CREATE OR REPLACE FUNCTION record_migration(
+    p_version VARCHAR(50),
+    p_description TEXT,
+    p_script_hash VARCHAR(64)
+) RETURNS VOID AS $$
+BEGIN
+    INSERT INTO schema_migrations (version, description, script_hash)
+    VALUES (p_version, p_description, p_script_hash);
+END;
+$$ LANGUAGE plpgsql;
+```
+
+Our system employs the following principles for schema evolution:
+
+1. **Forward-Only Migrations**: All schema changes are forward-only, with explicit upgrade paths.
+2. **Idempotent Scripts**: Migration scripts are designed to be safely rerunnable.
+3. **Point-in-Time Recovery**: Each migration maintains a timestamp for potential rollback to specific database states.
+4. **Change Atomicity**: Related schema changes are grouped in atomic transactions.
+
+#### Zero-Downtime Migration Strategies
+
+For critical production systems, we employ techniques that minimize or eliminate downtime during migrations:
+
+1. **Expand/Contract Pattern**:
+   - First add new structures
+   - Gradually migrate data
+   - Update application code to use both old and new structures
+   - Eventually remove old structures
+
+2. **Feature Flags**: Database changes are tied to application feature flags to control exposure.
+
+3. **Deferred Constraint Checking**: For large tables, constraints are initially disabled, then validated after data migration.
+
+Example zero-downtime migration sequence:
+
+```sql
+-- 1. Add new column without constraints
+ALTER TABLE entities ADD COLUMN IF NOT EXISTS metadata JSONB;
+
+-- 2. Backfill data in batches (implemented in Rust)
+-- This happens through application code, processing chunks of entities
+
+-- 3. Add constraints after data is populated
+ALTER TABLE entities ALTER COLUMN metadata SET DEFAULT '{}';
+```
+
+### Performance Monitoring and Optimization
+
+The database system includes built-in monitoring and optimization capabilities:
+
+```sql
+-- Track slow queries
+CREATE TABLE query_performance_log (
+    log_id SERIAL PRIMARY KEY,
+    query_text TEXT,
+    execution_time INTERVAL,
+    execution_plan TEXT,
+    query_parameters TEXT,
+    logged_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Function to log slow queries
+CREATE OR REPLACE FUNCTION log_slow_query(
+    p_query_text TEXT,
+    p_execution_time INTERVAL,
+    p_query_parameters TEXT DEFAULT NULL
+) RETURNS VOID AS $$
+DECLARE
+    explain_output TEXT;
+BEGIN
+    -- Capture execution plan if possible
+    BEGIN
+        EXECUTE 'EXPLAIN (FORMAT JSON) ' || p_query_text INTO explain_output;
+    EXCEPTION WHEN OTHERS THEN
+        explain_output := NULL;
+    END;
+
+    INSERT INTO query_performance_log (
+        query_text,
+        execution_time,
+        execution_plan,
+        query_parameters
+    ) VALUES (
+        p_query_text,
+        p_execution_time,
+        explain_output,
+        p_query_parameters
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- Index usage statistics
+CREATE OR REPLACE FUNCTION get_index_usage_stats()
+RETURNS TABLE(
+    index_name TEXT,
+    table_name TEXT,
+    index_size TEXT,
+    index_scans BIGINT,
+    rows_fetched BIGINT,
+    unused BOOLEAN
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        i.indexrelname AS index_name,
+        t.relname AS table_name,
+        pg_size_pretty(pg_relation_size(i.indexrelid)) AS index_size,
+        s.idx_scan AS index_scans,
+        s.idx_tup_fetch AS rows_fetched,
+        (s.idx_scan = 0) AS unused
+    FROM pg_stat_user_indexes s
+    JOIN pg_index i ON s.indexrelid = i.indexrelid
+    JOIN pg_class t ON i.indrelid = t.oid
+    ORDER BY pg_relation_size(i.indexrelid) DESC;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### Automated Maintenance Procedures
+
+Regular maintenance is crucial for optimal database performance:
+
+```sql
+-- Table vacuum and analyze function
+CREATE OR REPLACE FUNCTION maintenance_vacuum_analyze() RETURNS VOID AS $$
+DECLARE
+    table_record RECORD;
+BEGIN
+    FOR table_record IN
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+    LOOP
+        EXECUTE 'VACUUM ANALYZE ' || table_record.table_name;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to reindex vector indexes
+CREATE OR REPLACE FUNCTION maintenance_reindex_vectors() RETURNS VOID AS $$
+BEGIN
+    REINDEX INDEX idx_entity_embedding;
+    REINDEX INDEX idx_relationship_path;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### Query Optimization Techniques
+
+For optimal performance with vector operations and complex entity relationships, we implement specific optimizations:
+
+1. **Materialized Computation Paths**: For frequent, complex relational queries:
+
+```sql
+-- Create materialized view for common complex relationship patterns
+CREATE MATERIALIZED VIEW common_entity_relationships AS
+SELECT
+    e1.entity_id AS source_id,
+    e1.name AS source_name,
+    e2.entity_id AS target_id,
+    e2.name AS target_name,
+    r.relationship_type,
+    r.weight AS confidence
+FROM entities e1
+JOIN relationships r ON e1.entity_id = r.entity_id_1
+JOIN entities e2 ON r.entity_id_2 = e2.entity_id
+WHERE r.weight > 0.7
+ORDER BY e1.entity_id, r.weight DESC;
+
+-- Create index on materialized view
+CREATE INDEX idx_common_relationships_source ON common_entity_relationships(source_id);
+CREATE INDEX idx_common_relationships_target ON common_entity_relationships(target_id);
+
+-- Refresh materialized view function
+CREATE OR REPLACE FUNCTION refresh_relationship_materialized_views() RETURNS VOID AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY common_entity_relationships;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+2. **Connection Pooling Configuration**: Our application uses optimized database connection pooling:
+
+```rust
+// Configuration parameters for database connection pooling
+pub struct DbPoolConfig {
+    pub max_connections: u32,        // Default: 10
+    pub min_connections: u32,        // Default: 2
+    pub max_lifetime: Duration,      // Default: 30 minutes
+    pub idle_timeout: Duration,      // Default: 10 minutes
+    pub connection_timeout: Duration, // Default: 3 seconds
+}
+
+// Optimal settings for vector-heavy operations
+pub fn vector_optimized_pool_config() -> DbPoolConfig {
+    DbPoolConfig {
+        max_connections: 20,        // Higher for parallel vector operations
+        min_connections: 5,         // Keep more connections ready
+        max_lifetime: Duration::from_secs(1800),
+        idle_timeout: Duration::from_secs(300),
+        connection_timeout: Duration::from_secs(5),
+    }
+}
+```
+
 ### Workflow Implementation
 
 #### Node Initialization:
@@ -1067,14 +1708,7 @@ impl ReasoningContext {
 }
 ```
 
-**Benefits**:
-- Event-based communication enables loose coupling between nodes
-- Shared context object ensures all nodes work with consistent information
-- Checkpointing enables speculative reasoning without risking context pollution
-- Explicit event types allow nodes to selectively process only relevant state changes
-- Merge strategies ensure coherent combination of different reasoning branches
-
-## Project Structure
+### Project Structure
 
 RustyGPT follows a clean architecture with clear separation of concerns:
 
