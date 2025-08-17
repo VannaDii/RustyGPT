@@ -38,6 +38,39 @@ enum Commands {
         )]
         config: Option<PathBuf>,
     },
+    /// Start an interactive chat session with the AI
+    Chat {
+        /// Path to the model file to use for chat
+        #[arg(
+            long,
+            short,
+            help = "Path to the model file to use for chat (e.g., /path/to/model.gguf)"
+        )]
+        model: Option<PathBuf>,
+
+        /// Maximum number of tokens to generate per response
+        #[arg(
+            long,
+            help = "Maximum number of tokens to generate per response (default: model dependent)"
+        )]
+        max_tokens: Option<u32>,
+
+        /// Temperature for response generation (0.0-1.0, lower = more focused)
+        #[arg(
+            long,
+            short,
+            help = "Temperature for response generation (0.0-1.0, lower = more focused, higher = more creative)"
+        )]
+        temperature: Option<f32>,
+
+        /// System message to set the AI's behavior
+        #[arg(
+            long,
+            short,
+            help = "System message to set the AI's behavior (e.g., 'You are a helpful assistant')"
+        )]
+        system: Option<String>,
+    },
     /// Generate the OpenAPI specification
     Spec {
         /// Output path for the OpenAPI spec (YAML or JSON based on extension, or "json"/"yaml" for streaming)
@@ -76,6 +109,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Commands::Serve { port, config } => {
             let resolved_config = Config::load_config(config, Some(port))?;
             server::run(resolved_config).await.expect("Server exited");
+        }
+        Commands::Chat {
+            model,
+            max_tokens,
+            temperature,
+            system,
+        } => {
+            commands::chat::start_chat(model, max_tokens, temperature, system).await?;
         }
         Commands::Spec { output_path } => {
             commands::spec::generate_spec(output_path.as_deref())?;

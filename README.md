@@ -48,6 +48,60 @@ The application features a real-time chat system with streaming message delivery
 4. **Streaming UI**: Messages are displayed with typing indicators while streaming
 5. **Conversation Management**: Users can view and interact with multiple conversations
 
+## CLI Interface
+
+The RustyGPT CLI provides a command-line interface for interacting with AI models locally:
+
+### Chat Command
+
+Start an interactive chat session with a local AI model:
+
+```sh
+# Basic chat with default settings
+cargo run --bin cli chat
+
+# Chat with custom model
+cargo run --bin cli chat --model /path/to/your/model.gguf
+
+# Chat with custom parameters
+cargo run --bin cli chat \
+  --model /path/to/model.gguf \
+  --temperature 0.7 \
+  --max-tokens 512 \
+  --system "You are a helpful coding assistant."
+```
+
+### Available Options
+
+- `--model, -m`: Path to the GGUF model file (auto-detects hardware optimization)
+- `--temperature, -t`: Response creativity (0.0-1.0, lower = more focused)
+- `--max-tokens`: Maximum tokens per response (model-dependent default)
+- `--system, -s`: System message to set AI behavior
+
+### Features
+
+- **Hardware Optimization**: Automatically detects CPU/GPU capabilities and optimizes model parameters
+- **Interactive Session**: Type messages and receive AI responses in real-time
+- **Exit Commands**: Type `exit`, `quit`, or `q` to end the session
+- **Token Usage**: Shows token statistics for each response
+- **Error Handling**: Graceful handling of model loading and generation errors
+
+### Other CLI Commands
+
+```sh
+# Generate OpenAPI specification
+cargo run --bin cli spec
+
+# Generate shell completions
+cargo run --bin cli completion bash
+
+# Generate configuration file
+cargo run --bin cli config
+
+# Start the backend server
+cargo run --bin cli serve --port 8080
+```
+
 ## Authentication Flow
 
 The application supports OAuth authentication with both GitHub and Apple:
