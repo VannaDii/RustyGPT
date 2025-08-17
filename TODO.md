@@ -8,19 +8,43 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## ⏮️ -1. Refactor CLI and Server
+## 🧱 0. Minimal AI Chat MVP (Single-User, Local-Only)
+
+Start here. This establishes the core of a functioning, local-first AI Chat app using REST and SSE. No auth, no multi-user support, no web UI complexity—just basic functionality that works.
+
+- [ ] Use crate: `rustygpt-server`
+  - [ ] Axum-based REST API
+  - [ ] `POST /v1/chat/completions` — accepts JSON with `messages` array
+  - [ ] `stream: true` returns Server-Sent Events
+- [ ] Use crate: `rustygpt-shared`
+  - [ ] Load a local GGUF model using `llama-rs` or similar
+  - [ ] Expose basic streaming and blocking completion interface
+- [ ] Add shared types crate: `rustygpt-shared`
+  - [ ] OpenAI-compatible request and response types
+- [ ] Implement basic model manager
+  - [ ] Load 1 local model
+  - [ ] Run inference and return completion tokens
+- [ ] SSE streaming output
+  - [ ] Use `axum::response::sse::Sse`
+  - [ ] Emit OpenAI `delta` format
+- [ ] CLI to run API server
+- [ ] Manual test client to send completion requests
+
+---
+
+## 1. Refactor CLI and Server
 
 - [X] Move CLI out of Server
 - [X] Add `lib` to Server
 - [X] Enable CLI to run Server via `lib`
 
-## 🔊 0. Copilot Chat-Compatible API First
+## 2. Copilot Chat-Compatible API First
 
-- [ ] Scaffold `rustygpt-api` crate to serve Copilot-compatible endpoints
-  - [x] `POST /v1/chat/completions` with OpenAI schema
-  - [ ] `GET /v1/models` listing available model(s)
-- [ ] Static response MVP
-  - [ ] Return dummy assistant message
+- [X] Scaffold `rustygpt-server` crate to serve Copilot-compatible endpoints
+  - [X] `POST /v1/chat/completions` with OpenAI schema
+  - [X] `GET /v1/models` listing available model(s)
+- [X] Static response MVP
+  - [X] Return dummy assistant message
   - [ ] Confirm Copilot Chat connects
 - [ ] Implement RustyGPT backend model interface
   - [ ] Use internal inference engine (no external Ollama or OpenAI)
@@ -39,68 +63,71 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
   - [ ] Add `/status` endpoint
   - [ ] Log: model, duration, stream flag, token count
 - [ ] Testing
-  - [x] Unit + integration tests for `/v1/chat/completions`
+  - [X] Unit + integration tests for `/v1/chat/completions`
   - [ ] Manual validation in GitHub Copilot Chat
 
 ---
 
-## 📦 1. Project Structure & Workspace
+## 3. Project Structure & Workspace
 
-- [ ] Set up `Cargo.toml` workspace with crates
-  - [ ] `rustygpt-common`
-  - [ ] `rustygpt-api`
-  - [ ] `rustygpt-frontend`
-  - [ ] `rustygpt-model`
-  - [ ] `rustygpt-db`
+- [X] Set up `Cargo.toml` workspace with crates
+  - [X] `rustygpt-shared` (was `rustygpt-common`)
+  - [X] `rustygpt-server` (was `rustygpt-api`)
+  - [X] `rustygpt-web` (was `rustygpt-frontend`)
+  - [X] `rustygpt-cli`
+  - [X] `rustygpt-tools` (was `rustygpt-utils`)
+  - [ ] `rustygpt-model` (integrated into server for now)
+  - [ ] `rustygpt-db` (integrated into server for now)
   - [ ] `rustygpt-index`
-  - [ ] `rustygpt-utils`
-- [ ] Add Makefile or justfile
+- [X] Add Makefile or justfile
 - [ ] Add `.cargo/config.toml` for targets
 
 ---
 
-## 🚀 2. Backend (Axum)
+## 4. Backend (Axum)
 
-- [ ] Setup Axum API project
-- [ ] Add OpenAPI support via `utoipa` or `paperclip`
-- [ ] Define route tree
-  - [ ] `/auth`
-  - [ ] `/chat`
+- [X] Setup Axum API project
+- [X] Add OpenAPI support via `utoipa` or `paperclip`
+- [X] Define route tree
+  - [X] `/auth` (OAuth routes)
+  - [X] `/api/conversations` (chat)
   - [ ] `/search`
   - [ ] `/admin`
-- [ ] Define `AppState`
-  - [ ] Config
-  - [ ] DB pool
+  - [X] `/v1/chat/completions` (Copilot API)
+  - [X] `/v1/models` (Copilot API)
+- [X] Define `AppState`
+  - [X] Config
+  - [X] DB pool
   - [ ] Cache
   - [ ] Model runtime handle
-- [ ] Add middleware
-  - [ ] Tracing
-  - [ ] Auth (JWT / Cookie)
-  - [ ] CORS
+- [X] Add middleware
+  - [X] Tracing
+  - [X] Auth (JWT / Cookie)
+  - [X] CORS
   - [ ] Compression
-- [ ] Implement SSE streaming endpoint
+- [X] Implement SSE streaming endpoint
 
 ---
 
-## 🛂 3. Authentication & Accounts
+## 5. Authentication & Accounts
 
 - [ ] Local login
   - [ ] Email + password (argon2)
-- [ ] External auth
-  - [ ] Apple Sign In
-  - [ ] GitHub OAuth
-- [ ] Stored procedures in Postgres
-  - [ ] Create user
-  - [ ] Login
-  - [ ] Validate session
-  - [ ] Link OAuth identity
+- [X] External auth
+  - [X] Apple Sign In
+  - [X] GitHub OAuth
+- [X] Stored procedures in Postgres
+  - [X] Create user
+  - [X] Login
+  - [X] Validate session
+  - [X] Link OAuth identity
 - [ ] Token handling
-  - [ ] Short- [ ]lived JWT
+  - [ ] Short-lived JWT
   - [ ] Secure refresh cookie
 
 ---
 
-## 🧠 4. AI Model Integration (LLM)
+## 6. AI Model Integration (LLM)
 
 - [ ] Implement internal model manager
   - [ ] Load GGUF/ONNX models from disk
@@ -114,7 +141,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 📚 5. File, Book, and Knowledge Indexing
+## 7. File, Book, and Knowledge Indexing
 
 - [ ] Create `rustygpt-index`
 - [ ] Add parsers
@@ -128,67 +155,67 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 🧪 6. Testing & Coverage
+## 8. Testing & Coverage
 
-- [ ] Add `cargo llvm-cov` to workflow
-  - [ ] Command: `cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html`
-- [ ] Write unit tests
-  - [ ] API routes
-  - [ ] SSE stream
-  - [ ] Stored procedures
-- [ ] Add Yew tests for frontend logic
+- [X] Add `cargo llvm-cov` to workflow
+  - [X] Command: `cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html`
+- [X] Write unit tests
+  - [X] API routes
+  - [X] SSE stream
+  - [X] Stored procedures
+- [X] Add Yew tests for frontend logic
 - [ ] Target 90%+ coverage in all crates
 
 ---
 
-## 🖥️ 7. Frontend (Yew)
+## 9. Frontend (Yew)
 
-- [ ] Set up Yew project
-- [ ] Integrate TailwindCSS + Trunk
-- [ ] Implement pages
-  - [ ] Auth (Sign In, Sign Up)
-  - [ ] Chat
+- [X] Set up Yew project
+- [X] Integrate TailwindCSS + Trunk
+- [X] Implement pages
+  - [X] Auth (Sign In, Sign Up)
+  - [X] Chat
   - [ ] Search
   - [ ] Admin
-- [ ] Build components
-  - [ ] ChatBox
+- [X] Build components
+  - [X] ChatBox
   - [ ] Streaming tokens
   - [ ] Threaded view
-- [ ] Use shared types via `rustygpt-common`
+- [X] Use shared types via `rustygpt-shared`
 
 ---
 
-## 📦 8. Dockerized Environment
+## 10. Dockerized Environment
 
-- [ ] Define Docker Compose stack
-  - [ ] `rustygpt-api`
-  - [ ] `rustygpt-frontend`
-  - [ ] `postgres`
+- [X] Define Docker Compose stack
+  - [X] `rustygpt-server` (was `rustygpt-api`)
+  - [X] `rustygpt-web` (was `rustygpt-frontend`)
+  - [X] `postgres`
   - [ ] `rustygpt-model` (internal LLM server)
-- [ ] Mount volumes
-  - [ ] `/array/data/books`
-  - [ ] `/array/data/media`
+- [X] Mount volumes
+  - [X] `/array/data/books`
+  - [X] `/array/data/media`
 - [ ] Enable GPU pass-through (REQUIRED For Linux and macOS)
 
 ---
 
-## 🧰 9. Tooling & Dev Experience
+## 11. Tooling & Dev Experience
 
-- [ ] Add `COPILOT_INSTRUCTIONS.md`
-  - [ ] Idiomatic Rust enforcement
-  - [ ] Explicit type links in docstrings
-  - [ ] No unnecessary clones
-  - [ ] Crate version synchronization
-- [ ] Add `dev.md`
-  - [ ] Common commands
-- [ ] Add CLI tools or scripts
-  - [ ] DB seed
+- [X] Add `COPILOT_INSTRUCTIONS.md`
+  - [X] Idiomatic Rust enforcement
+  - [X] Explicit type links in docstrings
+  - [X] No unnecessary clones
+  - [X] Crate version synchronization
+- [X] Add `dev.md` (via Justfile and README)
+  - [X] Common commands
+- [X] Add CLI tools or scripts
+  - [X] DB seed (via docker-compose)
   - [ ] Model download/init
-  - [ ] Lint / check / coverage
+  - [X] Lint / check / coverage (via Justfile)
 
 ---
 
-## 💬 10. Conversation Explorer
+## 12. Conversation Explorer
 
 - [ ] Message model
   - [ ] `thread_id`
@@ -203,7 +230,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 🧠 11. Critical Thinking Tools
+## 13. Critical Thinking Tools
 
 - [ ] Prompt styles
   - [ ] Socratic
@@ -219,7 +246,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 🛡️ 12. Privacy & Offline Use
+## 14. Privacy & Offline Use
 
 - [ ] Run all inference locally
 - [ ] No cloud dependencies
@@ -228,7 +255,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 🔒 13. Roles & Permissions
+## 15. Roles & Permissions
 
 - [ ] Define roles
   - [ ] Admin
@@ -239,7 +266,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 🧠 14. Prompt Enrichment & Memory
+## 16. Prompt Enrichment & Memory
 
 - [ ] Generate thread summaries
 - [ ] Token-bounded memory injection
@@ -250,7 +277,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 🖼️ 15. RustyGPT Image Generation
+## 17. RustyGPT Image Generation
 
 - [ ] Build internal image generation module
 - [ ] Use local stable diffusion models only
@@ -267,7 +294,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 🏕️ 16. Survival Mode (Books + AI)
+## 18. Survival Mode (Books + AI)
 
 - [ ] Index survival content
   - [ ] Water
@@ -280,7 +307,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## 🧩 17. Optional / Bonus Features
+## 19. Optional / Bonus Features
 
 - [ ] Raven companions (Ogg & Vorbis 🪶)
 - [ ] Local smart home API (EcoFlow, HomeKit, HA)
@@ -290,7 +317,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ---
 
-## ✅ 18. Milestones
+## 20. Milestones
 
 - [ ] Milestone 1: Copilot Chat Compatibility
 - [ ] Milestone 2: Project scaffold + workspace
