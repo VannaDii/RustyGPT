@@ -4,6 +4,19 @@ This document defines strict, high-quality guidelines for GitHub Copilot to foll
 
 > **Workspace Members**: See the [workspace Cargo.toml](../Cargo.toml) for crate membership and layout.
 
+## Rule Discovery & Integration
+
+This document focuses on **technical standards and implementation guidelines**. For comprehensive guidance, also reference:
+
+**[Agent Rules](prompts/agent-rules.prompt.md)** - Essential behavioral and interactive guidance including:
+- Communication optimization and token efficiency
+- Simplicity principles and YAGNI methodology
+- Conversation summarization strategies
+- Impact awareness and rule adherence
+- Meta-cognitive improvement practices
+
+Both rule sets work together: **technical standards** (this document) + **behavioral guidance** (agent rules) = complete development framework.
+
 ## Architecture Overview
 
 RustyGPT is a full-stack Rust application with clear separation between frontend (Yew + WASM), backend (Axum + PostgreSQL), and shared components:
@@ -56,7 +69,7 @@ just build-release # Release builds
 
 ### Project-Specific Command Execution
 
-You have many tools available to you for command execution. You should primarily use the `#execute_command` tool without providing a `timeout` attribute, and ensuring the command you want to run is prefixed by a `cd` command that specifies the correct directory for the command to execute successfully. This ensures that the command runs in the appropriate context and can access the necessary resources.
+You have many tools available to you for command execution. You should primarily use the `mcp_shell-exec_execute_command` tool with a `timeout` attribute set to 300000 milliseconds (5 minutes), and ensuring the command you want to run is prefixed by a `cd` command that specifies the correct directory for the command to execute successfully. This ensures that the command runs in the appropriate context and can access the necessary resources.
 
 ### Example Commands
 
@@ -66,11 +79,12 @@ cd ~/Source/rusty_gpt && cargo check
 
 ```json
 {
-  "command": "cd ~/Source/rusty_gpt && cargo check"
+  "command": "cd ~/Source/rusty_gpt && cargo check",
+  "timeout": 300000
 }
 ```
 
-**Notice there is never a `timeout` attribute.** This is because the command will run until it completes, and you should not set a timeout for it.
+**Always include a `timeout` attribute set to 300000 milliseconds (5 minutes).** This provides a reasonable timeout for most development commands while preventing indefinite hangs.
 
 ### Test Commands
 
@@ -178,15 +192,14 @@ When running tests, you MUST ONLY use the `cargo test` command and it MUST be ru
 cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html
 ```
 
-- Maintain **100% coverage** of all logic.
+- Maintain **90% minimum coverage, striving for 100% where practical and beneficial.**
 
 ### Linting
 
 - Run formatting and Clippy checks in CI:
 
 ```sh
-cargo fmt --all
-cargo clippy --all-features -- -D warnings
+just check
 ```
 
 - No warnings allowed in production.
@@ -336,7 +349,7 @@ Copilot **must always**:
 
 - Follow all idiomatic Rust practices.
 - Avoid unnecessary clones or allocations.
-- Maintain 100% unit test coverage.
+- Maintain a minimum of 90% unit test coverage, striving for 100% where practical and beneficial.
 - Write happy-path and error-path tests.
 - Add or update all related doc comments.
 - Format all commit messages per Conventional Commits.
