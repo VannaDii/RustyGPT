@@ -1,7 +1,6 @@
 //! Integration tests for the CLI chat command.
 
 use assert_cmd::Command;
-use predicates;
 
 #[tokio::test]
 async fn test_chat_command_help() {

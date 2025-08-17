@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use crate::config::llm::LLMConfiguration;
 use serde::{Deserialize, Serialize};
 use std::{env, fs, path::PathBuf};
@@ -18,6 +19,7 @@ pub struct Config {
     pub frontend_path: PathBuf,
 
     /// LLM configuration settings
+    #[cfg(not(target_arch = "wasm32"))]
     pub llm: LLMConfiguration,
 }
 
@@ -29,6 +31,7 @@ impl Config {
             database_url: "postgres://tinroof:rusty@localhost/rusty_gpt".to_string(),
             log_level: "info".to_string(),
             frontend_path: PathBuf::from("../frontend/dist"),
+            #[cfg(not(target_arch = "wasm32"))]
             llm: LLMConfiguration::default(),
         }
     }
@@ -64,7 +67,10 @@ impl Config {
             config.database_url = file_config.database_url;
             config.log_level = file_config.log_level;
             config.frontend_path = file_config.frontend_path;
-            config.llm = file_config.llm;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                config.llm = file_config.llm;
+            }
         }
 
         // Use environment variables only if values are not already set
@@ -92,6 +98,7 @@ impl Config {
         }
 
         // Apply LLM environment variables to existing config
+        #[cfg(not(target_arch = "wasm32"))]
         config.llm.apply_env_overrides();
 
         // Override with command-line arguments if provided
@@ -108,16 +115,19 @@ impl Config {
     }
 
     /// Get the default LLM configuration for chat
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_chat_llm_config(&self) -> Result<crate::llms::types::LLMConfig, String> {
         self.llm.get_default_chat_config()
     }
 
     /// Get the default LLM configuration for embeddings
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_embedding_llm_config(&self) -> Result<crate::llms::types::LLMConfig, String> {
         self.llm.get_default_embedding_config()
     }
 
     /// Get LLM configuration for a specific model
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_llm_config(
         &self,
         model_name: &str,
@@ -142,6 +152,7 @@ impl Config {
         }
 
         // Validate LLM configuration
+        #[cfg(not(target_arch = "wasm32"))]
         if let Err(llm_errors) = self.llm.validate() {
             errors.extend(llm_errors);
         }

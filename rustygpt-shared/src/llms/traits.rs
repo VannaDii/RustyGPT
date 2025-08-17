@@ -10,15 +10,21 @@ use async_trait::async_trait;
 use futures_util::Stream;
 use std::pin::Pin;
 
-/// Type alias for streaming response
+/// Type alias for streaming response with conditional Send bound
+#[cfg(not(target_arch = "wasm32"))]
 pub type StreamingResponseStream =
     Pin<Box<dyn Stream<Item = LLMResult<StreamingResponse>> + Send + 'static>>;
+
+#[cfg(target_arch = "wasm32")]
+pub type StreamingResponseStream =
+    Pin<Box<dyn Stream<Item = LLMResult<StreamingResponse>> + 'static>>;
 
 /// Main trait for LLM providers
 ///
 /// This trait defines the interface for different LLM backend implementations.
 /// Providers are responsible for loading models and managing their lifecycle.
 #[async_trait]
+#[cfg(not(target_arch = "wasm32"))]
 pub trait LLMProvider: Send + Sync {
     /// The type of model this provider creates
     type Model: LLMModel;

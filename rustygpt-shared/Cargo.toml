@@ -18,10 +18,17 @@ utoipa-axum = { workspace = true }
 yew = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, optional = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { workspace = true }
+
+[features]
+default = ["tokio"]
+server = ["tokio"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

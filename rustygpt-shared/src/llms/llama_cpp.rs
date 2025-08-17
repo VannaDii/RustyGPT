@@ -23,7 +23,10 @@ use crate::llms::{
 use async_trait::async_trait;
 use chrono::Utc;
 use futures_util::{StreamExt, stream};
+#[cfg(not(feature = "tokio"))]
+use gloo_timers::future::sleep;
 use std::{collections::HashMap, path::Path, time::Duration};
+#[cfg(feature = "tokio")]
 use tokio::time::sleep;
 use tracing::{info, warn};
 
