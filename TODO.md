@@ -10,25 +10,37 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 
 ## 🧱 0. Minimal AI Chat MVP (Single-User, Local-Only)
 
-Start here. This establishes the core of a functioning, local-first AI Chat app using REST and SSE. No auth, no multi-user support, no web UI complexity—just basic functionality that works.
+**Current State**: Basic endpoints exist but return dummy responses. Need actual local LLM inference integration.
 
-- [ ] Use crate: `rustygpt-server`
-  - [ ] Axum-based REST API
-  - [ ] `POST /v1/chat/completions` — accepts JSON with `messages` array
-  - [ ] `stream: true` returns Server-Sent Events
-- [ ] Use crate: `rustygpt-shared`
-  - [ ] Load a local GGUF model using `llama-rs` or similar
+**Goal**: Transform existing dummy chat completions endpoint into a functioning local AI chat with real model inference.
+
+- [X] ~~Use crate: `rustygpt-server`~~ ✅ **Already exists**
+  - [X] ~~Axum-based REST API~~ ✅ **Already implemented**
+  - [X] ~~`POST /v1/chat/completions` — accepts JSON with `messages` array~~ ✅ **Already exists (dummy response)**
+  - [ ] **UPGRADE**: Replace dummy echo responses with actual LLM inference
+  - [ ] `stream: true` parameter support in `ChatCompletionRequest`
+  - [ ] Connect existing SSE infrastructure to chat completions endpoint
+- [ ] **NEW**: Add local model loading to `rustygpt-server`
+  - [ ] Add model loading dependencies (`candle-core`, `candle-transformers`, or `llama-rs`)
+  - [ ] Load a local GGUF model (e.g., Llama 3.2 3B)
   - [ ] Expose basic streaming and blocking completion interface
-- [ ] Add shared types crate: `rustygpt-shared`
-  - [ ] OpenAI-compatible request and response types
-- [ ] Implement basic model manager
-  - [ ] Load 1 local model
-  - [ ] Run inference and return completion tokens
-- [ ] SSE streaming output
-  - [ ] Use `axum::response::sse::Sse`
-  - [ ] Emit OpenAI `delta` format
-- [ ] CLI to run API server
-- [ ] Manual test client to send completion requests
+  - [ ] Integrate model manager with existing `AppState`
+- [X] ~~Add shared types crate: `rustygpt-shared`~~ ✅ **Already exists**
+  - [X] ~~OpenAI-compatible request and response types~~ ✅ **Already implemented**
+  - [ ] **UPGRADE**: Add `stream` parameter to `ChatCompletionRequest`
+  - [ ] Add streaming response types for `delta` format
+- [ ] **UPGRADE**: Implement actual model manager in `rustygpt-server`
+  - [ ] Load 1 local model on server startup
+  - [ ] Run inference and return completion tokens (not echoes)
+  - [ ] Handle both streaming and non-streaming requests
+- [ ] **UPGRADE**: Connect existing SSE streaming output to chat completions
+  - [X] ~~Use `axum::response::sse::Sse`~~ ✅ **Infrastructure exists**
+  - [ ] Emit correct OpenAI `delta` format for streaming responses
+  - [ ] Route streaming responses through existing SSE infrastructure
+- [X] ~~CLI to run API server~~ ✅ **Already works via `rustygpt-cli`**
+- [ ] **TEST**: Manual test client to send real completion requests (not just echoes)
+
+**Priority**: Replace echo responses with actual local LLM inference while leveraging existing infrastructure.
 
 ---
 
