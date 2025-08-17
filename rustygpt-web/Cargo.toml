@@ -20,7 +20,7 @@ uuid = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 web-sys = { workspace = true }
-yew = { version = "0.21", features = ["csr", "ssr"] }
+yew = { workspace = true }
 yew-hooks = { workspace = true }
 yew_icons = { workspace = true }
 yew-router = { workspace = true }

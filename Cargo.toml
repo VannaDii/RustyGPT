@@ -22,8 +22,8 @@ anyhow = "1.0"
 thiserror = "2"
 
 # Async runtime and streams
-tokio = { version = "1.45.0", features = ["full"] }
-tokio-stream = "0.1"
+tokio = { version = "1.47", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["io-util"] }
 futures-util = "0.3"
 
 # HTTP and web framework
@@ -58,19 +58,19 @@ utoipa-swagger-ui = { version = "9", features = ["axum", "reqwest"] }
 
 # Frontend/WASM
 yew = { version = "0.21", features = ["csr"] }
-yew-hooks = "0.3.3"
-yew-router = "0.18.0"
-yew_icons = { version = "0.8.0", features = ["heroicons_solid", "heroicons_outline", "heroicons_mini_solid"] }
-yewdux = "0.11.0"
+yew-hooks = "0.3"
+yew-router = "0.18"
+yew_icons = { version = "0.8", features = ["heroicons_solid", "heroicons_outline", "heroicons_mini_solid"] }
+yewdux = "0.11"
 wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4.40"
+wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Clipboard", "console", "CssStyleDeclaration", "EventSource", "Headers", "HtmlInputElement", "HtmlSelectElement", "HtmlStyleElement", "MediaQueryList", "MessageEvent", "Navigator", "Request", "RequestInit", "RequestMode", "Response", "ScrollToOptions", "Window"] }
 gloo-storage = "0.3"
 gloo-timers = "0.3"
 
 # Internationalization
-i18nrs = { version = "0.1.3", features = ["yew"] }
+i18nrs = { version = "0.1", features = ["yew"] }
 
 # Utilities
 chrono = { version = "0.4.41", features = ["serde"] }
@@ -80,7 +80,7 @@ dotenv = "0.15.0"
 colored = "3"
 strum = { version = "0.27", features = ["derive"] }
 strum_macros = "0.27"
-walkdir = "2.4"
+walkdir = "2.5"
 shlex = "1"
 
 # Logging and tracing
@@ -99,7 +99,7 @@ wasm-bindgen-test = "0.3"
 assert_cmd = "2.0"
 assert_fs = "1.1"
 predicates = "3.1"
-tempfile = "3.10"
+tempfile = "3.20"
 mockall = "0.13"
 serial_test = "3.2"
 test-case = "3.3"
