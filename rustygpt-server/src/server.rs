@@ -9,7 +9,6 @@ use routes::openapi::openapi_routes;
 use shared::config::server::Config;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::service_fn;
@@ -67,7 +66,7 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         .merge(routes::copilot::create_router_copilot()); // Added copilot routes
 
     // Set up static file serving for the app
-    let frontend_path = PathBuf::from(config.frontend_path);
+    let frontend_path = config.frontend_path;
     let fallback_service = service_fn(|_req| async {
         Ok::<_, std::convert::Infallible>(Redirect::to("/").into_response())
     });

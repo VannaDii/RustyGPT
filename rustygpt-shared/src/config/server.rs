@@ -1,13 +1,24 @@
+use crate::config::llm::LLMConfiguration;
 use serde::{Deserialize, Serialize};
 use std::{env, fs, path::PathBuf};
 
-/// Represents the configuration structure for RustyGPT.
-#[derive(Serialize, Deserialize, Debug, Default)]
+/// The main configuration structure for the RustyGPT application
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
+    /// Port for the HTTP server
     pub server_port: u16,
+
+    /// Database connection URL
     pub database_url: String,
+
+    /// Logging level
     pub log_level: String,
-    pub frontend_path: String,
+
+    /// Path to frontend static files
+    pub frontend_path: PathBuf,
+
+    /// LLM configuration settings
+    pub llm: LLMConfiguration,
 }
 
 impl Config {
@@ -17,7 +28,8 @@ impl Config {
             server_port: 8080,
             database_url: "postgres://tinroof:rusty@localhost/rusty_gpt".to_string(),
             log_level: "info".to_string(),
-            frontend_path: "../frontend/dist".to_string(),
+            frontend_path: PathBuf::from("../frontend/dist"),
+            llm: LLMConfiguration::default(),
         }
     }
 
@@ -52,6 +64,7 @@ impl Config {
             config.database_url = file_config.database_url;
             config.log_level = file_config.log_level;
             config.frontend_path = file_config.frontend_path;
+            config.llm = file_config.llm;
         }
 
         // Use environment variables only if values are not already set
@@ -74,9 +87,12 @@ impl Config {
         }
         if config.frontend_path == Config::with_defaults().frontend_path {
             if let Ok(frontend_path) = env::var("RUSTYGPT_FRONTEND_PATH") {
-                config.frontend_path = frontend_path;
+                config.frontend_path = PathBuf::from(frontend_path);
             }
         }
+
+        // Apply LLM environment variables to existing config
+        config.llm.apply_env_overrides();
 
         // Override with command-line arguments if provided
         if let Some(port) = port_override {
@@ -89,5 +105,51 @@ impl Config {
         }
 
         Ok(config)
+    }
+
+    /// Get the default LLM configuration for chat
+    pub fn get_chat_llm_config(&self) -> Result<crate::llms::types::LLMConfig, String> {
+        self.llm.get_default_chat_config()
+    }
+
+    /// Get the default LLM configuration for embeddings
+    pub fn get_embedding_llm_config(&self) -> Result<crate::llms::types::LLMConfig, String> {
+        self.llm.get_default_embedding_config()
+    }
+
+    /// Get LLM configuration for a specific model
+    pub fn get_llm_config(
+        &self,
+        model_name: &str,
+    ) -> Result<crate::llms::types::LLMConfig, String> {
+        self.llm.to_llm_config(model_name)
+    }
+
+    /// Validate the complete configuration including LLM settings
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+
+        // Validate basic server config
+        if self.server_port == 0 {
+            errors.push("Invalid server port. Must be greater than 0.".to_string());
+        }
+
+        if !self.frontend_path.exists() {
+            errors.push(format!(
+                "Frontend path does not exist: {}",
+                self.frontend_path.display()
+            ));
+        }
+
+        // Validate LLM configuration
+        if let Err(llm_errors) = self.llm.validate() {
+            errors.extend(llm_errors);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
