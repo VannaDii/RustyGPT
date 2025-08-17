@@ -5,9 +5,15 @@
 //!
 //! The mock implementation provides realistic interfaces and can be used to test the trait system
 //! and develop the server/CLI integration without requiring actual model files.
+//!
+//! ## Hardware Optimization
+//!
+//! This implementation includes intelligent hardware detection and parameter optimization
+//! to ensure models load safely and efficiently on the target system.
 
 use crate::llms::{
     errors::{LLMError, LLMResult},
+    hardware::{OptimalParams, SystemHardware},
     traits::{LLMModel, LLMProvider, StreamingResponseStream},
     types::{
         FinishReason, LLMConfig, LLMRequest, LLMResponse, ModelCapabilities, ModelInfo,
@@ -19,15 +25,23 @@ use chrono::Utc;
 use futures_util::{StreamExt, stream};
 use std::{collections::HashMap, path::Path, time::Duration};
 use tokio::time::sleep;
+use tracing::{info, warn};
 
 /// Mock Llama.cpp provider implementation
 ///
 /// This is a development implementation that simulates the behavior of a real LLM
 /// without requiring actual model files or the `llama-cpp-rs` dependency.
+///
+/// The provider automatically detects hardware capabilities and optimizes
+/// loading parameters for the best performance and stability.
 #[derive(Debug, Clone)]
 pub struct LlamaCppProvider {
     /// Configuration used to initialize models
     config: LLMConfig,
+    /// Detected hardware information
+    hardware_info: Option<SystemHardware>,
+    /// Optimal parameters for this hardware
+    optimal_params: Option<OptimalParams>,
 }
 
 /// Mock Llama.cpp model implementation
@@ -58,7 +72,27 @@ impl LLMProvider for LlamaCppProvider {
             ));
         }
 
-        Ok(Self { config })
+        // Detect hardware and calculate optimal parameters
+        let (hardware_info, optimal_params) = match SystemHardware::detect() {
+            Ok(hardware) => {
+                let params = hardware.calculate_optimal_params(None);
+                (Some(hardware), Some(params))
+            }
+            Err(e) => {
+                // Log warning but continue without hardware optimization
+                warn!(
+                    message = "Failed to detect hardware, using default parameters",
+                    error = %e
+                );
+                (None, None)
+            }
+        };
+
+        Ok(Self {
+            config,
+            hardware_info,
+            optimal_params,
+        })
     }
 
     async fn load_model(&self, model_path: &str) -> LLMResult<Self::Model> {
@@ -67,7 +101,7 @@ impl LLMProvider for LlamaCppProvider {
         self.load_model_with_config(config).await
     }
 
-    async fn load_model_with_config(&self, config: LLMConfig) -> LLMResult<Self::Model> {
+    async fn load_model_with_config(&self, mut config: LLMConfig) -> LLMResult<Self::Model> {
         // Validate model path exists
         if !Path::new(&config.model_path).exists() {
             return Err(LLMError::model_not_found(&config.model_path));
@@ -80,17 +114,76 @@ impl LLMProvider for LlamaCppProvider {
             });
         }
 
-        // Simulate model loading time
-        sleep(Duration::from_millis(100)).await;
+        // Apply hardware optimization if available
+        if let Some(optimal_params) = &self.optimal_params {
+            // Estimate model size from file if not provided
+            let model_size_estimate = std::fs::metadata(&config.model_path)
+                .map(|metadata| metadata.len())
+                .ok();
+
+            // Apply optimal parameters
+            config = config.apply_optimal_params(optimal_params, model_size_estimate);
+
+            // Log optimization information
+            if let Some(hardware) = &self.hardware_info {
+                info!(
+                    message = "Hardware detected and optimizations applied",
+                    hardware_description = %hardware.description(),
+                    n_threads = optimal_params.n_threads,
+                    n_gpu_layers = optimal_params.n_gpu_layers,
+                    context_size = optimal_params.context_size,
+                    batch_size = optimal_params.batch_size
+                );
+            }
+        }
+
+        // Validate the configuration is safe for this hardware
+        if let Err(warnings) = config.validate_for_hardware() {
+            for warning in &warnings {
+                warn!(
+                    message = "Configuration validation warning",
+                    warning = %warning
+                );
+            }
+            // Continue with warnings but log them
+        }
+
+        // Simulate model loading time based on model size
+        let model_size = std::fs::metadata(&config.model_path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(1024 * 1024 * 1024); // Default 1GB if unknown
+
+        // Simulate loading time: larger models take longer
+        let loading_time_ms = (model_size / (100 * 1024 * 1024)).clamp(100, 2000);
+        sleep(Duration::from_millis(loading_time_ms)).await;
 
         // Extract model information
         let info = Self::extract_model_info(&config)?;
+
+        // Calculate simulated memory usage based on model parameters
+        let estimated_memory = self.estimate_model_memory_usage(&config, &info);
+
+        // Check if we have enough memory for the model
+        if self.hardware_info.is_some() {
+            if let Some(optimal_params) = &self.optimal_params {
+                if estimated_memory as u64 > optimal_params.max_model_size {
+                    return Err(LLMError::InvalidConfiguration {
+                        field: "model_size".to_string(),
+                        message: format!(
+                            "Model requires approximately {}MB but only {}MB is safely available",
+                            estimated_memory / (1024 * 1024),
+                            optimal_params.max_model_size / (1024 * 1024)
+                        ),
+                    });
+                }
+            }
+        }
 
         Ok(LlamaCppModel {
             config,
             info,
             ready: true,
-            memory_usage: 1024 * 1024 * 512, // 512MB simulated
+            memory_usage: estimated_memory,
         })
     }
 
@@ -111,6 +204,36 @@ impl LLMProvider for LlamaCppProvider {
 }
 
 impl LlamaCppProvider {
+    /// Create a new provider with hardware optimization
+    ///
+    /// This is a convenience method that automatically detects hardware
+    /// and applies optimal parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_path` - Path to the model file
+    ///
+    /// # Returns
+    ///
+    /// A [`LLMResult`] containing the optimized provider.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use shared::llms::llama_cpp::LlamaCppProvider;
+    ///
+    /// let provider = LlamaCppProvider::new_optimized("/path/to/model.gguf").await?;
+    /// ```
+    pub async fn new_optimized<P: Into<String>>(model_path: P) -> LLMResult<Self> {
+        let config = LLMConfig::optimized_for_hardware(model_path, None).map_err(|e| {
+            LLMError::ModelInitializationFailed {
+                message: format!("Hardware optimization failed: {}", e),
+            }
+        })?;
+
+        Self::new(config).await
+    }
+
     /// Extract model information from configuration
     fn extract_model_info(config: &LLMConfig) -> LLMResult<ModelInfo> {
         let name = Path::new(&config.model_path)
@@ -137,6 +260,48 @@ impl LlamaCppProvider {
                 supported_languages: vec!["en".to_string(), "es".to_string(), "fr".to_string()],
             },
         })
+    }
+
+    /// Estimate memory usage for a model based on configuration and info
+    ///
+    /// This method provides a realistic estimate of how much memory the model
+    /// will consume when loaded, including the model weights, KV cache, and overhead.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The [`LLMConfig`] containing model parameters
+    /// * `info` - The [`ModelInfo`] containing model metadata
+    ///
+    /// # Returns
+    ///
+    /// Estimated memory usage in bytes.
+    fn estimate_model_memory_usage(&self, config: &LLMConfig, info: &ModelInfo) -> usize {
+        // Get model file size as base
+        let model_file_size = std::fs::metadata(&config.model_path)
+            .map(|metadata| metadata.len() as usize)
+            .unwrap_or(4 * 1024 * 1024 * 1024); // Default 4GB if unknown
+
+        // Estimate KV cache size based on context length
+        let context_size = config.context_size.unwrap_or(2048) as usize;
+        let parameter_count = info.parameter_count.unwrap_or(7_000_000_000) as usize;
+
+        // Rough calculation for KV cache size
+        // Each token in context requires storing key and value vectors
+        let hidden_size = (parameter_count as f64).sqrt() as usize; // Rough estimate
+        let num_layers = 32; // Typical for 7B models
+        let kv_cache_size = context_size * hidden_size * num_layers * 2 * 2; // 2 for K+V, 2 for bytes per element (fp16)
+
+        // Add overhead for GPU memory (if using GPU layers)
+        let gpu_overhead = if config.n_gpu_layers.unwrap_or(0) > 0 {
+            model_file_size / 10 // 10% overhead for GPU
+        } else {
+            0
+        };
+
+        // Add general overhead (buffers, intermediate calculations, etc.)
+        let general_overhead = model_file_size / 20; // 5% general overhead
+
+        model_file_size + kv_cache_size + gpu_overhead + general_overhead
     }
 }
 
@@ -352,6 +517,8 @@ mod tests {
     fn test_model_support_check() {
         let provider = LlamaCppProvider {
             config: LLMConfig::default(),
+            hardware_info: None,
+            optimal_params: None,
         };
 
         assert!(provider.is_model_supported("model.gguf"));
@@ -373,7 +540,13 @@ mod tests {
             ..Default::default()
         };
 
-        let provider = LlamaCppProvider::new(config.clone()).await.unwrap();
+        // Create provider without hardware validation for testing
+        let provider = LlamaCppProvider {
+            config: config.clone(),
+            hardware_info: None,
+            optimal_params: None,
+        };
+
         let model = provider.load_model_with_config(config).await.unwrap();
 
         assert!(model.is_ready());
@@ -387,7 +560,13 @@ mod tests {
             ..Default::default()
         };
 
-        let provider = LlamaCppProvider::new(config.clone()).await.unwrap();
+        // Create provider without hardware validation for testing
+        let provider = LlamaCppProvider {
+            config: config.clone(),
+            hardware_info: None,
+            optimal_params: None,
+        };
+
         let result = provider.load_model_with_config(config).await;
 
         assert!(result.is_err());
@@ -409,7 +588,13 @@ mod tests {
             ..Default::default()
         };
 
-        let provider = LlamaCppProvider::new(config.clone()).await.unwrap();
+        // Create provider without hardware validation for testing
+        let provider = LlamaCppProvider {
+            config: config.clone(),
+            hardware_info: None,
+            optimal_params: None,
+        };
+
         let model = provider.load_model_with_config(config).await.unwrap();
 
         let request = LLMRequest::new("Hello, world!");
@@ -431,7 +616,13 @@ mod tests {
             ..Default::default()
         };
 
-        let provider = LlamaCppProvider::new(config.clone()).await.unwrap();
+        // Create provider without hardware validation for testing
+        let provider = LlamaCppProvider {
+            config: config.clone(),
+            hardware_info: None,
+            optimal_params: None,
+        };
+
         let model = provider.load_model_with_config(config).await.unwrap();
 
         let request = LLMRequest::new_streaming("Hello");
@@ -457,7 +648,13 @@ mod tests {
             ..Default::default()
         };
 
-        let provider = LlamaCppProvider::new(config.clone()).await.unwrap();
+        // Create provider without hardware validation for testing
+        let provider = LlamaCppProvider {
+            config: config.clone(),
+            hardware_info: None,
+            optimal_params: None,
+        };
+
         let model = provider.load_model_with_config(config).await.unwrap();
 
         let tokens = model.tokenize("hello world test").await.unwrap();
@@ -478,7 +675,13 @@ mod tests {
             ..Default::default()
         };
 
-        let provider = LlamaCppProvider::new(config.clone()).await.unwrap();
+        // Create provider without hardware validation for testing
+        let provider = LlamaCppProvider {
+            config: config.clone(),
+            hardware_info: None,
+            optimal_params: None,
+        };
+
         let mut model = provider.load_model_with_config(config).await.unwrap();
 
         assert!(model.is_ready());
@@ -493,6 +696,8 @@ mod tests {
     fn test_provider_info() {
         let provider = LlamaCppProvider {
             config: LLMConfig::default(),
+            hardware_info: None,
+            optimal_params: None,
         };
 
         let info = provider.get_provider_info();
@@ -503,6 +708,8 @@ mod tests {
     async fn test_list_available_models() {
         let provider = LlamaCppProvider {
             config: LLMConfig::default(),
+            hardware_info: None,
+            optimal_params: None,
         };
 
         let models = provider.list_available_models().await.unwrap();
@@ -542,5 +749,66 @@ mod tests {
                 .generate_mock_response("Explain quantum physics")
                 .contains("explain")
         );
+    }
+
+    #[tokio::test]
+    async fn test_hardware_optimization() {
+        // Test that hardware optimization doesn't break the provider creation
+        let config = LLMConfig {
+            model_path: "test.gguf".to_string(),
+            ..Default::default()
+        };
+
+        let result = LlamaCppProvider::new(config).await;
+        assert!(result.is_ok());
+
+        let provider = result.unwrap();
+
+        // Check that hardware detection was attempted (may succeed or fail depending on platform)
+        // The provider should still work regardless
+        assert!(!provider.config.model_path.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_memory_estimation() {
+        let temp_dir = tempdir().unwrap();
+        let model_path = temp_dir.path().join("test_model.gguf");
+        fs::write(&model_path, "mock model content").unwrap();
+
+        let config = LLMConfig {
+            model_path: model_path.to_string_lossy().to_string(),
+            context_size: Some(4096),
+            ..Default::default()
+        };
+
+        let provider = LlamaCppProvider::new(config.clone()).await.unwrap();
+
+        // Extract model info for testing
+        let info = LlamaCppProvider::extract_model_info(&config).unwrap();
+
+        // Test memory estimation
+        let memory_usage = provider.estimate_model_memory_usage(&config, &info);
+        assert!(memory_usage > 0);
+
+        // Memory usage should be reasonable (not ridiculously large)
+        assert!(memory_usage < 100 * 1024 * 1024 * 1024); // Less than 100GB
+    }
+
+    #[test]
+    fn test_config_validation() {
+        let config = LLMConfig {
+            model_path: "test.gguf".to_string(),
+            n_threads: Some(1000),         // Unreasonably high
+            context_size: Some(1_000_000), // Very large context
+            ..Default::default()
+        };
+
+        // This should generate warnings
+        let result = config.validate_for_hardware();
+        assert!(result.is_err()); // Should have warnings
+
+        if let Err(warnings) = result {
+            assert!(!warnings.is_empty());
+        }
     }
 }

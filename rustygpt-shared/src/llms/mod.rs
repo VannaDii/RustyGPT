@@ -32,12 +32,14 @@
 
 pub mod errors;
 pub mod examples;
+pub mod hardware;
 pub mod llama_cpp;
 pub mod traits;
 pub mod types;
 
 // Re-export the main public APIs
 pub use errors::{LLMError, LLMResult};
+pub use hardware::{GpuType, OptimalParams, SystemHardware};
 pub use traits::{LLMModel, LLMProvider};
 pub use types::{
     LLMConfig, LLMRequest, LLMResponse, ModelCapabilities, ModelInfo, StreamingResponse, TokenUsage,

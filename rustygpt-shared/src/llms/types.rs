@@ -44,6 +44,208 @@ pub struct LLMConfig {
     pub additional_params: HashMap<String, serde_json::Value>,
 }
 
+impl LLMConfig {
+    /// Apply optimal parameters based on hardware detection
+    ///
+    /// This method updates the configuration with hardware-optimized settings
+    /// for best performance while ensuring system stability.
+    ///
+    /// # Arguments
+    ///
+    /// * `optimal_params` - The [`OptimalParams`](crate::llms::OptimalParams) calculated from hardware detection
+    /// * `model_size_estimate` - Optional estimated model size in bytes for better optimization
+    ///
+    /// # Returns
+    ///
+    /// A new [`LLMConfig`] with optimized parameters applied.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use shared::llms::{LLMConfig, SystemHardware};
+    ///
+    /// let hardware = SystemHardware::detect()?;
+    /// let optimal_params = hardware.calculate_optimal_params(Some(4_000_000_000)); // 4GB model
+    /// let config = LLMConfig::default().apply_optimal_params(&optimal_params, None);
+    /// ```
+    pub fn apply_optimal_params(
+        mut self,
+        optimal_params: &crate::llms::OptimalParams,
+        model_size_estimate: Option<u64>,
+    ) -> Self {
+        // Apply hardware-optimized settings
+        self.n_threads = Some(optimal_params.n_threads);
+        self.n_gpu_layers = Some(optimal_params.n_gpu_layers);
+        self.context_size = Some(optimal_params.context_size);
+        self.batch_size = Some(optimal_params.batch_size);
+
+        // Add memory mapping if supported
+        if optimal_params.use_mmap {
+            self.additional_params
+                .insert("use_mmap".to_string(), serde_json::Value::Bool(true));
+        }
+
+        // Add model size estimate if provided
+        if let Some(size) = model_size_estimate {
+            self.additional_params.insert(
+                "estimated_model_size".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(size)),
+            );
+        }
+
+        // Add memory buffer information
+        self.additional_params.insert(
+            "memory_buffer_percent".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(optimal_params.memory_buffer_percent as f64)
+                    .unwrap_or_else(|| serde_json::Number::from(20)), // 20% as integer fallback
+            ),
+        );
+
+        self
+    }
+
+    /// Create an optimized configuration for the detected hardware
+    ///
+    /// This is a convenience method that detects hardware and applies optimal parameters
+    /// in one step.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_path` - Path to the model file to load
+    /// * `model_size_estimate` - Optional estimated model size in bytes
+    ///
+    /// # Returns
+    ///
+    /// A [`Result`] containing either an optimized [`LLMConfig`] or a hardware detection error.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`crate::llms::hardware::HardwareError`] if hardware detection fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use shared::llms::LLMConfig;
+    ///
+    /// let config = LLMConfig::optimized_for_hardware(
+    ///     "/path/to/model.gguf",
+    ///     Some(4_000_000_000), // 4GB model
+    /// )?;
+    /// ```
+    pub fn optimized_for_hardware<P: Into<String>>(
+        model_path: P,
+        model_size_estimate: Option<u64>,
+    ) -> Result<Self, crate::llms::hardware::HardwareError> {
+        let hardware = crate::llms::SystemHardware::detect()?;
+        let optimal_params = hardware.calculate_optimal_params(model_size_estimate);
+
+        let config = Self {
+            model_path: model_path.into(),
+            ..Default::default()
+        }
+        .apply_optimal_params(&optimal_params, model_size_estimate);
+
+        Ok(config)
+    }
+
+    /// Validate that the configuration is safe for the current hardware
+    ///
+    /// This method checks if the configuration parameters are reasonable
+    /// for the detected hardware to prevent system overload.
+    ///
+    /// # Returns
+    ///
+    /// A [`Result`] indicating whether the configuration is safe, or containing
+    /// a vector of warning messages if potential issues are detected.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use shared::llms::LLMConfig;
+    ///
+    /// let config = LLMConfig::default();
+    /// match config.validate_for_hardware() {
+    ///     Ok(()) => println!("Configuration is safe"),
+    ///     Err(warnings) => {
+    ///         for warning in warnings {
+    ///             println!("Warning: {}", warning);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn validate_for_hardware(&self) -> Result<(), Vec<String>> {
+        let mut warnings = Vec::new();
+
+        // Try to detect hardware for validation
+        match crate::llms::SystemHardware::detect() {
+            Ok(hardware) => {
+                let optimal_params = hardware.calculate_optimal_params(None);
+
+                // Check thread count
+                if let Some(threads) = self.n_threads {
+                    if threads > hardware.cpu_threads {
+                        warnings.push(format!(
+                            "Thread count ({}) exceeds available CPU threads ({})",
+                            threads, hardware.cpu_threads
+                        ));
+                    }
+                    if threads > optimal_params.n_threads * 2 {
+                        warnings.push(format!(
+                            "Thread count ({}) is significantly higher than recommended ({})",
+                            threads, optimal_params.n_threads
+                        ));
+                    }
+                }
+
+                // Check GPU layers
+                if let Some(gpu_layers) = self.n_gpu_layers {
+                    if gpu_layers > 0 && hardware.gpu_type == crate::llms::GpuType::None {
+                        warnings.push(
+                            "GPU layers specified but no compatible GPU detected".to_string(),
+                        );
+                    }
+                    if gpu_layers > optimal_params.n_gpu_layers * 2 {
+                        warnings.push(format!(
+                            "GPU layers ({}) significantly exceed recommended ({})",
+                            gpu_layers, optimal_params.n_gpu_layers
+                        ));
+                    }
+                }
+
+                // Check context size
+                if let Some(context_size) = self.context_size {
+                    if context_size > optimal_params.context_size * 2 {
+                        warnings.push(format!(
+                            "Context size ({}) may be too large for available memory. Recommended: {}",
+                            context_size, optimal_params.context_size
+                        ));
+                    }
+                }
+
+                // Check batch size
+                if let Some(batch_size) = self.batch_size {
+                    if batch_size > optimal_params.batch_size * 2 {
+                        warnings.push(format!(
+                            "Batch size ({}) may be too large for available memory. Recommended: {}",
+                            batch_size, optimal_params.batch_size
+                        ));
+                    }
+                }
+            }
+            Err(_) => {
+                warnings.push("Unable to detect hardware for validation".to_string());
+            }
+        }
+
+        if warnings.is_empty() {
+            Ok(())
+        } else {
+            Err(warnings)
+        }
+    }
+}
+
 impl Default for LLMConfig {
     fn default() -> Self {
         Self {
