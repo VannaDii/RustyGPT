@@ -4,11 +4,57 @@ This document defines strict, high-quality guidelines for GitHub Copilot to foll
 
 > **Workspace Members**: See the [workspace Cargo.toml](../Cargo.toml) for crate membership and layout.
 
+## Architecture Overview
+
+RustyGPT is a full-stack Rust application with clear separation between frontend (Yew + WASM), backend (Axum + PostgreSQL), and shared components:
+
+- **rustygpt-server**: Axum-based API server with OAuth, SSE streaming, and PostgreSQL integration
+- **rustygpt-web**: Yew frontend with Yewdux state management, i18n support, and DaisyUI components
+- **rustygpt-shared**: Common models and configuration used by both frontend and backend
+- **rustygpt-cli**: Command-line interface for project management
+- **rustygpt-tools**: Development utilities (`confuse` for concurrent tasks, `i18n-agent` for translation management)
+
+### Key Architectural Patterns
+
+- **State Management**: Backend uses `Arc<AppState>` with optional PostgreSQL pool; frontend uses Yewdux for global state
+- **API Communication**: Frontend uses `RustyGPTClient` wrapper around reqwest for type-safe API calls
+- **Real-time Updates**: Server-Sent Events (SSE) for streaming message chunks from `/api/stream/{user_id}`
+- **Authentication**: OAuth flow with GitHub/Apple, JWT tokens, protected routes via middleware
+- **Error Handling**: Shared error types in `rustygpt-shared/src/models/errors.rs`, consistent JSON error responses
+
 # Knowledge Base
 
 The authors of this project often use AI tools for ideation and research. Conversations are stored in `.chats` folder in the project root and are JSON formatted. Use the `.chat` files for workspace context and planning activities. Draw on these conversations to inform suggestions and implementation decisions.
 
-## Command Execution
+## Development Workflow & Commands
+
+### Just Commands (Primary Development Interface)
+
+This project uses [Just](https://just.systems/) as the primary task runner. Key commands:
+
+```sh
+# Development workflow
+just dev          # Start concurrent frontend/backend with confuse tool
+just check        # Run fmt, check, and clippy on workspace
+just fix          # Auto-fix formatting and clippy issues
+just test         # Run all workspace tests
+just coverage     # Generate HTML coverage report with cargo llvm-cov
+
+# Individual components
+just run-server   # Start backend server on port 8080
+just watch-server # Watch mode for backend development
+just build        # Build all workspace crates + frontend
+just build-release # Release builds
+```
+
+### Critical Development Patterns
+
+- **Testing**: Always run `cargo test` from workspace root - never from individual crates
+- **Frontend Development**: Use `trunk watch` in `rustygpt-web/` directory for hot reloading
+- **Concurrent Development**: Use `just dev` which runs `confuse` tool to manage frontend/backend simultaneously
+- **Database**: PostgreSQL with connection pooling; see `docker-compose.yaml` for local setup
+
+### Project-Specific Command Execution
 
 You have many tools available to you for command execution. You should primarily use the `#execute_command` tool without providing a `timeout` attribute, and ensuring the command you want to run is prefixed by a `cd` command that specifies the correct directory for the command to execute successfully. This ensures that the command runs in the appropriate context and can access the necessary resources.
 
@@ -234,6 +280,14 @@ Use this template:
 
 ## 7. UI/UX Standards (Yew + TailwindCSS + DaisyUI)
 
+### Frontend Architecture Specifics
+
+- **Yew Framework**: Component-based with functional components (`#[function_component]`)
+- **State Management**: Yewdux for global state, initialized in `main.rs` with `YewduxRoot`
+- **Internationalization**: `i18nrs` with JSON translation files in `translations/` directory
+- **API Client**: Centralized `RustyGPTClient` in `api.rs` with typed request/response models
+- **Routing**: Uses Yew Router with routes defined in `routes.rs`
+
 ### CSS & Components
 
 - Use [TailwindCSS](https://github.com/tailwindlabs/tailwindcss) for styling.
@@ -242,9 +296,41 @@ Use this template:
 - Keep component structure clean and responsive.
 - Prefer functional, accessible HTML and ARIA patterns.
 
+### Frontend Build Process
+
+- **Trunk**: WASM bundler with config in `Trunk.toml`
+- **Build Commands**: `trunk build` (dev) or `trunk build --release` (production)
+- **Static Assets**: Served from backend with fallback routing to frontend SPA
+
 ---
 
-## 8. Copilot Enforcement Checklist
+## 8. Project-Specific Patterns
+
+### Backend Route Organization
+
+Routes are organized into logical modules in `rustygpt-server/src/routes/`:
+- `setup.rs`: Initial configuration endpoints
+- `auth.rs`: OAuth authentication flow (GitHub/Apple)
+- `protected.rs`: Authenticated endpoints with middleware
+- `copilot.rs`: AI-specific endpoints
+- `openapi.rs`: OpenAPI/Swagger documentation
+
+### Shared Models
+
+All API types are defined in `rustygpt-shared/src/models/` for type safety between frontend/backend:
+- `conversation.rs`: Chat conversation models
+- `message.rs`: Message and streaming chunk types
+- `oauth.rs`: OAuth request/response types
+- `errors.rs`: Standardized error responses
+- `streaming.rs`: SSE message chunk definitions
+
+### Development Tools
+
+- **confuse**: Custom tool for concurrent command execution (`rustygpt-tools/confuse/`)
+- **i18n-agent**: Translation management with audit/clean/template generation (`rustygpt-tools/i18n-agent/`)
+- Both tools have comprehensive CLI interfaces and are used in development workflows
+
+## 9. Copilot Enforcement Checklist
 
 Copilot **must always**:
 
@@ -261,7 +347,7 @@ Copilot **must always**:
 
 ---
 
-## 9. Critical Rust Concepts to Reinforce
+## 10. Critical Rust Concepts to Reinforce
 
 - Safety: use `unsafe` only with full justification and comments.
 - Memory: prefer `&T`, avoid clones, use `Cow`, `Option`, `Result` idiomatically.
