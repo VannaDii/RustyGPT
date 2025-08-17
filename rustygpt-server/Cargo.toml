@@ -4,51 +4,35 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = { version = "0.8", features = ["macros"] }
+axum = { workspace = true }
 chrono = { workspace = true }
-clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
+clap = { workspace = true }
+clap_complete = { workspace = true }
 dotenv = { workspace = true }
-futures-util = "0.3"
-http = "1"
-hyper = { version = "1", features = ["client", "http1", "full"] }
-hyper-rustls = { version = "0.27", features = ["http1", "webpki-roots"] }
-oauth2 = "5"
+futures-util = { workspace = true }
+http = { workspace = true }
+hyper = { workspace = true }
+hyper-rustls = { workspace = true }
+oauth2 = { workspace = true }
 regex = { workspace = true }
-reqwest = "0.12"
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 shared = { workspace = true }
-sqlx = { version = "0.8", features = [
-  "postgres",
-  "macros",
-  "runtime-tokio",
-  "uuid",
-] }
+sqlx = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
-tower-service = "0.3"
+tower = { workspace = true }
+tower-http = { workspace = true }
+tower-service = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-utoipa = { version = "5", features = [
-  "macros",
-  "yaml",
-  "axum_extras",
-  "debug",
-  "chrono",
-  "time",
-  "decimal_float",
-  "uuid",
-  "url",
-  "openapi_extensions",
-] }
-utoipa-axum = "0.2"
-utoipa-swagger-ui = { version = "9", features = ["axum", "reqwest"] }
+utoipa = { workspace = true }
+utoipa-axum = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-axum-test = "17"
-tower = "0.5"
+axum-test = { workspace = true }
+tower = { workspace = true }

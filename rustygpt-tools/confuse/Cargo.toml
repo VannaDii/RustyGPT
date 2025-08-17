@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-colored = "3"
-shlex = "1"
-tokio = { version = "1", features = ["full"] }
+clap = { workspace = true }
+colored = { workspace = true }
+shlex = { workspace = true }
+tokio = { workspace = true }
 tokio-stream = { version = "0.1", features = ["full"] }
 
 [dev-dependencies]
-assert_cmd = "2.0"
-predicates = "3.0"
-tempfile = "3.8"
-mockall = "0.13"
-serial_test = "3.2"
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }
+mockall = { workspace = true }
+serial_test = { workspace = true }
