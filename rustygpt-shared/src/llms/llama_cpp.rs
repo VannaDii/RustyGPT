@@ -23,11 +23,28 @@ use crate::llms::{
 use async_trait::async_trait;
 use chrono::Utc;
 use futures_util::{StreamExt, stream};
-#[cfg(not(feature = "tokio"))]
+#[cfg(all(target_arch = "wasm32", not(feature = "tokio")))]
 use gloo_timers::future::sleep;
 use std::{collections::HashMap, path::Path, time::Duration};
 #[cfg(feature = "tokio")]
 use tokio::time::sleep;
+
+/// Async sleep function that works across different environments
+#[cfg(feature = "tokio")]
+async fn async_sleep(duration: Duration) {
+    sleep(duration).await;
+}
+
+#[cfg(all(target_arch = "wasm32", not(feature = "tokio")))]
+async fn async_sleep(duration: Duration) {
+    sleep(duration).await;
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "tokio")))]
+async fn async_sleep(_duration: Duration) {
+    // No-op for non-tokio, non-WASM environments
+    // This is acceptable for a mock implementation
+}
 use tracing::{info, warn};
 
 /// Mock Llama.cpp provider implementation
@@ -158,7 +175,7 @@ impl LLMProvider for LlamaCppProvider {
 
         // Simulate loading time: larger models take longer
         let loading_time_ms = (model_size / (100 * 1024 * 1024)).clamp(100, 2000);
-        sleep(Duration::from_millis(loading_time_ms)).await;
+        async_sleep(Duration::from_millis(loading_time_ms)).await;
 
         // Extract model information
         let info = Self::extract_model_info(&config)?;
@@ -317,7 +334,7 @@ impl LLMModel for LlamaCppModel {
 
         // Simulate processing time
         let processing_time = Duration::from_millis(100 + (request.prompt.len() as u64 * 2));
-        sleep(processing_time).await;
+        async_sleep(processing_time).await;
 
         // Prepare the prompt
         let full_prompt = if let Some(system_msg) = &request.system_message {
@@ -388,7 +405,7 @@ impl LLMModel for LlamaCppModel {
                 let delay = Duration::from_millis(50);
 
                 Box::pin(async move {
-                    sleep(delay).await;
+                    async_sleep(delay).await;
                     Ok(StreamingResponse {
                         request_id,
                         text_delta,

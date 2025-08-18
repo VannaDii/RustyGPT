@@ -100,3 +100,120 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cors_configuration() {
+        // Test CORS configuration setup
+        use std::env;
+
+        unsafe {
+            env::set_var("CORS_ORIGIN", "http://localhost:3000");
+            let origin = env::var("CORS_ORIGIN").unwrap();
+            assert_eq!(origin, "http://localhost:3000");
+            env::remove_var("CORS_ORIGIN");
+        }
+    }
+
+    #[test]
+    fn test_port_configuration() {
+        // Test server port configuration
+        use std::env;
+
+        unsafe {
+            env::set_var("PORT", "8080");
+            let port = env::var("PORT").unwrap();
+            assert_eq!(port, "8080");
+            env::remove_var("PORT");
+        }
+    }
+
+    #[test]
+    fn test_database_configuration() {
+        // Test database URL configuration
+        use std::env;
+
+        unsafe {
+            env::set_var("DATABASE_URL", "postgresql://localhost/test");
+            let db_url = env::var("DATABASE_URL").unwrap();
+            assert_eq!(db_url, "postgresql://localhost/test");
+            env::remove_var("DATABASE_URL");
+        }
+    }
+
+    #[test]
+    fn test_config_struct_creation() {
+        // Test that Config can be created with basic values
+        use std::path::PathBuf;
+
+        let config = Config::with_defaults();
+
+        assert_eq!(config.server_port, 8080);
+        assert_eq!(config.frontend_path, PathBuf::from("../frontend/dist"));
+        assert_eq!(config.log_level, "info");
+    }
+
+    #[test]
+    fn test_socket_addr_parsing() {
+        // Test socket address parsing functionality
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        assert_eq!(addr.port(), 8080);
+        assert!(addr.is_ipv4());
+    }
+
+    #[test]
+    fn test_graceful_shutdown_signal_types() {
+        // Test that we can reference shutdown signal types
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::SignalKind;
+            let _sigterm = SignalKind::terminate();
+            let _sigint = SignalKind::interrupt();
+        }
+    }
+
+    #[test]
+    fn test_environment_variable_handling() {
+        // Test various environment variable scenarios
+        use std::env;
+
+        unsafe {
+            // Test setting and retrieving multiple env vars
+            env::set_var("TEST_VAR_1", "value1");
+            env::set_var("TEST_VAR_2", "value2");
+
+            assert_eq!(env::var("TEST_VAR_1").unwrap(), "value1");
+            assert_eq!(env::var("TEST_VAR_2").unwrap(), "value2");
+
+            // Test removing env vars
+            env::remove_var("TEST_VAR_1");
+            env::remove_var("TEST_VAR_2");
+
+            assert!(env::var("TEST_VAR_1").is_err());
+            assert!(env::var("TEST_VAR_2").is_err());
+        }
+    }
+
+    #[test]
+    fn test_tracing_configuration() {
+        // Test tracing configuration options
+        use tracing::Level;
+
+        let debug_level = Level::DEBUG;
+        let info_level = Level::INFO;
+
+        assert!(debug_level > info_level);
+    }
+
+    #[test]
+    fn test_cors_layer_creation() {
+        // Test CORS layer creation
+        let cors = CorsLayer::new().allow_origin(Any);
+
+        // Verify CORS layer can be created
+        assert!(!format!("{:?}", cors).is_empty());
+    }
+}

@@ -568,12 +568,30 @@ mod tests {
 
     #[test]
     fn test_env_loading() {
-        // Note: This test doesn't actually set env vars to avoid affecting other tests
-        // In a real scenario, you could use a mocking library or test with actual env vars
+        // Store original environment variables
+        let original_provider = std::env::var("LLM_DEFAULT_PROVIDER").ok();
+        let original_models_dir = std::env::var("LLM_MODELS_DIRECTORY").ok();
+
+        // Clear environment variables for clean test
+        unsafe {
+            std::env::remove_var("LLM_DEFAULT_PROVIDER");
+            std::env::remove_var("LLM_MODELS_DIRECTORY");
+        }
+
         let config = LLMConfiguration::load_from_env();
 
         // Should return default configuration when no env vars are set
         assert_eq!(config.default_provider, "llama_cpp");
         assert_eq!(config.models_directory, PathBuf::from("./models"));
+
+        // Restore original environment variables
+        unsafe {
+            if let Some(provider) = original_provider {
+                std::env::set_var("LLM_DEFAULT_PROVIDER", provider);
+            }
+            if let Some(models_dir) = original_models_dir {
+                std::env::set_var("LLM_MODELS_DIRECTORY", models_dir);
+            }
+        }
     }
 }

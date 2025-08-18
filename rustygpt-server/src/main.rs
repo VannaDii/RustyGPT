@@ -16,6 +16,9 @@ mod services;
 mod tracer;
 
 #[cfg(test)]
+mod main_tests;
+
+#[cfg(test)]
 mod server_test;
 
 /// RustyGPT CLI

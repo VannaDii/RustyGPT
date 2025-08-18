@@ -26,6 +26,7 @@ enum Commands {
         #[arg(
             long,
             short,
+            default_value = "8080",
             help = "The port number to bind the server to (e.g., 8080). Example usage: `--port 8080`"
         )]
         port: u16,
@@ -134,4 +135,103 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_parsing() {
+        // Test basic CLI structure can be parsed
+        let cli = Cli::try_parse_from(&["cli", "serve", "--port", "8080"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Serve { port, .. } => assert_eq!(port, 8080),
+            _ => panic!("Expected Serve command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_spec_command() {
+        let cli = Cli::try_parse_from(&["cli", "spec", "test.json"]);
+        if let Err(e) = &cli {
+            panic!("CLI parse error: {}", e);
+        }
+
+        match cli.unwrap().command {
+            Commands::Spec { output_path } => {
+                assert_eq!(output_path, Some("test.json".to_string()))
+            }
+            _ => panic!("Expected Spec command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_completion_command() {
+        let cli = Cli::try_parse_from(&["cli", "completion", "--shell", "bash"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Completion { shell } => assert_eq!(shell, "bash"),
+            _ => panic!("Expected Completion command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_config_command() {
+        let cli = Cli::try_parse_from(&["cli", "config", "--format", "json"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Config { format } => assert_eq!(format, Some("json".to_string())),
+            _ => panic!("Expected Config command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_config_command_default() {
+        let cli = Cli::try_parse_from(&["cli", "config"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Config { format } => assert_eq!(format, None),
+            _ => panic!("Expected Config command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_serve_command_defaults() {
+        let cli = Cli::try_parse_from(&["cli", "serve"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Serve { port, config } => {
+                assert_eq!(port, 8080);
+                assert_eq!(config, None);
+            }
+            _ => panic!("Expected Serve command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_invalid_command() {
+        let cli = Cli::try_parse_from(&["cli", "invalid-command"]);
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn test_cli_serve_with_config() {
+        let cli = Cli::try_parse_from(&["cli", "serve", "--config", "/path/to/config.yaml"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Serve { config, .. } => {
+                assert_eq!(config, Some(PathBuf::from("/path/to/config.yaml")));
+            }
+            _ => panic!("Expected Serve command"),
+        }
+    }
 }

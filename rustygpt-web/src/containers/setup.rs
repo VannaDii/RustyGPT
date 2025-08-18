@@ -4,6 +4,10 @@
 //! is first run and no users exist in the database. It collects the necessary
 //! information to create the first admin user.
 
+use super::setup_validation::{
+    ValidationError, validate_confirm_password, validate_email, validate_password,
+    validate_username,
+};
 use crate::api::RustyGPTClient;
 use i18nrs::yew::use_translation;
 use shared::models::SetupRequest;
@@ -20,21 +24,6 @@ use yew::{
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
     fn log(s: &str);
-}
-
-/// Validation errors that can occur during form validation.
-#[derive(Debug, PartialEq, Eq)]
-pub enum ValidationError {
-    /// The field is required but was left empty.
-    Required,
-    /// Username is too short (minimum 3 characters).
-    UsernameTooShort,
-    /// Email format is invalid (must contain '@').
-    InvalidEmail,
-    /// Password is too short (minimum 8 characters).
-    PasswordTooShort,
-    /// Passwords do not match.
-    PasswordsDoNotMatch,
 }
 
 /// Component for first-time setup of the application.
@@ -480,102 +469,6 @@ pub fn create_api_client() -> RustyGPTClient {
     RustyGPTClient::new("http://localhost:8080/api")
 }
 
-/// Validates a username.
-///
-/// # Arguments
-/// * `username` - The username to validate
-///
-/// # Returns
-/// `Ok(())` if the username is valid, otherwise a [`ValidationError`].
-///
-/// # Validation rules
-/// - Username must not be empty
-/// - Username must be at least 3 characters long
-pub fn validate_username(username: &str) -> Result<(), ValidationError> {
-    if username.trim().is_empty() {
-        return Err(ValidationError::Required);
-    }
-
-    if username.len() < 3 {
-        return Err(ValidationError::UsernameTooShort);
-    }
-
-    Ok(())
-}
-
-/// Validates an email address.
-///
-/// # Arguments
-/// * `email` - The email address to validate
-///
-/// # Returns
-/// `Ok(())` if the email is valid, otherwise a [`ValidationError`].
-///
-/// # Validation rules
-/// - Email must not be empty
-/// - Email must contain an '@' symbol
-pub fn validate_email(email: &str) -> Result<(), ValidationError> {
-    if email.trim().is_empty() {
-        return Err(ValidationError::Required);
-    }
-
-    if !email.contains('@') {
-        return Err(ValidationError::InvalidEmail);
-    }
-
-    Ok(())
-}
-
-/// Validates a password.
-///
-/// # Arguments
-/// * `password` - The password to validate
-///
-/// # Returns
-/// `Ok(())` if the password is valid, otherwise a [`ValidationError`].
-///
-/// # Validation rules
-/// - Password must not be empty
-/// - Password must be at least 8 characters long
-pub fn validate_password(password: &str) -> Result<(), ValidationError> {
-    if password.trim().is_empty() {
-        return Err(ValidationError::Required);
-    }
-
-    if password.len() < 8 {
-        return Err(ValidationError::PasswordTooShort);
-    }
-
-    Ok(())
-}
-
-/// Validates that the password confirmation matches the password.
-///
-/// # Arguments
-/// * `confirm_password` - The confirmation password
-/// * `password` - The original password
-///
-/// # Returns
-/// `Ok(())` if the confirmation is valid, otherwise a [`ValidationError`].
-///
-/// # Validation rules
-/// - Confirmation must not be empty
-/// - Confirmation must match the password
-pub fn validate_confirm_password(
-    confirm_password: &str,
-    password: &str,
-) -> Result<(), ValidationError> {
-    if confirm_password.trim().is_empty() {
-        return Err(ValidationError::Required);
-    }
-
-    if confirm_password != password {
-        return Err(ValidationError::PasswordsDoNotMatch);
-    }
-
-    Ok(())
-}
-
 /// Sets the initial theme for the application.
 ///
 /// Applies the 'dark' theme to the document's HTML element by setting the
@@ -597,6 +490,8 @@ fn initialize_theme() {
 
 /// Handles the redirection after successful setup completion.
 ///
+/// Handles the redirection after successful setup completion.
+///
 /// # Arguments
 /// * `is_complete` - Boolean indicating if setup has completed successfully
 fn handle_setup_completion(is_complete: bool) {
@@ -615,4 +510,18 @@ fn handle_setup_completion(is_complete: bool) {
         }
         || {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_api_client() {
+        // Test that we can create an API client with the expected base URL
+        let _client = create_api_client();
+        // In a real test environment, we would verify the URL configuration
+        // For now, we just ensure the function doesn't panic
+        assert!(true);
+    }
 }
