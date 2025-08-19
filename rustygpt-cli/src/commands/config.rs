@@ -141,13 +141,17 @@ mod tests {
             assert!(yaml_result.is_ok());
             assert!(json_result.is_ok());
 
-            // Both files should exist in current directory (temp directory)
-            assert!(fs::metadata("config.yaml").is_ok());
-            assert!(fs::metadata("config.json").is_ok());
+            // Check for files in temp directory using full paths
+            let yaml_path = temp_dir.path().join("config.yaml");
+            let json_path = temp_dir.path().join("config.json");
+
+            // Both files should exist in temp directory
+            assert!(yaml_path.exists());
+            assert!(json_path.exists());
 
             // Both should have content
-            let yaml_content = fs::read_to_string("config.yaml").unwrap();
-            let json_content = fs::read_to_string("config.json").unwrap();
+            let yaml_content = fs::read_to_string(&yaml_path).unwrap();
+            let json_content = fs::read_to_string(&json_path).unwrap();
 
             assert!(!yaml_content.is_empty());
             assert!(!json_content.is_empty());

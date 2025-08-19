@@ -8,4 +8,7 @@ pub mod setup;
 mod auth_test;
 
 #[cfg(test)]
+mod openapi_tests;
+
+#[cfg(test)]
 mod protected_test;

@@ -104,51 +104,45 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::config::server::Config;
+    use std::path::PathBuf;
 
     #[test]
-    fn test_cors_configuration() {
-        // Test CORS configuration setup
-        use std::env;
-
-        unsafe {
-            env::set_var("CORS_ORIGIN", "http://localhost:3000");
-            let origin = env::var("CORS_ORIGIN").unwrap();
-            assert_eq!(origin, "http://localhost:3000");
-            env::remove_var("CORS_ORIGIN");
-        }
+    fn test_socket_addr_creation() {
+        // Test socket address creation from config
+        let config = Config::with_defaults();
+        let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
+        assert_eq!(addr.port(), 8080);
+        assert!(addr.is_ipv4());
     }
 
     #[test]
-    fn test_port_configuration() {
-        // Test server port configuration
-        use std::env;
-
-        unsafe {
-            env::set_var("PORT", "8080");
-            let port = env::var("PORT").unwrap();
-            assert_eq!(port, "8080");
-            env::remove_var("PORT");
-        }
+    fn test_socket_addr_with_custom_port() {
+        // Test socket address with custom port
+        let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+        assert_eq!(addr.port(), 3000);
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
     }
 
     #[test]
-    fn test_database_configuration() {
-        // Test database URL configuration
-        use std::env;
+    fn test_cors_layer_creation() {
+        // Test CORS layer creation
+        let cors = CorsLayer::new().allow_origin(Any);
 
-        unsafe {
-            env::set_var("DATABASE_URL", "postgresql://localhost/test");
-            let db_url = env::var("DATABASE_URL").unwrap();
-            assert_eq!(db_url, "postgresql://localhost/test");
-            env::remove_var("DATABASE_URL");
-        }
+        // Verify CORS layer can be created without errors
+        assert!(!format!("{:?}", cors).is_empty());
     }
 
     #[test]
-    fn test_config_struct_creation() {
-        // Test that Config can be created with basic values
-        use std::path::PathBuf;
+    fn test_app_state_creation_without_pool() {
+        // Test AppState creation without database pool
+        let state = Arc::new(AppState { pool: None });
+        assert!(state.pool.is_none());
+    }
 
+    #[test]
+    fn test_config_default_values() {
+        // Test that Config has expected default values
         let config = Config::with_defaults();
 
         assert_eq!(config.server_port, 8080);
@@ -157,63 +151,93 @@ mod tests {
     }
 
     #[test]
-    fn test_socket_addr_parsing() {
-        // Test socket address parsing functionality
-        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        assert_eq!(addr.port(), 8080);
-        assert!(addr.is_ipv4());
+    fn test_frontend_path_configuration() {
+        // Test frontend path configuration
+        let frontend_path = PathBuf::from("/custom/frontend/path");
+
+        let mut config = Config::with_defaults();
+        config.frontend_path = frontend_path.clone();
+
+        assert_eq!(config.frontend_path, frontend_path);
     }
 
     #[test]
-    fn test_graceful_shutdown_signal_types() {
-        // Test that we can reference shutdown signal types
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::SignalKind;
-            let _sigterm = SignalKind::terminate();
-            let _sigint = SignalKind::interrupt();
+    fn test_database_url_validation() {
+        // Test database URL format validation
+        let valid_urls = vec![
+            "postgresql://localhost/test",
+            "postgresql://user:pass@localhost:5432/db",
+            "postgresql://user@localhost/database",
+        ];
+
+        for url in valid_urls {
+            // Just test that the string format is valid
+            assert!(!url.is_empty());
+            assert!(url.starts_with("postgresql://"));
         }
     }
 
     #[test]
-    fn test_environment_variable_handling() {
-        // Test various environment variable scenarios
-        use std::env;
+    fn test_tracing_level_filter() {
+        // Test tracing level filter creation
+        use tracing::level_filters::LevelFilter;
 
-        unsafe {
-            // Test setting and retrieving multiple env vars
-            env::set_var("TEST_VAR_1", "value1");
-            env::set_var("TEST_VAR_2", "value2");
+        let debug_filter = LevelFilter::DEBUG;
+        let info_filter = LevelFilter::INFO;
+        let warn_filter = LevelFilter::WARN;
 
-            assert_eq!(env::var("TEST_VAR_1").unwrap(), "value1");
-            assert_eq!(env::var("TEST_VAR_2").unwrap(), "value2");
-
-            // Test removing env vars
-            env::remove_var("TEST_VAR_1");
-            env::remove_var("TEST_VAR_2");
-
-            assert!(env::var("TEST_VAR_1").is_err());
-            assert!(env::var("TEST_VAR_2").is_err());
-        }
+        assert!(debug_filter > info_filter);
+        assert!(info_filter > warn_filter);
     }
 
     #[test]
-    fn test_tracing_configuration() {
-        // Test tracing configuration options
-        use tracing::Level;
+    fn test_env_filter_creation() {
+        // Test environment filter creation
+        use tracing_subscriber::EnvFilter;
 
-        let debug_level = Level::DEBUG;
-        let info_level = Level::INFO;
+        let filter = EnvFilter::builder()
+            .with_default_directive(LevelFilter::DEBUG.into())
+            .from_env_lossy();
 
-        assert!(debug_level > info_level);
+        assert!(!format!("{:?}", filter).is_empty());
     }
 
     #[test]
-    fn test_cors_layer_creation() {
-        // Test CORS layer creation
-        let cors = CorsLayer::new().allow_origin(Any);
+    fn test_serve_dir_configuration() {
+        // Test ServeDir configuration with static path
+        let serve_dir = ServeDir::new("./static").append_index_html_on_directories(true);
 
-        // Verify CORS layer can be created
-        assert!(!format!("{:?}", cors).is_empty());
+        assert!(!format!("{:?}", serve_dir).is_empty());
+    }
+
+    #[test]
+    fn test_pg_pool_options() {
+        // Test PostgreSQL pool options configuration
+        let pool_options = PgPoolOptions::new().max_connections(5);
+
+        // Verify pool options can be configured
+        assert!(!format!("{:?}", pool_options).is_empty());
+    }
+
+    #[test]
+    fn test_ipv4_vs_ipv6_addresses() {
+        // Test different IP address types
+        let ipv4_addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+        let ipv6_addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 8080));
+
+        assert!(ipv4_addr.is_ipv4());
+        assert!(ipv6_addr.is_ipv6());
+    }
+
+    #[test]
+    fn test_config_log_levels() {
+        // Test different log level configurations
+        let mut config = Config::with_defaults();
+
+        config.log_level = "debug".to_string();
+        assert_eq!(config.log_level, "debug");
+
+        config.log_level = "warn".to_string();
+        assert_eq!(config.log_level, "warn");
     }
 }

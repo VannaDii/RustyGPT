@@ -200,7 +200,9 @@ async fn run_chat_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
+    use tempfile::tempdir;
 
     #[test]
     fn test_create_llm_config_default() {
@@ -236,6 +238,18 @@ mod tests {
     }
 
     #[test]
+    fn test_create_llm_config_invalid_temperature_negative() {
+        let result = create_llm_config(None, None, Some(-0.1));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Temperature must be between 0.0 and 1.0")
+        );
+    }
+
+    #[test]
     fn test_create_llm_config_invalid_max_tokens() {
         let result = create_llm_config(None, Some(0), None);
         assert!(result.is_err());
@@ -245,5 +259,44 @@ mod tests {
                 .to_string()
                 .contains("Max tokens must be greater than 0")
         );
+    }
+
+    #[test]
+    fn test_create_llm_config_valid_temperature_boundaries() {
+        // Test boundary values
+        let config_zero = create_llm_config(None, None, Some(0.0)).unwrap();
+        assert_eq!(config_zero.temperature, Some(0.0));
+
+        let config_one = create_llm_config(None, None, Some(1.0)).unwrap();
+        assert_eq!(config_one.temperature, Some(1.0));
+    }
+
+    #[test]
+    fn test_create_llm_config_with_temp_file_path() {
+        let temp_dir = tempdir().unwrap();
+        let model_file = temp_dir.path().join("test_model.gguf");
+        fs::write(&model_file, "dummy model content").unwrap();
+
+        let config = create_llm_config(Some(model_file.clone()), None, None).unwrap();
+        assert_eq!(config.model_path, model_file.to_string_lossy());
+    }
+
+    #[test]
+    fn test_create_llm_config_all_parameters() {
+        let model_path = Some(PathBuf::from("/custom/model.gguf"));
+        let max_tokens = Some(1024);
+        let temperature = Some(0.3);
+
+        let config = create_llm_config(model_path, max_tokens, temperature).unwrap();
+        assert_eq!(config.model_path, "/custom/model.gguf");
+        assert_eq!(config.max_tokens, Some(1024));
+        assert_eq!(config.temperature, Some(0.3));
+    }
+
+    #[test]
+    fn test_create_llm_config_large_max_tokens() {
+        let max_tokens = Some(4096);
+        let config = create_llm_config(None, max_tokens, None).unwrap();
+        assert_eq!(config.max_tokens, Some(4096));
     }
 }

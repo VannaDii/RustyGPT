@@ -66,7 +66,8 @@ test:
 
 # Run all tests and generate coverage report
 coverage:
-    cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/html/index.html
+    cargo llvm-cov --workspace --lib --html --output-dir .coverage
+    @echo "📊 Coverage report generated at file://$PWD/.coverage/html/index.html"
 
 docs:
     # Generate documentation for all crates
