@@ -12,7 +12,7 @@ use i18n_agent::reporter::{generate_report, print_audit_report};
 use crate::common::test_utils::create_test_keys_in_use;
 
 #[test]
-fn test_print_audit_report() -> Result<()> {
+fn test_print_audit_report_basic() -> Result<()> {
     // Create a simple AuditResult
     let keys_in_use = create_test_keys_in_use();
 
@@ -57,6 +57,152 @@ fn test_print_audit_report() -> Result<()> {
 
     // Test print_audit_report (should not panic)
     print_audit_report(&audit_result, "text");
+
+    Ok(())
+}
+
+#[test]
+fn test_print_audit_report_with_unused_keys() -> Result<()> {
+    let keys_in_use = HashSet::from([
+        "common.button.submit".to_string(),
+        "common.button.cancel".to_string(),
+    ]);
+
+    let mut translations = HashMap::new();
+
+    // English translation with unused keys
+    let en_all_keys = HashSet::from([
+        "common.button.submit".to_string(),
+        "common.button.cancel".to_string(),
+        "unused.key1".to_string(),
+        "unused.key2".to_string(),
+        "unused.key3".to_string(),
+    ]);
+
+    let en_unused_keys = HashSet::from([
+        "unused.key1".to_string(),
+        "unused.key2".to_string(),
+        "unused.key3".to_string(),
+    ]);
+
+    let en_data = TranslationData {
+        file_path: PathBuf::from("en.json"),
+        all_keys: en_all_keys,
+        unused_keys: en_unused_keys,
+        content: serde_json::json!({}),
+    };
+    translations.insert("en".to_string(), en_data);
+
+    let audit_result = AuditResult {
+        keys_in_use,
+        translations,
+        reference_language: "en".to_string(),
+    };
+
+    // Test print_audit_report with unused keys
+    print_audit_report(&audit_result, "text");
+
+    Ok(())
+}
+
+#[test]
+fn test_print_audit_report_with_missing_translations() -> Result<()> {
+    let keys_in_use = HashSet::from([
+        "common.button.submit".to_string(),
+        "common.button.cancel".to_string(),
+        "common.button.reset".to_string(),
+        "profile.title".to_string(),
+    ]);
+
+    let mut translations = HashMap::new();
+
+    // English translation (reference)
+    let en_all_keys = HashSet::from([
+        "common.button.submit".to_string(),
+        "common.button.cancel".to_string(),
+        "common.button.reset".to_string(),
+        "profile.title".to_string(),
+    ]);
+
+    let en_data = TranslationData {
+        file_path: PathBuf::from("en.json"),
+        all_keys: en_all_keys,
+        unused_keys: HashSet::new(),
+        content: serde_json::json!({}),
+    };
+    translations.insert("en".to_string(), en_data);
+
+    // Spanish translation with missing keys
+    let es_all_keys = HashSet::from([
+        "common.button.submit".to_string(),
+        "common.button.cancel".to_string(),
+        // Missing: "common.button.reset" and "profile.title"
+    ]);
+
+    let es_data = TranslationData {
+        file_path: PathBuf::from("es.json"),
+        all_keys: es_all_keys,
+        unused_keys: HashSet::new(),
+        content: serde_json::json!({}),
+    };
+    translations.insert("es".to_string(), es_data);
+
+    let audit_result = AuditResult {
+        keys_in_use,
+        translations,
+        reference_language: "en".to_string(),
+    };
+
+    // Test print_audit_report with missing translations
+    print_audit_report(&audit_result, "text");
+
+    Ok(())
+}
+
+#[test]
+fn test_print_audit_report_empty_translations() -> Result<()> {
+    let keys_in_use = HashSet::new();
+    let translations = HashMap::new();
+
+    let audit_result = AuditResult {
+        keys_in_use,
+        translations,
+        reference_language: "en".to_string(),
+    };
+
+    // Test print_audit_report with empty data
+    print_audit_report(&audit_result, "text");
+
+    Ok(())
+}
+
+#[test]
+fn test_print_audit_report_json_format() -> Result<()> {
+    let keys_in_use = create_test_keys_in_use();
+
+    let mut translations = HashMap::new();
+
+    let en_all_keys = HashSet::from([
+        "common.button.submit".to_string(),
+        "profile.title".to_string(),
+    ]);
+
+    let en_data = TranslationData {
+        file_path: PathBuf::from("en.json"),
+        all_keys: en_all_keys,
+        unused_keys: HashSet::new(),
+        content: serde_json::json!({}),
+    };
+    translations.insert("en".to_string(), en_data);
+
+    let audit_result = AuditResult {
+        keys_in_use,
+        translations,
+        reference_language: "en".to_string(),
+    };
+
+    // Test print_audit_report with JSON format
+    print_audit_report(&audit_result, "json");
 
     Ok(())
 }

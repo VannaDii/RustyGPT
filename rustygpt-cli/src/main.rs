@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn test_cli_parsing() {
         // Test basic CLI structure can be parsed
-        let cli = Cli::try_parse_from(&["cli", "serve", "--port", "8080"]);
+        let cli = Cli::try_parse_from(["cli", "serve", "--port", "8080"]);
         assert!(cli.is_ok());
 
         match cli.unwrap().command {
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_cli_spec_command() {
-        let cli = Cli::try_parse_from(&["cli", "spec", "test.json"]);
+        let cli = Cli::try_parse_from(["cli", "spec", "test.json"]);
         if let Err(e) = &cli {
             panic!("CLI parse error: {}", e);
         }
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_cli_completion_command() {
-        let cli = Cli::try_parse_from(&["cli", "completion", "--shell", "bash"]);
+        let cli = Cli::try_parse_from(["cli", "completion", "--shell", "bash"]);
         assert!(cli.is_ok());
 
         match cli.unwrap().command {
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_cli_config_command() {
-        let cli = Cli::try_parse_from(&["cli", "config", "--format", "json"]);
+        let cli = Cli::try_parse_from(["cli", "config", "--format", "json"]);
         assert!(cli.is_ok());
 
         match cli.unwrap().command {
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn test_cli_config_command_default() {
-        let cli = Cli::try_parse_from(&["cli", "config"]);
+        let cli = Cli::try_parse_from(["cli", "config"]);
         assert!(cli.is_ok());
 
         match cli.unwrap().command {
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_cli_serve_command_defaults() {
-        let cli = Cli::try_parse_from(&["cli", "serve"]);
+        let cli = Cli::try_parse_from(["cli", "serve"]);
         assert!(cli.is_ok());
 
         match cli.unwrap().command {
@@ -218,13 +218,13 @@ mod tests {
 
     #[test]
     fn test_cli_invalid_command() {
-        let cli = Cli::try_parse_from(&["cli", "invalid-command"]);
+        let cli = Cli::try_parse_from(["cli", "invalid-command"]);
         assert!(cli.is_err());
     }
 
     #[test]
     fn test_cli_serve_with_config() {
-        let cli = Cli::try_parse_from(&["cli", "serve", "--config", "/path/to/config.yaml"]);
+        let cli = Cli::try_parse_from(["cli", "serve", "--config", "/path/to/config.yaml"]);
         assert!(cli.is_ok());
 
         match cli.unwrap().command {

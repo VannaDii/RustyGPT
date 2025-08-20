@@ -65,6 +65,17 @@ mod tests {
 
     #[test]
     fn test_config_loading_from_yaml_file() {
+        // Clean up any existing environment variables first that might interfere
+        unsafe {
+            std::env::remove_var("RUSTYGPT_DEFAULT_PROVIDER");
+            std::env::remove_var("RUSTYGPT_DEFAULT_MODEL");
+            std::env::remove_var("RUSTYGPT_MODELS_DIR");
+            std::env::remove_var("RUSTYGPT_GPU_LAYERS");
+            std::env::remove_var("RUSTYGPT_THREADS");
+            std::env::remove_var("RUSTYGPT_LLM_TIMEOUT");
+            std::env::remove_var("RUSTYGPT_MAX_CONCURRENT_REQUESTS");
+        }
+
         let temp_dir = tempdir().unwrap();
         let config_file = temp_dir.path().join("test_config.yaml");
 

@@ -180,9 +180,13 @@ mod tests {
     /// Test OAuthProvider equality
     #[wasm_bindgen_test]
     fn test_oauth_provider_equality() {
-        assert_eq!(OAuthProvider::GitHub, OAuthProvider::GitHub);
-        assert_eq!(OAuthProvider::Apple, OAuthProvider::Apple);
+        // Test that the same variants are equal and different variants are not
         assert_ne!(OAuthProvider::GitHub, OAuthProvider::Apple);
+
+        // Test cloning produces equal values
+        let github = OAuthProvider::GitHub;
+        let github_clone = github.clone();
+        assert_eq!(github, github_clone);
     }
 
     /// Test OAuthProvider cloning
@@ -308,8 +312,8 @@ mod tests {
     /// Test all OAuth provider variants
     #[wasm_bindgen_test]
     fn test_all_oauth_providers() {
-        let providers = vec![OAuthProvider::GitHub, OAuthProvider::Apple];
-        let expected_strings = vec!["github", "apple"];
+        let providers = [OAuthProvider::GitHub, OAuthProvider::Apple];
+        let expected_strings = ["github", "apple"];
 
         for (provider, expected) in providers.iter().zip(expected_strings.iter()) {
             assert_eq!(provider.as_str(), *expected);

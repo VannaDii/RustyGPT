@@ -59,12 +59,11 @@ pub fn generate_spec(output_path: Option<&str>) -> Result<(), Box<dyn std::error
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::path::Path;
     use tempfile::TempDir;
 
     #[test]
-    #[serial]
+    #[serial_test::serial]
     fn test_generate_spec_to_json() {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
@@ -101,6 +100,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_generate_spec_to_yaml() {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();

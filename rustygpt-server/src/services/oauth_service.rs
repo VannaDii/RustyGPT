@@ -353,4 +353,263 @@ mod tests {
         let empty_code = oauth2::AuthorizationCode::new("".to_string());
         assert_eq!(empty_code.secret(), "");
     }
+
+    /// Test create_http_client redirect policy
+    #[test]
+    fn test_create_http_client_redirect_policy() {
+        let client = create_http_client();
+
+        // Verify the client was built successfully
+        assert!(format!("{:?}", client).contains("Client"));
+
+        // Test that the client has the expected configuration
+        // We can't easily test internal configuration, but we can verify it exists
+        assert!(!format!("{:?}", client).is_empty());
+    }
+
+    /// Test handle_apple_oauth with invalid token URL
+    #[tokio::test]
+    #[serial]
+    async fn test_handle_apple_oauth_invalid_token_url() {
+        unsafe {
+            std::env::set_var("APPLE_CLIENT_ID", "test_client_id");
+            std::env::set_var("APPLE_AUTH_URL", "https://valid.auth.url");
+            std::env::set_var("APPLE_TOKEN_URL", "invalid_token_url");
+        }
+
+        let pool: Option<PgPool> = None;
+        let auth_code = "test_auth_code".to_string();
+
+        let result = handle_apple_oauth(&pool, auth_code).await;
+
+        // Should fail due to invalid token URL
+        assert!(result.is_err());
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("APPLE_CLIENT_ID");
+            std::env::remove_var("APPLE_AUTH_URL");
+            std::env::remove_var("APPLE_TOKEN_URL");
+        }
+    }
+
+    /// Test handle_github_oauth with invalid token URL
+    #[tokio::test]
+    #[serial]
+    async fn test_handle_github_oauth_invalid_token_url() {
+        unsafe {
+            std::env::set_var("GITHUB_CLIENT_ID", "test_client_id");
+            std::env::set_var("GITHUB_CLIENT_SECRET", "test_client_secret");
+            std::env::set_var("GITHUB_AUTH_URL", "https://valid.auth.url");
+            std::env::set_var("GITHUB_TOKEN_URL", "invalid_token_url");
+        }
+
+        let pool: Option<PgPool> = None;
+        let auth_code = "test_auth_code".to_string();
+
+        let result = handle_github_oauth(&pool, auth_code).await;
+
+        // Should fail due to invalid token URL
+        assert!(result.is_err());
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("GITHUB_CLIENT_ID");
+            std::env::remove_var("GITHUB_CLIENT_SECRET");
+            std::env::remove_var("GITHUB_AUTH_URL");
+            std::env::remove_var("GITHUB_TOKEN_URL");
+        }
+    }
+
+    /// Test handle_apple_oauth with missing auth URL
+    #[tokio::test]
+    #[serial]
+    async fn test_handle_apple_oauth_missing_auth_url() {
+        unsafe {
+            std::env::set_var("APPLE_CLIENT_ID", "test_client_id");
+            std::env::remove_var("APPLE_AUTH_URL");
+            std::env::set_var("APPLE_TOKEN_URL", "https://valid.token.url");
+        }
+
+        let pool: Option<PgPool> = None;
+        let auth_code = "test_auth_code".to_string();
+
+        let result = handle_apple_oauth(&pool, auth_code).await;
+
+        // Should fail due to missing auth URL
+        assert!(result.is_err());
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("APPLE_CLIENT_ID");
+            std::env::remove_var("APPLE_TOKEN_URL");
+        }
+    }
+
+    /// Test handle_github_oauth with missing client secret
+    #[tokio::test]
+    #[serial]
+    async fn test_handle_github_oauth_missing_client_secret() {
+        unsafe {
+            std::env::set_var("GITHUB_CLIENT_ID", "test_client_id");
+            std::env::remove_var("GITHUB_CLIENT_SECRET");
+            std::env::set_var("GITHUB_AUTH_URL", "https://valid.auth.url");
+            std::env::set_var("GITHUB_TOKEN_URL", "https://valid.token.url");
+        }
+
+        let pool: Option<PgPool> = None;
+        let auth_code = "test_auth_code".to_string();
+
+        let result = handle_github_oauth(&pool, auth_code).await;
+
+        // Should fail due to missing client secret
+        assert!(result.is_err());
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("GITHUB_CLIENT_ID");
+            std::env::remove_var("GITHUB_AUTH_URL");
+            std::env::remove_var("GITHUB_TOKEN_URL");
+        }
+    }
+
+    /// Test OAuth client creation with different client IDs
+    #[test]
+    fn test_oauth_client_creation_with_different_ids() {
+        let client_id1 = oauth2::ClientId::new("test_id_1".to_string());
+        let client_id2 = oauth2::ClientId::new("test_id_2".to_string());
+
+        assert_eq!(client_id1.as_str(), "test_id_1");
+        assert_eq!(client_id2.as_str(), "test_id_2");
+        assert_ne!(client_id1, client_id2);
+    }
+
+    /// Test OAuth client secret creation
+    #[test]
+    fn test_oauth_client_secret_creation() {
+        let secret = oauth2::ClientSecret::new("test_secret".to_string());
+        assert_eq!(secret.secret(), "test_secret");
+
+        let empty_secret = oauth2::ClientSecret::new("".to_string());
+        assert_eq!(empty_secret.secret(), "");
+    }
+
+    /// Test OAuth error handling for URL parsing edge cases
+    #[test]
+    fn test_oauth_url_edge_cases() {
+        // Test various invalid URL formats
+        let invalid_urls = vec![
+            "",
+            "not-a-url",
+            "://missing-scheme.com",
+            "http://",
+            "https://",
+        ];
+
+        for invalid_url in invalid_urls {
+            let auth_url_result = oauth2::AuthUrl::new(invalid_url.to_string());
+            assert!(
+                auth_url_result.is_err(),
+                "URL should be invalid: {}",
+                invalid_url
+            );
+
+            let token_url_result = oauth2::TokenUrl::new(invalid_url.to_string());
+            assert!(
+                token_url_result.is_err(),
+                "URL should be invalid: {}",
+                invalid_url
+            );
+        }
+
+        // Note: ftp:// URLs might be considered valid by the oauth2 library, so we test other cases
+
+        // Test valid URLs
+        let valid_urls = vec![
+            "https://example.com",
+            "https://example.com/oauth",
+            "https://example.com:8080/oauth",
+            "http://localhost:3000",
+        ];
+
+        for valid_url in valid_urls {
+            let auth_url_result = oauth2::AuthUrl::new(valid_url.to_string());
+            assert!(
+                auth_url_result.is_ok(),
+                "URL should be valid: {}",
+                valid_url
+            );
+
+            let token_url_result = oauth2::TokenUrl::new(valid_url.to_string());
+            assert!(
+                token_url_result.is_ok(),
+                "URL should be valid: {}",
+                valid_url
+            );
+        }
+    }
+
+    /// Test BasicClient creation with minimal configuration
+    #[test]
+    fn test_basic_client_minimal_config() {
+        let client_id = oauth2::ClientId::new("test_client".to_string());
+        let client = BasicClient::new(client_id);
+
+        // Verify client was created successfully
+        assert!(!format!("{:?}", client).is_empty());
+    }
+
+    /// Test handle_apple_oauth with special characters in auth code
+    #[tokio::test]
+    #[serial]
+    async fn test_handle_apple_oauth_special_chars_auth_code() {
+        unsafe {
+            std::env::set_var("APPLE_CLIENT_ID", "test_client_id");
+            std::env::set_var("APPLE_AUTH_URL", "https://valid.auth.url");
+            std::env::set_var("APPLE_TOKEN_URL", "https://valid.token.url");
+        }
+
+        let pool: Option<PgPool> = None;
+        let auth_code = "code_with_special!@#$%^&*()_+chars".to_string();
+
+        let result = handle_apple_oauth(&pool, auth_code).await;
+
+        // Should fail at token exchange, but not due to special characters
+        assert!(result.is_err());
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("APPLE_CLIENT_ID");
+            std::env::remove_var("APPLE_AUTH_URL");
+            std::env::remove_var("APPLE_TOKEN_URL");
+        }
+    }
+
+    /// Test handle_github_oauth with special characters in auth code
+    #[tokio::test]
+    #[serial]
+    async fn test_handle_github_oauth_special_chars_auth_code() {
+        unsafe {
+            std::env::set_var("GITHUB_CLIENT_ID", "test_client_id");
+            std::env::set_var("GITHUB_CLIENT_SECRET", "test_client_secret");
+            std::env::set_var("GITHUB_AUTH_URL", "https://valid.auth.url");
+            std::env::set_var("GITHUB_TOKEN_URL", "https://valid.token.url");
+        }
+
+        let pool: Option<PgPool> = None;
+        let auth_code = "code_with_special!@#$%^&*()_+chars".to_string();
+
+        let result = handle_github_oauth(&pool, auth_code).await;
+
+        // Should fail at token exchange, but not due to special characters
+        assert!(result.is_err());
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("GITHUB_CLIENT_ID");
+            std::env::remove_var("GITHUB_CLIENT_SECRET");
+            std::env::remove_var("GITHUB_AUTH_URL");
+            std::env::remove_var("GITHUB_TOKEN_URL");
+        }
+    }
 }

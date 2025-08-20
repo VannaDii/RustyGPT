@@ -692,4 +692,304 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_generate_report_invalid_format() -> Result<()> {
+        // Create a temporary directory for output
+        let temp_dir = TempDir::new()?;
+
+        // Create a minimal AuditResult
+        let keys_in_use = HashSet::new();
+        let translations = HashMap::new();
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test generate_report with invalid format
+        let result = generate_report(&audit_result, temp_dir.path(), "invalid_format");
+
+        // Should return an error
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported report format"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_report_text_format() -> Result<()> {
+        // Create a temporary directory for output
+        let temp_dir = TempDir::new()?;
+
+        // Create a minimal AuditResult
+        let keys_in_use = HashSet::new();
+        let translations = HashMap::new();
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test generate_report with text format
+        let result = generate_report(&audit_result, temp_dir.path(), "text");
+        assert!(result.is_ok());
+
+        // Verify report file was created
+        let report_path = temp_dir.path().join("translation_report.txt");
+        assert!(report_path.exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_report_json_format() -> Result<()> {
+        // Create a temporary directory for output
+        let temp_dir = TempDir::new()?;
+
+        // Create a minimal AuditResult
+        let keys_in_use = HashSet::new();
+        let translations = HashMap::new();
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test generate_report with json format
+        let result = generate_report(&audit_result, temp_dir.path(), "json");
+        assert!(result.is_ok());
+
+        // Verify report file was created
+        let report_path = temp_dir.path().join("translation_report.json");
+        assert!(report_path.exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_report_html_format() -> Result<()> {
+        // Create a temporary directory for output
+        let temp_dir = TempDir::new()?;
+
+        // Create a minimal AuditResult
+        let keys_in_use = HashSet::new();
+        let translations = HashMap::new();
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test generate_report with html format
+        let result = generate_report(&audit_result, temp_dir.path(), "html");
+        assert!(result.is_ok());
+
+        // Verify report file was created
+        let report_path = temp_dir.path().join("translation_report.html");
+        assert!(report_path.exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_audit_report_basic() -> Result<()> {
+        // Create a basic AuditResult for testing print_audit_report
+        let mut keys_in_use = HashSet::new();
+        keys_in_use.insert("common.title".to_string());
+
+        let mut translations = HashMap::new();
+
+        // English translation data
+        let en_content = json!({
+            "common": {
+                "title": "Title"
+            }
+        });
+
+        let mut en_all_keys = HashSet::new();
+        en_all_keys.insert("common.title".to_string());
+
+        let en_data = TranslationData {
+            file_path: PathBuf::from("en.json"),
+            all_keys: en_all_keys,
+            unused_keys: HashSet::new(),
+            content: en_content,
+        };
+        translations.insert("en".to_string(), en_data);
+
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test print_audit_report - this should not panic
+        print_audit_report(&audit_result, "text");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_audit_report_empty_translations() -> Result<()> {
+        // Create an AuditResult with no translations
+        let keys_in_use = HashSet::new();
+        let translations = HashMap::new();
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test print_audit_report with empty data - should not panic
+        print_audit_report(&audit_result, "text");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_audit_report_json_format() -> Result<()> {
+        // Create a basic AuditResult
+        let mut keys_in_use = HashSet::new();
+        keys_in_use.insert("test.key".to_string());
+
+        let mut translations = HashMap::new();
+
+        let en_content = json!({
+            "test": {
+                "key": "Test"
+            }
+        });
+
+        let mut en_all_keys = HashSet::new();
+        en_all_keys.insert("test.key".to_string());
+
+        let en_data = TranslationData {
+            file_path: PathBuf::from("en.json"),
+            all_keys: en_all_keys,
+            unused_keys: HashSet::new(),
+            content: en_content,
+        };
+        translations.insert("en".to_string(), en_data);
+
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test print_audit_report with json format
+        print_audit_report(&audit_result, "json");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_audit_report_with_unused_keys() -> Result<()> {
+        // Create AuditResult with some unused keys
+        let mut keys_in_use = HashSet::new();
+        keys_in_use.insert("used.key".to_string());
+
+        let mut translations = HashMap::new();
+
+        let en_content = json!({
+            "used": {
+                "key": "Used"
+            },
+            "unused": {
+                "key1": "Unused 1",
+                "key2": "Unused 2"
+            }
+        });
+
+        let mut en_all_keys = HashSet::new();
+        en_all_keys.insert("used.key".to_string());
+        en_all_keys.insert("unused.key1".to_string());
+        en_all_keys.insert("unused.key2".to_string());
+
+        let mut unused_keys = HashSet::new();
+        unused_keys.insert("unused.key1".to_string());
+        unused_keys.insert("unused.key2".to_string());
+
+        let en_data = TranslationData {
+            file_path: PathBuf::from("en.json"),
+            all_keys: en_all_keys,
+            unused_keys,
+            content: en_content,
+        };
+        translations.insert("en".to_string(), en_data);
+
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test print_audit_report with unused keys
+        print_audit_report(&audit_result, "text");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_audit_report_with_missing_translations() -> Result<()> {
+        // Create AuditResult with missing translations
+        let mut keys_in_use = HashSet::new();
+        keys_in_use.insert("common.title".to_string());
+        keys_in_use.insert("common.subtitle".to_string());
+
+        let mut translations = HashMap::new();
+
+        // English (reference) has both keys
+        let en_content = json!({
+            "common": {
+                "title": "Title",
+                "subtitle": "Subtitle"
+            }
+        });
+
+        let mut en_all_keys = HashSet::new();
+        en_all_keys.insert("common.title".to_string());
+        en_all_keys.insert("common.subtitle".to_string());
+
+        let en_data = TranslationData {
+            file_path: PathBuf::from("en.json"),
+            all_keys: en_all_keys,
+            unused_keys: HashSet::new(),
+            content: en_content,
+        };
+        translations.insert("en".to_string(), en_data);
+
+        // Spanish is missing subtitle
+        let es_content = json!({
+            "common": {
+                "title": "Título"
+            }
+        });
+
+        let mut es_all_keys = HashSet::new();
+        es_all_keys.insert("common.title".to_string());
+
+        let es_data = TranslationData {
+            file_path: PathBuf::from("es.json"),
+            all_keys: es_all_keys,
+            unused_keys: HashSet::new(),
+            content: es_content,
+        };
+        translations.insert("es".to_string(), es_data);
+
+        let audit_result = AuditResult {
+            keys_in_use,
+            translations,
+            reference_language: "en".to_string(),
+        };
+
+        // Test print_audit_report with missing translations
+        print_audit_report(&audit_result, "text");
+
+        Ok(())
+    }
 }

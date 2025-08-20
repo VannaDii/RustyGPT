@@ -34,12 +34,11 @@ pub fn generate_config(format: &str) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::fs;
     use tempfile::TempDir;
 
     #[test]
-    #[serial]
+    #[serial_test::serial]
     fn test_generate_config_yaml_format() {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
@@ -63,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial_test::serial]
     fn test_generate_config_json_format() {
         // Create temporary directory for test
         let temp_dir = tempfile::tempdir().unwrap();
@@ -125,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[serial_test::serial]
     fn test_config_serialization_consistency() {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();

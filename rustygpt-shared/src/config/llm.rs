@@ -523,8 +523,10 @@ mod tests {
         let model_file = models_dir.join("default.gguf");
         fs::write(&model_file, "mock model content").unwrap();
 
-        let mut config = LLMConfiguration::default();
-        config.models_directory = models_dir;
+        let mut config = LLMConfiguration {
+            models_directory: models_dir,
+            ..Default::default()
+        };
 
         // Update the default model path to match our temp directory structure
         if let Some(default_model_config) = config.models.get_mut("default") {

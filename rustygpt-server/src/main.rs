@@ -21,18 +21,18 @@ mod main_tests;
 #[cfg(test)]
 mod server_test;
 
-/// RustyGPT CLI
+/// Main CLI structure for RustyGPT server
 #[derive(Parser)]
 #[command(name = "RustyGPT CLI")]
 #[command(about = "Backend server and tools for RustyGPT", long_about = None)]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    pub command: Commands,
 }
 
 /// Subcommands for the RustyGPT CLI
 #[derive(Subcommand)]
-enum Commands {
+pub enum Commands {
     /// Start the backend server
     Serve {
         /// The port number to bind the server to (e.g., 8080). Example usage: `--port 8080`
@@ -53,17 +53,49 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+/// Initializes environment variables and returns the parsed CLI.
+///
+/// # Returns
+/// Returns the parsed [`Cli`] structure.
+pub fn initialize_cli() -> Cli {
     dotenv().ok();
-    let cli = Cli::parse();
+    Cli::parse()
+}
+
+/// Handles the serve command by loading configuration and starting the server.
+///
+/// # Arguments
+/// * `port` - The port number to bind the server to.
+/// * `config` - Optional path to the configuration file.
+///
+/// # Errors
+/// Returns an error if configuration loading or server startup fails.
+pub async fn handle_serve_command(
+    port: u16,
+    config: Option<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
+    let resolved_config = Config::load_config(config, Some(port))?;
+    server::run(resolved_config).await.expect("Server exited");
+    Ok(())
+}
+
+/// Main application entry point.
+///
+/// # Errors
+/// Returns an error if the application fails to initialize or run.
+pub async fn run_app() -> Result<(), Box<dyn Error>> {
+    let cli = initialize_cli();
 
     match cli.command {
         Commands::Serve { port, config } => {
-            let resolved_config = Config::load_config(config, Some(port))?;
-            server::run(resolved_config).await.expect("Server exited");
+            handle_serve_command(port, config).await?;
         }
     }
 
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    run_app().await
 }

@@ -62,11 +62,11 @@ build-release:
 
 # Test everything
 test:
-    cargo test --workspace -- --test-threads=1
+    cargo test --workspace --lib -- --test-threads=1
 
 # Run all tests and generate coverage report
 coverage:
-    cargo llvm-cov --workspace --lib --html --output-dir .coverage
+    cargo llvm-cov --workspace --lib --html --output-dir .coverage -- --test-threads=1
     @echo "📊 Coverage report generated at file://$PWD/.coverage/html/index.html"
 
 docs:

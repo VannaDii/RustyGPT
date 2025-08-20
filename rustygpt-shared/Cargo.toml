@@ -32,3 +32,4 @@ server = ["tokio"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+serial_test = { workspace = true }

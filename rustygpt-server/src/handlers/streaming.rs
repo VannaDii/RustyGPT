@@ -192,8 +192,7 @@ mod tests {
         // This should complete without error but not send any messages
         stream_partial_response(state, missing_user_id, conversation_id, message_id, chunks).await;
 
-        // Test passes if no panic occurred
-        assert!(true);
+        // Test passes if no panic occurred - verified by reaching this point
     }
 
     /// Test stream_partial_response with empty chunks

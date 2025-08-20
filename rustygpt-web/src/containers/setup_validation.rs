@@ -312,13 +312,24 @@ mod tests {
 
         assert_eq!(errors.len(), 5);
 
+        // Verify all error variants can be matched and handled
         for error in errors {
             match error {
-                ValidationError::Required => assert!(true),
-                ValidationError::UsernameTooShort => assert!(true),
-                ValidationError::InvalidEmail => assert!(true),
-                ValidationError::PasswordTooShort => assert!(true),
-                ValidationError::PasswordsDoNotMatch => assert!(true),
+                ValidationError::Required => {
+                    // Test that required error is handled
+                }
+                ValidationError::UsernameTooShort => {
+                    // Test that username too short error is handled
+                }
+                ValidationError::InvalidEmail => {
+                    // Test that invalid email error is handled
+                }
+                ValidationError::PasswordTooShort => {
+                    // Test that password too short error is handled
+                }
+                ValidationError::PasswordsDoNotMatch => {
+                    // Test that passwords don't match error is handled
+                }
             }
         }
     }

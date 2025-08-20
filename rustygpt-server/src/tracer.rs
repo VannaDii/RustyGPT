@@ -17,7 +17,8 @@ type TraceLayerType = TraceLayer<
     fn(ServerErrorsFailureClass, Duration, &Span) -> (),
 >;
 
-fn on_request_handler(req: &Request<Body>, span: &Span) {
+/// Handle incoming request logging
+pub(crate) fn on_request_handler(req: &Request<Body>, span: &Span) {
     span.in_scope(|| {
         info!(
             method = %req.method(),
@@ -28,7 +29,8 @@ fn on_request_handler(req: &Request<Body>, span: &Span) {
     })
 }
 
-fn on_failure_handler(error: ServerErrorsFailureClass, latency: Duration, span: &Span) {
+/// Handle failure logging
+pub(crate) fn on_failure_handler(error: ServerErrorsFailureClass, latency: Duration, span: &Span) {
     span.in_scope(|| {
         error!(
             error = %error,
@@ -38,6 +40,7 @@ fn on_failure_handler(error: ServerErrorsFailureClass, latency: Duration, span: 
     })
 }
 
+/// Create a trace layer for HTTP request logging
 pub fn create_trace_layer() -> TraceLayerType {
     TraceLayer::new_for_http()
         .make_span_with(DefaultMakeSpan::new().level(Level::INFO))

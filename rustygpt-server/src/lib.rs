@@ -9,3 +9,5 @@ mod tracer;
 
 #[cfg(test)]
 mod server_test;
+#[cfg(test)]
+mod tracer_tests;

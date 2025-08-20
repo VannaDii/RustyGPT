@@ -1,4 +1,13 @@
-use crate::{app_state::AppState, handlers::github_auth::*};
+use crate::{
+    app_state::AppState,
+    handlers::{
+        github_auth::*,
+        oauth_testable::{github_oauth_callback_with_service, github_oauth_manual_with_service},
+    },
+    services::oauth_service_trait::test_implementations::{
+        MockOAuthServiceFailure, MockOAuthServiceSuccess,
+    },
+};
 use axum::{
     Json,
     extract::{Query, State},
@@ -154,5 +163,73 @@ mod tests {
         );
 
         clean_test_env();
+    }
+
+    #[tokio::test]
+    async fn test_github_oauth_callback_success_path() {
+        let state = Arc::new(AppState::default());
+        let callback = OAuthCallback {
+            code: "test_auth_code".to_string(),
+            state: None,
+        };
+
+        let response = github_oauth_callback_with_service(
+            Query(callback),
+            State(state),
+            MockOAuthServiceSuccess,
+        )
+        .await;
+
+        // Should get a redirect response for success
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    }
+
+    #[tokio::test]
+    async fn test_github_oauth_callback_failure_path() {
+        let state = Arc::new(AppState::default());
+        let callback = OAuthCallback {
+            code: "invalid_code".to_string(),
+            state: None,
+        };
+
+        let response = github_oauth_callback_with_service(
+            Query(callback),
+            State(state),
+            MockOAuthServiceFailure,
+        )
+        .await;
+
+        // Should get an error response for failure
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_github_oauth_manual_success_path() {
+        let state = Arc::new(AppState::default());
+        let request = OAuthRequest {
+            auth_code: "test_auth_code".to_string(),
+        };
+
+        let response =
+            github_oauth_manual_with_service(State(state), Json(request), MockOAuthServiceSuccess)
+                .await;
+
+        // Should get a success response with user ID
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_github_oauth_manual_failure_path() {
+        let state = Arc::new(AppState::default());
+        let request = OAuthRequest {
+            auth_code: "invalid_code".to_string(),
+        };
+
+        let response =
+            github_oauth_manual_with_service(State(state), Json(request), MockOAuthServiceFailure)
+                .await;
+
+        // Should get an error response for failure
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

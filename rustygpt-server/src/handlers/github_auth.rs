@@ -1,11 +1,16 @@
-use crate::{app_state::AppState, services::oauth_service::handle_github_oauth};
+use crate::{
+    app_state::AppState,
+    handlers::oauth_testable::{
+        github_oauth_callback_with_service, github_oauth_manual_with_service,
+    },
+    services::oauth_service_trait::ProductionOAuthService,
+};
 use axum::{
     Router,
     extract::{Json, Query, State},
-    response::{IntoResponse, Redirect, Response},
+    response::Response,
     routing::{get, post},
 };
-use http::StatusCode;
 use shared::models::{
     ErrorResponse,
     oauth::{OAuthCallback, OAuthInitResponse, OAuthRequest},
@@ -49,17 +54,10 @@ pub async fn github_oauth_init() -> Json<OAuthInitResponse> {
 )]
 #[axum::debug_handler]
 pub async fn github_oauth_callback(
-    Query(params): Query<OAuthCallback>,
-    State(state): State<Arc<AppState>>,
+    query: Query<OAuthCallback>,
+    state: State<Arc<AppState>>,
 ) -> Response {
-    match handle_github_oauth(&state.pool, params.code).await {
-        Ok(user_id) => {
-            // In a real app, you would set a cookie or return a JWT token
-            // For now, redirect to a success page with the user ID
-            Redirect::to(&format!("/auth-success.html?user_id={}", user_id)).into_response()
-        }
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
-    }
+    github_oauth_callback_with_service(query, state, ProductionOAuthService).await
 }
 
 // Handler for manual GitHub OAuth (for testing with direct auth code)
@@ -74,17 +72,10 @@ pub async fn github_oauth_callback(
 )]
 #[axum::debug_handler]
 pub async fn github_oauth_manual(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<OAuthRequest>,
+    state: State<Arc<AppState>>,
+    payload: Json<OAuthRequest>,
 ) -> Response {
-    match handle_github_oauth(&state.pool, payload.auth_code).await {
-        Ok(user_id) => (
-            StatusCode::OK,
-            format!("GitHub OAuth successful, user_id: {}", user_id),
-        )
-            .into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
-    }
+    github_oauth_manual_with_service(state, payload, ProductionOAuthService).await
 }
 
 // Function to register the GitHub OAuth routes

@@ -80,7 +80,7 @@ mod tests {
         let state = AppState::default();
 
         // pool.is_some() should be consistent with having a database
-        assert!(!state.pool.is_some());
+        assert!(state.pool.is_none());
     }
 
     /// Test multiple AppState instances independence
@@ -91,8 +91,8 @@ mod tests {
 
         // Both should be independent and have the same default state
         assert_eq!(state1.pool.is_some(), state2.pool.is_some());
-        assert!(!state1.pool.is_some());
-        assert!(!state2.pool.is_some());
+        assert!(state1.pool.is_none());
+        assert!(state2.pool.is_none());
     }
 
     /// Test AppState field visibility

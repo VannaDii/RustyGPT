@@ -505,6 +505,174 @@ mod tests {
         assert_eq!(config.max_tokens, Some(512));
         assert_eq!(config.temperature, Some(0.7));
         assert_eq!(config.context_size, Some(2048));
+        assert_eq!(config.n_gpu_layers, Some(0));
+        assert_eq!(config.top_p, Some(0.9));
+        assert_eq!(config.top_k, Some(40));
+        assert_eq!(config.repetition_penalty, Some(1.1));
+        assert_eq!(config.batch_size, Some(512));
+        assert!(config.additional_params.is_empty());
+        assert!(config.model_path.is_empty());
+    }
+
+    #[test]
+    fn test_llm_config_apply_optimal_params() {
+        use crate::llms::hardware::OptimalParams;
+
+        let config = LLMConfig::default();
+        let optimal_params = OptimalParams {
+            n_threads: 8,
+            n_gpu_layers: 20,
+            context_size: 4096,
+            batch_size: 1024,
+            max_model_size: 8 * 1024 * 1024 * 1024, // 8GB
+            use_mmap: true,
+            memory_buffer_percent: 0.2,
+        };
+
+        let updated_config = config.apply_optimal_params(&optimal_params, Some(4_000_000_000));
+
+        assert_eq!(updated_config.n_threads, Some(8));
+        assert_eq!(updated_config.n_gpu_layers, Some(20));
+        assert_eq!(updated_config.context_size, Some(4096));
+        assert_eq!(updated_config.batch_size, Some(1024));
+
+        // Check additional params
+        assert_eq!(
+            updated_config.additional_params.get("use_mmap"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            updated_config.additional_params.get("estimated_model_size"),
+            Some(&serde_json::Value::Number(serde_json::Number::from(
+                4_000_000_000_u64
+            )))
+        );
+        assert!(
+            updated_config
+                .additional_params
+                .contains_key("memory_buffer_percent")
+        );
+    }
+
+    #[test]
+    fn test_llm_config_optimized_for_hardware() {
+        let result = LLMConfig::optimized_for_hardware("/test/model.gguf", Some(2_000_000_000));
+
+        // This should succeed on any platform that supports hardware detection
+        match result {
+            Ok(config) => {
+                assert_eq!(config.model_path, "/test/model.gguf");
+                assert!(config.n_threads.is_some());
+                assert!(config.context_size.is_some());
+                assert!(config.batch_size.is_some());
+            }
+            Err(_) => {
+                // Hardware detection might fail in test environments, which is acceptable
+            }
+        }
+    }
+
+    #[test]
+    fn test_llm_config_optimized_for_hardware_string() {
+        let result = LLMConfig::optimized_for_hardware("model.bin".to_string(), None);
+
+        match result {
+            Ok(config) => {
+                assert_eq!(config.model_path, "model.bin");
+            }
+            Err(_) => {
+                // Hardware detection might fail in test environments
+            }
+        }
+    }
+
+    #[test]
+    fn test_llm_config_validate_for_hardware() {
+        // Test with reasonable configuration
+        let config = LLMConfig {
+            n_threads: Some(4),
+            n_gpu_layers: Some(0),
+            context_size: Some(2048),
+            batch_size: Some(512),
+            ..Default::default()
+        };
+
+        let result = config.validate_for_hardware();
+
+        // Should either succeed or fail gracefully
+        match result {
+            Ok(()) => {
+                // Configuration is valid
+            }
+            Err(warnings) => {
+                // Validation warnings are acceptable
+                assert!(!warnings.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn test_llm_config_validate_extreme_values() {
+        // Set extreme values that should trigger warnings
+        let config = LLMConfig {
+            n_threads: Some(1000),         // Way too many threads
+            n_gpu_layers: Some(1000),      // Way too many GPU layers
+            context_size: Some(1_000_000), // Massive context
+            batch_size: Some(100_000),     // Huge batch size
+            ..Default::default()
+        };
+
+        let result = config.validate_for_hardware();
+
+        // Should either provide warnings or fail to detect hardware
+        match result {
+            Ok(()) => {
+                // Might happen if hardware detection fails
+            }
+            Err(warnings) => {
+                assert!(!warnings.is_empty());
+                // Should contain warnings about extreme values
+                let warning_text = warnings.join(" ");
+                assert!(
+                    warning_text.contains("exceed")
+                        || warning_text.contains("large")
+                        || warning_text.contains("Unable")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_llm_config_debug() {
+        let config = LLMConfig::default();
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("LLMConfig"));
+        assert!(debug_str.contains("model_path"));
+    }
+
+    #[test]
+    fn test_llm_config_clone() {
+        let config = LLMConfig {
+            model_path: "test.gguf".to_string(),
+            max_tokens: Some(256),
+            ..Default::default()
+        };
+
+        let cloned = config.clone();
+        assert_eq!(config.model_path, cloned.model_path);
+        assert_eq!(config.max_tokens, cloned.max_tokens);
+    }
+
+    #[test]
+    fn test_llm_config_serialization() {
+        let config = LLMConfig::default();
+
+        let serialized = serde_json::to_string(&config).unwrap();
+        let deserialized: LLMConfig = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(config.max_tokens, deserialized.max_tokens);
+        assert_eq!(config.temperature, deserialized.temperature);
+        assert_eq!(config.model_path, deserialized.model_path);
     }
 
     #[test]
@@ -513,6 +681,8 @@ mod tests {
         assert_eq!(request.prompt, "Hello, world!");
         assert!(!request.stream);
         assert!(request.system_message.is_none());
+        assert!(request.stop_sequences.is_empty());
+        assert!(request.metadata.is_empty());
     }
 
     #[test]
@@ -534,10 +704,59 @@ mod tests {
     }
 
     #[test]
+    fn test_llm_request_multiple_stop_sequences() {
+        let request = LLMRequest::new("Test")
+            .with_stop_sequence("STOP")
+            .with_stop_sequence("END")
+            .with_stop_sequence("FINISH");
+
+        assert_eq!(request.stop_sequences.len(), 3);
+        assert!(request.stop_sequences.contains(&"STOP".to_string()));
+        assert!(request.stop_sequences.contains(&"END".to_string()));
+        assert!(request.stop_sequences.contains(&"FINISH".to_string()));
+    }
+
+    #[test]
+    fn test_llm_request_with_metadata() {
+        let mut request = LLMRequest::new("Test");
+        request.metadata.insert(
+            "user_id".to_string(),
+            serde_json::Value::String("123".to_string()),
+        );
+        request.metadata.insert(
+            "session_id".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(456)),
+        );
+
+        assert_eq!(request.metadata.len(), 2);
+        assert_eq!(
+            request.metadata.get("user_id"),
+            Some(&serde_json::Value::String("123".to_string()))
+        );
+    }
+
+    #[test]
     fn test_streaming_request() {
         let request = LLMRequest::new_streaming("Stream this");
         assert!(request.stream);
         assert_eq!(request.prompt, "Stream this");
+    }
+
+    #[test]
+    fn test_llm_request_debug() {
+        let request = LLMRequest::new("test");
+        let debug_str = format!("{:?}", request);
+        assert!(debug_str.contains("LLMRequest"));
+        assert!(debug_str.contains("test"));
+    }
+
+    #[test]
+    fn test_llm_request_clone() {
+        let request = LLMRequest::new("test").with_max_tokens(100);
+        let cloned = request.clone();
+        assert_eq!(request.prompt, cloned.prompt);
+        assert_eq!(request.max_tokens, cloned.max_tokens);
+        assert_eq!(request.id, cloned.id); // IDs should be the same when cloned
     }
 
     #[test]
@@ -553,17 +772,261 @@ mod tests {
     }
 
     #[test]
+    fn test_token_usage_default() {
+        let usage = TokenUsage::default();
+        assert_eq!(usage.prompt_tokens, 0);
+        assert_eq!(usage.completion_tokens, 0);
+        assert_eq!(usage.total_tokens, 0);
+    }
+
+    #[test]
+    fn test_token_usage_multiple_additions() {
+        let mut usage = TokenUsage::new(100, 0);
+
+        usage.add_completion_tokens(25);
+        assert_eq!(usage.completion_tokens, 25);
+        assert_eq!(usage.total_tokens, 125);
+
+        usage.add_completion_tokens(10);
+        assert_eq!(usage.completion_tokens, 35);
+        assert_eq!(usage.total_tokens, 135);
+
+        usage.add_completion_tokens(0);
+        assert_eq!(usage.completion_tokens, 35);
+        assert_eq!(usage.total_tokens, 135);
+    }
+
+    #[test]
+    fn test_token_usage_debug() {
+        let usage = TokenUsage::new(10, 20);
+        let debug_str = format!("{:?}", usage);
+        assert!(debug_str.contains("TokenUsage"));
+        assert!(debug_str.contains("10"));
+        assert!(debug_str.contains("20"));
+        assert!(debug_str.contains("30"));
+    }
+
+    #[test]
+    fn test_token_usage_clone() {
+        let usage = TokenUsage::new(10, 20);
+        let cloned = usage.clone();
+        assert_eq!(usage.prompt_tokens, cloned.prompt_tokens);
+        assert_eq!(usage.completion_tokens, cloned.completion_tokens);
+        assert_eq!(usage.total_tokens, cloned.total_tokens);
+    }
+
+    #[test]
+    fn test_token_usage_serialization() {
+        let usage = TokenUsage::new(100, 50);
+
+        let serialized = serde_json::to_string(&usage).unwrap();
+        let deserialized: TokenUsage = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(usage.prompt_tokens, deserialized.prompt_tokens);
+        assert_eq!(usage.completion_tokens, deserialized.completion_tokens);
+        assert_eq!(usage.total_tokens, deserialized.total_tokens);
+    }
+
+    #[test]
     fn test_finish_reason_equality() {
         assert_eq!(FinishReason::MaxTokens, FinishReason::MaxTokens);
         assert_ne!(FinishReason::MaxTokens, FinishReason::StopSequence);
+        assert_ne!(FinishReason::EndOfText, FinishReason::Cancelled);
+        assert_ne!(FinishReason::Error, FinishReason::EndOfText);
+    }
+
+    #[test]
+    fn test_finish_reason_debug() {
+        let reason = FinishReason::MaxTokens;
+        let debug_str = format!("{:?}", reason);
+        assert_eq!(debug_str, "MaxTokens");
+
+        let reason = FinishReason::StopSequence;
+        let debug_str = format!("{:?}", reason);
+        assert_eq!(debug_str, "StopSequence");
+    }
+
+    #[test]
+    fn test_finish_reason_clone() {
+        let reason = FinishReason::EndOfText;
+        let cloned = reason.clone();
+        assert_eq!(reason, cloned);
+    }
+
+    #[test]
+    fn test_finish_reason_serialization() {
+        let reasons = [
+            FinishReason::MaxTokens,
+            FinishReason::StopSequence,
+            FinishReason::EndOfText,
+            FinishReason::Cancelled,
+            FinishReason::Error,
+        ];
+
+        for reason in reasons {
+            let serialized = serde_json::to_string(&reason).unwrap();
+            let deserialized: FinishReason = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(reason, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_model_info_creation() {
+        let info = ModelInfo {
+            name: "test-model".to_string(),
+            version: Some("1.0".to_string()),
+            architecture: Some("llama".to_string()),
+            parameter_count: Some(7_000_000_000),
+            context_length: Some(4096),
+            capabilities: ModelCapabilities::default(),
+        };
+
+        assert_eq!(info.name, "test-model");
+        assert_eq!(info.version, Some("1.0".to_string()));
+        assert_eq!(info.architecture, Some("llama".to_string()));
+        assert_eq!(info.parameter_count, Some(7_000_000_000));
+        assert_eq!(info.context_length, Some(4096));
+    }
+
+    #[test]
+    fn test_model_info_debug() {
+        let info = ModelInfo {
+            name: "test".to_string(),
+            version: None,
+            architecture: None,
+            parameter_count: None,
+            context_length: None,
+            capabilities: ModelCapabilities::default(),
+        };
+
+        let debug_str = format!("{:?}", info);
+        assert!(debug_str.contains("ModelInfo"));
+        assert!(debug_str.contains("test"));
+    }
+
+    #[test]
+    fn test_model_info_clone() {
+        let info = ModelInfo {
+            name: "test".to_string(),
+            version: Some("1.0".to_string()),
+            architecture: None,
+            parameter_count: Some(1000),
+            context_length: Some(2048),
+            capabilities: ModelCapabilities::default(),
+        };
+
+        let cloned = info.clone();
+        assert_eq!(info.name, cloned.name);
+        assert_eq!(info.version, cloned.version);
+        assert_eq!(info.parameter_count, cloned.parameter_count);
+    }
+
+    #[test]
+    fn test_model_info_serialization() {
+        let info = ModelInfo {
+            name: "test-model".to_string(),
+            version: Some("2.0".to_string()),
+            architecture: Some("gpt".to_string()),
+            parameter_count: Some(1_000_000_000),
+            context_length: Some(8192),
+            capabilities: ModelCapabilities::default(),
+        };
+
+        let serialized = serde_json::to_string(&info).unwrap();
+        let deserialized: ModelInfo = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(info.name, deserialized.name);
+        assert_eq!(info.version, deserialized.version);
+        assert_eq!(info.architecture, deserialized.architecture);
+        assert_eq!(info.parameter_count, deserialized.parameter_count);
+        assert_eq!(info.context_length, deserialized.context_length);
     }
 
     #[test]
     fn test_model_capabilities_default() {
         let capabilities = ModelCapabilities::default();
         assert!(!capabilities.text_generation);
+        assert!(!capabilities.text_embedding);
+        assert!(!capabilities.chat_format);
+        assert!(!capabilities.function_calling);
         assert!(!capabilities.streaming);
+        assert!(capabilities.max_context_length.is_none());
         assert!(capabilities.supported_languages.is_empty());
+    }
+
+    #[test]
+    fn test_model_capabilities_full() {
+        let capabilities = ModelCapabilities {
+            text_generation: true,
+            text_embedding: true,
+            chat_format: true,
+            function_calling: false,
+            streaming: true,
+            max_context_length: Some(32768),
+            supported_languages: vec!["en".to_string(), "es".to_string(), "fr".to_string()],
+        };
+
+        assert!(capabilities.text_generation);
+        assert!(capabilities.text_embedding);
+        assert!(capabilities.chat_format);
+        assert!(!capabilities.function_calling);
+        assert!(capabilities.streaming);
+        assert_eq!(capabilities.max_context_length, Some(32768));
+        assert_eq!(capabilities.supported_languages.len(), 3);
+        assert!(capabilities.supported_languages.contains(&"en".to_string()));
+    }
+
+    #[test]
+    fn test_model_capabilities_debug() {
+        let capabilities = ModelCapabilities::default();
+        let debug_str = format!("{:?}", capabilities);
+        assert!(debug_str.contains("ModelCapabilities"));
+        assert!(debug_str.contains("text_generation"));
+    }
+
+    #[test]
+    fn test_model_capabilities_clone() {
+        let capabilities = ModelCapabilities {
+            text_generation: true,
+            streaming: false,
+            supported_languages: vec!["en".to_string()],
+            ..Default::default()
+        };
+
+        let cloned = capabilities.clone();
+        assert_eq!(capabilities.text_generation, cloned.text_generation);
+        assert_eq!(capabilities.streaming, cloned.streaming);
+        assert_eq!(capabilities.supported_languages, cloned.supported_languages);
+    }
+
+    #[test]
+    fn test_model_capabilities_serialization() {
+        let capabilities = ModelCapabilities {
+            text_generation: true,
+            text_embedding: false,
+            chat_format: true,
+            function_calling: true,
+            streaming: false,
+            max_context_length: Some(16384),
+            supported_languages: vec!["en".to_string(), "de".to_string()],
+        };
+
+        let serialized = serde_json::to_string(&capabilities).unwrap();
+        let deserialized: ModelCapabilities = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(capabilities.text_generation, deserialized.text_generation);
+        assert_eq!(capabilities.text_embedding, deserialized.text_embedding);
+        assert_eq!(capabilities.chat_format, deserialized.chat_format);
+        assert_eq!(capabilities.function_calling, deserialized.function_calling);
+        assert_eq!(capabilities.streaming, deserialized.streaming);
+        assert_eq!(
+            capabilities.max_context_length,
+            deserialized.max_context_length
+        );
+        assert_eq!(
+            capabilities.supported_languages,
+            deserialized.supported_languages
+        );
     }
 
     #[test]
@@ -578,5 +1041,32 @@ mod tests {
         assert_eq!(request.prompt, deserialized.prompt);
         assert_eq!(request.max_tokens, deserialized.max_tokens);
         assert_eq!(request.temperature, deserialized.temperature);
+    }
+
+    #[test]
+    fn test_llm_request_serialization_full() {
+        let mut request = LLMRequest::new("Full test")
+            .with_system_message("System")
+            .with_max_tokens(200)
+            .with_temperature(0.9)
+            .with_stop_sequence("STOP1")
+            .with_stop_sequence("STOP2");
+
+        request.stream = true;
+        request.metadata.insert(
+            "key1".to_string(),
+            serde_json::Value::String("value1".to_string()),
+        );
+
+        let serialized = serde_json::to_string(&request).unwrap();
+        let deserialized: LLMRequest = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(request.prompt, deserialized.prompt);
+        assert_eq!(request.system_message, deserialized.system_message);
+        assert_eq!(request.max_tokens, deserialized.max_tokens);
+        assert_eq!(request.temperature, deserialized.temperature);
+        assert_eq!(request.stream, deserialized.stream);
+        assert_eq!(request.stop_sequences, deserialized.stop_sequences);
+        assert_eq!(request.metadata, deserialized.metadata);
     }
 }
