@@ -37,5 +37,5 @@ shared = { path = "../shared" }
 
 
 [dev-dependencies]
-axum-test = "17.2.0"
+axum-test = "18.0.0"
 tower = "0.5.2"
