@@ -18,3 +18,6 @@ mode: agent
 14. Always ensure all unit tests run without hanging or errors.
 15. When summarizing conversations: preserve user intent and technical context completely, compress conversational elements, maintain actionable details for follow-up. Optimize for token efficiency while preserving accuracy.
 16. Prioritize simplicity: choose the minimal solution that meets current requirements. Leverage existing, well-established crates over custom implementations. Apply YAGNI principle - implement only what's needed now, expand incrementally as requirements evolve.
+17. In UI/UX development, you MUST NEVER use hard coded display strings. Instead, use the localization framework already in use.
+18. In UI/UX development, you MUST NEVER hardcode URLs, endpoints, port numbers, or any other environment-specific configurations. Instead, use configuration files.
+19. Your changes MUST NOT DECREASE code coverage. You MUST ADD tests to prove and cover your changes.
