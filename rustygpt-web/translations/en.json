@@ -36,5 +36,50 @@
   },
   "theme": {
     "selector": "Theme selector"
+  },
+  "chat": {
+    "title": "Chat",
+    "new_conversation": "New Conversation",
+    "welcome": "Welcome to RustyGPT",
+    "start_conversation": "Start a conversation by typing a message below.",
+    "type_message": "Type your message...",
+    "hint": "Press Enter to send, Shift+Enter for new line"
+  },
+  "streaming": {
+    "connected": "Connected to live updates",
+    "connecting": "Connecting to live updates..."
+  },
+  "dashboard": {
+    "cards": {
+      "chat": {
+        "description": "Start a conversation with AI assistants",
+        "action": "Start Chatting"
+      },
+      "settings": {
+        "title": "Settings",
+        "description": "Configure your preferences and AI models",
+        "action": "Open Settings"
+      },
+      "documentation": {
+        "title": "Documentation",
+        "description": "Learn how to get the most out of RustyGPT",
+        "action": "View Docs"
+      }
+    },
+    "stats": {
+      "conversations": {
+        "title": "Total Conversations",
+        "description": "Start your first conversation!"
+      },
+      "messages": {
+        "title": "Messages Sent",
+        "description": "Your message history"
+      },
+      "status": {
+        "title": "System Status",
+        "value": "Online",
+        "description": "All systems operational"
+      }
+    }
   }
 }

@@ -3,10 +3,12 @@
 #[cfg(test)]
 mod tests {
     use crate::config::server::Config;
+    use serial_test::serial;
     use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
+    #[serial]
     fn test_server_config_compatibility() {
         // Clean up any existing environment variables first
         unsafe {
@@ -40,6 +42,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_config_loading_with_port_override() {
         // Clean up any existing environment variables first
         unsafe {
@@ -64,6 +67,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_config_loading_from_yaml_file() {
         // Clean up any existing environment variables first that might interfere
         unsafe {
@@ -85,6 +89,8 @@ server_port: 9000
 database_url: "postgres://test:test@localhost/test_db"
 log_level: "debug"
 frontend_path: "/custom/frontend/path"
+frontend:
+  documentation_url: "https://custom.docs.example.com"
 llm:
   default_provider: "llama_cpp"
   models_directory: "/custom/models"

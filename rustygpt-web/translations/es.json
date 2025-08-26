@@ -32,5 +32,54 @@
   },
   "theme": {
     "selector": "Selector de tema"
+  },
+  "setup": {
+    "heading": "Parece que estás usando RustyGPT por primera vez",
+    "description": "¡Configuremos tu sistema para que puedas iniciar sesión y empezar a divertirte!"
+  },
+  "chat": {
+    "title": "Chat",
+    "new_conversation": "Nueva Conversación",
+    "welcome": "Bienvenido a RustyGPT",
+    "start_conversation": "Inicia una conversación escribiendo un mensaje abajo.",
+    "type_message": "Escribe tu mensaje...",
+    "hint": "Presiona Enter para enviar, Shift+Enter para nueva línea"
+  },
+  "streaming": {
+    "connected": "Conectado a actualizaciones en vivo",
+    "connecting": "Conectando a actualizaciones en vivo..."
+  },
+  "dashboard": {
+    "cards": {
+      "chat": {
+        "description": "Inicia una conversación con asistentes de IA",
+        "action": "Empezar a Chatear"
+      },
+      "settings": {
+        "title": "Configuración",
+        "description": "Configura tus preferencias y modelos de IA",
+        "action": "Abrir Configuración"
+      },
+      "documentation": {
+        "title": "Documentación",
+        "description": "Aprende cómo sacar el máximo provecho de RustyGPT",
+        "action": "Ver Documentos"
+      }
+    },
+    "stats": {
+      "conversations": {
+        "title": "Conversaciones Totales",
+        "description": "¡Inicia tu primera conversación!"
+      },
+      "messages": {
+        "title": "Mensajes Enviados",
+        "description": "Tu historial de mensajes"
+      },
+      "status": {
+        "title": "Estado del Sistema",
+        "value": "En Línea",
+        "description": "Todos los sistemas operativos"
+      }
+    }
   }
 }

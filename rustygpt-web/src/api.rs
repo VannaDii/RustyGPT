@@ -6,7 +6,6 @@ use shared::models::{
     conversation::{SendMessageRequest, SendMessageResponse},
     oauth::{OAuthInitResponse, OAuthRequest},
 };
-use uuid::Uuid;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 #[wasm_bindgen]
@@ -103,27 +102,35 @@ impl RustyGPTClient {
         Ok(response)
     }
 
+    /// Get a specific conversation by ID.
+    ///
+    /// # Arguments
+    /// * `conversation_id` - The ID of the conversation to retrieve
+    ///
+    /// # Returns
+    /// A [`Result`] containing the conversation or an error.
+    pub async fn get_conversation(&self, conversation_id: &str) -> Result<Conversation, Error> {
+        let url = format!("{}/conversation/{}", self.base_url, conversation_id);
+        let response = self.client.get(&url).send().await?.json().await?;
+        Ok(response)
+    }
+
     /// Send a message to a conversation.
     ///
     /// # Arguments
-    /// * `conversation_id` - UUID of the target conversation
     /// * `message_request` - The message to send
     ///
     /// # Returns
     /// A [`Result`] containing the send message response or an error.
     pub async fn send_message(
         &self,
-        conversation_id: Uuid,
-        message_request: SendMessageRequest,
+        message_request: &SendMessageRequest,
     ) -> Result<SendMessageResponse, Error> {
-        let url = format!(
-            "{}/conversation/{}/messages",
-            self.base_url, conversation_id
-        );
+        let url = format!("{}/messages", self.base_url);
         let response = self
             .client
             .post(&url)
-            .json(&message_request)
+            .json(message_request)
             .send()
             .await?
             .json()
@@ -242,17 +249,10 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_message_url_formation() {
         let client = RustyGPTClient::new("http://localhost:8080");
-        let conversation_id = Uuid::new_v4();
 
         // Test the URL formation logic used in send_message
-        let expected_url = format!(
-            "{}/conversation/{}/messages",
-            client.base_url(),
-            conversation_id
-        );
-        assert!(expected_url.contains("/conversation/"));
-        assert!(expected_url.contains("/messages"));
-        assert!(expected_url.contains(&conversation_id.to_string()));
+        let expected_url = format!("{}/messages", client.base_url());
+        assert_eq!(expected_url, "http://localhost:8080/messages");
     }
 
     /// Test RustyGPTClient URL formation for OAuth endpoints

@@ -18,9 +18,27 @@ pub struct Config {
     /// Path to frontend static files
     pub frontend_path: PathBuf,
 
+    /// Frontend configuration
+    pub frontend: FrontendConfig,
+
     /// LLM configuration settings
     #[cfg(not(target_arch = "wasm32"))]
     pub llm: LLMConfiguration,
+}
+
+/// Frontend configuration for URLs and external links
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FrontendConfig {
+    /// Documentation URL
+    pub documentation_url: String,
+}
+
+impl Default for FrontendConfig {
+    fn default() -> Self {
+        Self {
+            documentation_url: "https://github.com/VannaDii/RustyGPT".to_string(),
+        }
+    }
 }
 
 impl Config {
@@ -30,7 +48,8 @@ impl Config {
             server_port: 8080,
             database_url: "postgres://tinroof:rusty@localhost/rusty_gpt".to_string(),
             log_level: "info".to_string(),
-            frontend_path: PathBuf::from("../frontend/dist"),
+            frontend_path: PathBuf::from("../rustygpt-web/dist"),
+            frontend: FrontendConfig::default(),
             #[cfg(not(target_arch = "wasm32"))]
             llm: LLMConfiguration::default(),
         }
@@ -67,13 +86,14 @@ impl Config {
             config.database_url = file_config.database_url;
             config.log_level = file_config.log_level;
             config.frontend_path = file_config.frontend_path;
+            config.frontend = file_config.frontend;
             #[cfg(not(target_arch = "wasm32"))]
             {
                 config.llm = file_config.llm;
             }
         }
 
-        // Use environment variables only if values are not already set
+        // Use environment variables only if values are not already set (from file)
         if config.server_port == Config::with_defaults().server_port {
             if let Ok(port) = env::var("RUSTYGPT_SERVER_PORT") {
                 config.server_port = port.parse().map_err(|_| {
@@ -94,6 +114,13 @@ impl Config {
         if config.frontend_path == Config::with_defaults().frontend_path {
             if let Ok(frontend_path) = env::var("RUSTYGPT_FRONTEND_PATH") {
                 config.frontend_path = PathBuf::from(frontend_path);
+            }
+        }
+
+        // Apply frontend environment variables (only if not set in file)
+        if config.frontend.documentation_url == FrontendConfig::default().documentation_url {
+            if let Ok(doc_url) = env::var("RUSTYGPT_DOCUMENTATION_URL") {
+                config.frontend.documentation_url = doc_url;
             }
         }
 
@@ -178,10 +205,12 @@ mod tests {
             std::env::remove_var("RUSTYGPT_DATABASE_URL");
             std::env::remove_var("RUSTYGPT_LOG_LEVEL");
             std::env::remove_var("RUSTYGPT_FRONTEND_PATH");
+            std::env::remove_var("RUSTYGPT_DOCUMENTATION_URL");
         }
     }
 
     #[test]
+    #[serial]
     fn test_config_with_defaults() {
         cleanup_env_vars();
         let config = Config::with_defaults();
@@ -192,7 +221,7 @@ mod tests {
             "postgres://tinroof:rusty@localhost/rusty_gpt"
         );
         assert_eq!(config.log_level, "info");
-        assert_eq!(config.frontend_path, PathBuf::from("../frontend/dist"));
+        assert_eq!(config.frontend_path, PathBuf::from("../rustygpt-web/dist"));
         #[cfg(not(target_arch = "wasm32"))]
         {
             assert_eq!(config.llm.default_provider, "llama_cpp");
@@ -200,6 +229,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_config_with_defaults() {
         cleanup_env_vars();
         let config = Config::load_config(None, None).unwrap();
@@ -211,6 +241,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_config_with_port_override() {
         cleanup_env_vars();
         let config = Config::load_config(None, Some(3000)).unwrap();
@@ -277,6 +308,8 @@ server_port: 8080
 database_url: "postgres://test@localhost/test"
 log_level: "info"
 frontend_path: "/frontend"
+frontend:
+  documentation_url: "https://test.example.com/docs"
 llm:
   default_provider: "llama_cpp"
   models_directory: "/models"
@@ -334,6 +367,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_load_config_zero_port_validation() {
         cleanup_env_vars();
         let result = Config::load_config(None, Some(0));
@@ -347,6 +381,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_load_config_from_yaml_file() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_env_vars();
         let temp_dir = TempDir::new()?;
@@ -357,6 +392,8 @@ server_port: 4000
 database_url: "postgres://yaml:config@localhost/yaml_db"
 log_level: "trace"
 frontend_path: "/yaml/frontend"
+frontend:
+  documentation_url: "https://yaml.example.com/docs"
 llm:
   default_provider: "llama_cpp"
   models_directory: "/yaml/models"
@@ -419,6 +456,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_load_config_from_json_file() -> Result<(), Box<dyn std::error::Error>> {
         cleanup_env_vars();
         let temp_dir = TempDir::new()?;
@@ -430,6 +468,9 @@ llm:
   "database_url": "postgres://json:config@localhost/json_db",
   "log_level": "warn",
   "frontend_path": "/json/frontend",
+  "frontend": {
+    "documentation_url": "https://json.example.com/docs"
+  },
   "llm": {
     "default_provider": "llama_cpp",
     "models_directory": "/json/models",
@@ -501,6 +542,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_load_config_unsupported_format() {
         cleanup_env_vars();
         let temp_dir = TempDir::new().unwrap();
@@ -519,6 +561,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_load_config_nonexistent_file() {
         cleanup_env_vars();
         let nonexistent_file = PathBuf::from("/nonexistent/config.yaml");
@@ -528,6 +571,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_load_config_malformed_yaml() {
         cleanup_env_vars();
         let temp_dir = TempDir::new().unwrap();
@@ -540,6 +584,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_load_config_malformed_json() {
         cleanup_env_vars();
         let temp_dir = TempDir::new().unwrap();
@@ -552,6 +597,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_validate_config_valid() {
         cleanup_env_vars();
         let temp_dir = TempDir::new().unwrap();
@@ -568,6 +614,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_validate_config_invalid_port() {
         cleanup_env_vars();
         let mut config = Config::with_defaults();
@@ -580,6 +627,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_validate_config_nonexistent_frontend_path() {
         cleanup_env_vars();
         let mut config = Config::with_defaults();
@@ -609,6 +657,8 @@ server_port: 1111
 database_url: "postgres://file:config@localhost/file_db"
 log_level: "error"
 frontend_path: "/file/frontend"
+frontend:
+  documentation_url: "https://file.docs.example.com"
 llm:
   default_provider: "llama_cpp"
   models_directory: "/models"
@@ -673,6 +723,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     #[cfg(not(target_arch = "wasm32"))]
     fn test_llm_config_methods() {
         cleanup_env_vars();
@@ -705,6 +756,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_config_serialization() {
         cleanup_env_vars();
         let config = Config::with_defaults();
@@ -723,6 +775,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_config_clone_and_debug() {
         cleanup_env_vars();
         let config = Config::with_defaults();
@@ -739,6 +792,7 @@ llm:
     }
 
     #[test]
+    #[serial]
     fn test_edge_case_port_values() {
         cleanup_env_vars();
 

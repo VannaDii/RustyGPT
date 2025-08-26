@@ -32,5 +32,54 @@
   },
   "theme": {
     "selector": "Theme-Auswahl"
+  },
+  "setup": {
+    "heading": "Es sieht so aus, als würden Sie RustyGPT zum ersten Mal verwenden",
+    "description": "Lassen Sie uns Ihr System einrichten, damit Sie sich anmelden und Spaß haben können!"
+  },
+  "chat": {
+    "title": "Chat",
+    "new_conversation": "Neue Unterhaltung",
+    "welcome": "Willkommen bei RustyGPT",
+    "start_conversation": "Beginnen Sie eine Unterhaltung, indem Sie unten eine Nachricht eingeben.",
+    "type_message": "Geben Sie Ihre Nachricht ein...",
+    "hint": "Drücken Sie Enter zum Senden, Shift+Enter für eine neue Zeile"
+  },
+  "streaming": {
+    "connected": "Verbunden mit Live-Updates",
+    "connecting": "Verbindung zu Live-Updates..."
+  },
+  "dashboard": {
+    "cards": {
+      "chat": {
+        "description": "Beginnen Sie eine Unterhaltung mit KI-Assistenten",
+        "action": "Chat Starten"
+      },
+      "settings": {
+        "title": "Einstellungen",
+        "description": "Konfigurieren Sie Ihre Präferenzen und KI-Modelle",
+        "action": "Einstellungen Öffnen"
+      },
+      "documentation": {
+        "title": "Dokumentation",
+        "description": "Erfahren Sie, wie Sie das Beste aus RustyGPT herausholen",
+        "action": "Dokumentation Anzeigen"
+      }
+    },
+    "stats": {
+      "conversations": {
+        "title": "Gesamte Unterhaltungen",
+        "description": "Starten Sie Ihre erste Unterhaltung!"
+      },
+      "messages": {
+        "title": "Gesendete Nachrichten",
+        "description": "Ihr Nachrichtenverlauf"
+      },
+      "status": {
+        "title": "Systemstatus",
+        "value": "Online",
+        "description": "Alle Systeme betriebsbereit"
+      }
+    }
   }
 }

@@ -15,6 +15,10 @@ extern "C" {
 pub enum MainRoute {
     #[at("/")]
     Home,
+    #[at("/chat")]
+    Chat,
+    #[at("/chat/:conversation_id")]
+    ChatConversation { conversation_id: String },
     #[at("/admin")]
     AdminRoot,
     #[at("/admin/*")]
@@ -71,6 +75,15 @@ pub fn switch(route: MainRoute) -> Html {
     match route {
         MainRoute::Home => {
             html! {<Layout current_route={AppRoute::Main(route)}><DashboardPage /></Layout>}
+        }
+        MainRoute::Chat => {
+            html! {<Layout current_route={AppRoute::Main(route)}><ChatPage /></Layout>}
+        }
+        MainRoute::ChatConversation {
+            ref conversation_id,
+        } => {
+            let route_clone = route.clone();
+            html! {<Layout current_route={AppRoute::Main(route_clone)}><ChatPage conversation_id={Some(conversation_id.clone())} /></Layout>}
         }
         MainRoute::AdminRoot | MainRoute::Admin => {
             html! { <Switch<AdminRoute> render={switch_admin} /> }

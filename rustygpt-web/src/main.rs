@@ -1,11 +1,18 @@
 mod api;
 mod app;
 mod components;
+mod config;
 mod containers;
 mod language;
 mod models;
 mod pages;
 mod routes;
+
+#[cfg(test)]
+mod api_test;
+
+#[cfg(test)]
+mod routes_test;
 
 use app::App;
 use i18nrs::yew::I18nProvider;
