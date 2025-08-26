@@ -62,9 +62,8 @@ just build-release # Release builds
 
 ### Critical Development Patterns
 
-- **Testing**: Always run `cargo test` from workspace root - never from individual crates
-- **Frontend Development**: Use `trunk watch` in `rustygpt-web/` directory for hot reloading
-- **Concurrent Development**: Use `just dev` which runs `confuse` tool to manage frontend/backend simultaneously
+- **Testing**: Always run `just test` from workspace root - never from individual crates
+- **Development**: Use `just dev` which runs `confuse` tool to manage frontend/backend simultaneously
 - **Database**: PostgreSQL with connection pooling; see `docker-compose.yaml` for local setup
 
 ### Project-Specific Command Execution
@@ -88,7 +87,7 @@ cd ~/Source/rusty_gpt && cargo check
 
 ### Test Commands
 
-When running tests, you MUST ONLY use the `cargo test` command and it MUST be run in the workspace root! This is essential and not open to negotiation!
+When running tests, you MUST ONLY use the `just test` command and it MUST be run in the workspace root! This is essential and not open to negotiation!
 
 ---
 
@@ -179,6 +178,8 @@ When running tests, you MUST ONLY use the `cargo test` command and it MUST be ru
 
 - Every function must be tested: happy path, all error paths.
 - Use `#[cfg(test)]` modules co-located with implementation.
+- Mock external dependencies with `mockall` or similar.
+- Keep all tests isolated in `_test` files; use the format `*_test.rs`.
 
 ### Integration Testing
 
@@ -186,10 +187,10 @@ When running tests, you MUST ONLY use the `cargo test` command and it MUST be ru
 
 ### Code Coverage
 
-- Use `cargo llvm-cov` to measure:
+- Use `just coverage` to measure:
 
 ```sh
-cargo llvm-cov --workspace --html --output-dir .coverage && open .coverage/index.html
+just coverage
 ```
 
 - Maintain **90% minimum coverage, striving for 100% where practical and beneficial.**

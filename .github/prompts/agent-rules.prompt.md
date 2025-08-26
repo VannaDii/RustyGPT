@@ -22,3 +22,4 @@ mode: agent
 18. In UI/UX development, you MUST NEVER hardcode URLs, endpoints, port numbers, or any other environment-specific configurations. Instead, use configuration files.
 19. Your changes MUST NOT DECREASE code coverage. You MUST ADD tests to prove and cover your changes.
 20. The database should `RAISE EXCEPTION '<i18n_string>?key1=value1&key2=value2...'` when an exception occurs. This way the caller can parse the error message and take appropriate action.
+21. Never leave old code once you're upgraded; remove it or update it to use the new implementation. This includes stored procedures!
