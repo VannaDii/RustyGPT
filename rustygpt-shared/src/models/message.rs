@@ -1,8 +1,30 @@
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::Timestamp;
+
+/// The type of message in a conversation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub enum MessageType {
+    /// Message from a user.
+    User,
+    /// Message from an AI assistant.
+    Assistant,
+    /// System message (e.g., notifications, status updates).
+    System,
+}
+
+impl Display for MessageType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            MessageType::User => write!(f, "user"),
+            MessageType::Assistant => write!(f, "assistant"),
+            MessageType::System => write!(f, "system"),
+        }
+    }
+}
 
 /// Represents a single message in a conversation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -19,8 +41,27 @@ pub struct Message {
     /// The message content.
     pub content: String,
 
+    /// The type of message.
+    pub message_type: MessageType,
+
     /// Timestamp when the message was sent.
     pub timestamp: Timestamp,
+}
+
+/// Request structure for creating a new message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct CreateMessageRequest {
+    /// The UUID of the conversation to add the message to.
+    pub conversation_id: Uuid,
+
+    /// The UUID of the user sending the message.
+    pub sender_id: Uuid,
+
+    /// The content of the message.
+    pub content: String,
+
+    /// The type of message being sent.
+    pub message_type: MessageType,
 }
 
 #[cfg(test)]
@@ -37,6 +78,7 @@ mod tests {
             sender_id: Uuid::new_v4(),
             conversation_id: Uuid::new_v4(),
             content: "Hello, world!".to_string(),
+            message_type: MessageType::User,
             timestamp: Timestamp(Utc::now()),
         };
 
@@ -44,6 +86,7 @@ mod tests {
         assert!(!message.id.is_nil());
         assert!(!message.sender_id.is_nil());
         assert!(!message.conversation_id.is_nil());
+        assert_eq!(message.message_type, MessageType::User);
     }
 
     #[test]
@@ -59,6 +102,7 @@ mod tests {
             sender_id,
             conversation_id,
             content: "Hello, world!".to_string(),
+            message_type: MessageType::User,
             timestamp: timestamp.clone(),
         };
 
@@ -67,6 +111,7 @@ mod tests {
             sender_id,
             conversation_id,
             content: "Hello, world!".to_string(),
+            message_type: MessageType::User,
             timestamp: timestamp.clone(),
         };
 
@@ -75,6 +120,7 @@ mod tests {
             sender_id,
             conversation_id,
             content: "Hello, world!".to_string(),
+            message_type: MessageType::User,
             timestamp: timestamp.clone(),
         };
 
@@ -94,6 +140,7 @@ mod tests {
             sender_id,
             conversation_id,
             content: "Test message".to_string(),
+            message_type: MessageType::Assistant,
             timestamp: Timestamp(dt),
         };
 
@@ -105,6 +152,7 @@ mod tests {
         assert_eq!(deserialized.sender_id, sender_id);
         assert_eq!(deserialized.conversation_id, conversation_id);
         assert_eq!(deserialized.content, "Test message");
+        assert_eq!(deserialized.message_type, MessageType::Assistant);
         assert_eq!(deserialized.timestamp.0, dt);
     }
 
@@ -115,6 +163,7 @@ mod tests {
             sender_id: Uuid::new_v4(),
             conversation_id: Uuid::new_v4(),
             content: "".to_string(),
+            message_type: MessageType::System,
             timestamp: Timestamp(Utc::now()),
         };
 

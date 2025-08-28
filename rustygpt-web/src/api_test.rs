@@ -51,6 +51,7 @@ mod tests {
             conversation_id: Uuid::new_v4(),
             sender_id: Uuid::new_v4(),
             content: "Test message".to_string(),
+            message_type: shared::models::message::MessageType::User,
             timestamp: Timestamp(Utc::now()),
         };
 

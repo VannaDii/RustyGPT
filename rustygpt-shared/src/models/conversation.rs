@@ -34,9 +34,20 @@ pub struct SendMessageResponse {
     pub message_id: String,
 }
 
+/// Request structure for creating a new conversation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct CreateConversationRequest {
+    /// The title of the conversation.
+    pub title: String,
+
+    /// The UUID of the user creating the conversation.
+    pub creator_id: Uuid,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::MessageType;
     use chrono::{TimeZone, Utc};
     use serde_json;
     use uuid::Uuid;
@@ -82,6 +93,7 @@ mod tests {
             sender_id: user_id,
             conversation_id,
             content: "Hello".to_string(),
+            message_type: MessageType::User,
             timestamp: timestamp.clone(),
         };
 
@@ -90,6 +102,7 @@ mod tests {
             sender_id: user_id,
             conversation_id,
             content: "World".to_string(),
+            message_type: MessageType::Assistant,
             timestamp: timestamp.clone(),
         };
 

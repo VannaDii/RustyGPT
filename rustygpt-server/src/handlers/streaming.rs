@@ -1,32 +1,92 @@
 use axum::{
-    extract::Path,
-    http::{StatusCode, header},
-    response::Response,
+    extract::{Extension, Path},
+    http::StatusCode,
+    response::sse::{Event, Sse},
 };
+use futures_util::stream::{self, Stream};
 use serde_json::json;
 use shared::models::MessageChunk;
-use std::{collections::HashMap, sync::Arc};
-use tokio::{
-    sync::{Mutex, mpsc},
-    time::Duration,
-};
+use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Duration};
+use tokio::sync::{Mutex, mpsc};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Shared state for managing SSE connections
 pub type SharedState = Arc<Mutex<HashMap<Uuid, mpsc::Sender<String>>>>;
 
-/// A simple handler that doesn't require state
-pub async fn simple_sse_handler(Path(user_id): Path<String>) -> Response {
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/event-stream")
-        .header(header::CACHE_CONTROL, "no-cache")
-        .header(header::CONNECTION, "keep-alive")
-        .body(axum::body::Body::from(format!(
-            "data: Connected to SSE stream for user {}\n\n",
-            user_id
-        )))
-        .unwrap()
+/// A proper SSE handler that maintains long-lived streaming connections
+pub async fn sse_handler(
+    Path(user_id): Path<String>,
+    Extension(shared_state): Extension<SharedState>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+    let user_uuid = Uuid::parse_str(&user_id).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    info!("Setting up SSE connection for user {}", user_uuid);
+
+    // Create a channel for streaming data to this user
+    let (tx, _rx) = mpsc::channel::<String>(100);
+
+    // Add the user to the shared state
+    {
+        let mut state = shared_state.lock().await;
+        state.insert(user_uuid, tx.clone());
+        info!("Added user {} to SSE state", user_uuid);
+    }
+
+    // Send an initial connection message
+    if let Err(e) = tx
+        .send(
+            json!({
+                "type": "connected",
+                "user_id": user_uuid.to_string()
+            })
+            .to_string(),
+        )
+        .await
+    {
+        warn!(
+            "Failed to send initial message to user {}: {}",
+            user_uuid, e
+        );
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // Create a simple infinite keep-alive stream that sends proper MessageChunk objects
+    let test_user_id = user_uuid;
+    let test_stream = stream::unfold(0, move |counter| async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        // Create a proper MessageChunk that the frontend expects
+        let chunk = MessageChunk {
+            conversation_id: test_user_id, // Use user_id as a dummy conversation_id for keep-alive
+            message_id: test_user_id,      // Use user_id as a dummy message_id for keep-alive
+            content_type: "keep-alive".to_string(),
+            content: format!("ping-{}", counter),
+            is_final: false,
+        };
+
+        let message = match serde_json::to_string(&chunk) {
+            Ok(json_data) => {
+                info!("Sending SSE MessageChunk: {}", json_data);
+                json_data
+            }
+            Err(e) => {
+                warn!("Failed to serialize MessageChunk: {}", e);
+                // Send a simple fallback MessageChunk as JSON string
+                format!(
+                    r#"{{"conversation_id":"{}","message_id":"{}","content_type":"error","content":"serialization_error","is_final":false}}"#,
+                    test_user_id, test_user_id
+                )
+            }
+        };
+
+        Some((Ok(Event::default().data(message)), counter + 1))
+    });
+
+    // Create SSE response
+    let sse_stream = Sse::new(test_stream);
+
+    Ok(sse_stream)
 }
 
 /// Stream a partial response to a user
@@ -73,57 +133,33 @@ pub async fn stream_partial_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::extract::Path;
+    use axum::extract::{Extension, Path};
+    use std::collections::HashMap;
     use tokio::sync::mpsc;
 
-    /// Test simple_sse_handler returns proper SSE response
+    /// Test sse_handler with valid UUID returns proper SSE response
     #[tokio::test]
-    async fn test_simple_sse_handler() {
-        let user_id = "test_user_123".to_string();
-        let path = Path(user_id.clone());
+    async fn test_sse_handler_valid_uuid() {
+        let user_id = Uuid::new_v4().to_string();
+        let path = Path(user_id);
+        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
+        let extension = Extension(shared_state);
 
-        let response = simple_sse_handler(path).await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        // Check headers
-        let headers = response.headers();
-        assert_eq!(
-            headers.get(header::CONTENT_TYPE).unwrap(),
-            "text/event-stream"
-        );
-        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-cache");
-        assert_eq!(headers.get(header::CONNECTION).unwrap(), "keep-alive");
+        let result = sse_handler(path, extension).await;
+        assert!(result.is_ok(), "SSE handler should succeed with valid UUID");
     }
 
-    /// Test simple_sse_handler with empty user ID
+    /// Test sse_handler with invalid UUID returns error
     #[tokio::test]
-    async fn test_simple_sse_handler_empty_user_id() {
-        let user_id = "".to_string();
+    async fn test_sse_handler_invalid_uuid() {
+        let user_id = "invalid-uuid".to_string();
         let path = Path(user_id);
+        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
+        let extension = Extension(shared_state);
 
-        let response = simple_sse_handler(path).await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/event-stream"
-        );
-    }
-
-    /// Test simple_sse_handler with special characters in user ID
-    #[tokio::test]
-    async fn test_simple_sse_handler_special_chars() {
-        let user_id = "user@test.com".to_string();
-        let path = Path(user_id);
-
-        let response = simple_sse_handler(path).await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/event-stream"
-        );
+        let result = sse_handler(path, extension).await;
+        assert!(result.is_err(), "SSE handler should fail with invalid UUID");
+        assert_eq!(result.unwrap_err(), StatusCode::BAD_REQUEST);
     }
 
     /// Test stream_partial_response with valid state and user

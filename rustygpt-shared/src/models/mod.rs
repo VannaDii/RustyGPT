@@ -7,9 +7,9 @@ pub mod streaming;
 pub mod timestamp;
 pub mod user;
 
-pub use conversation::Conversation;
+pub use conversation::{Conversation, CreateConversationRequest};
 pub use errors::ErrorResponse;
-pub use message::Message;
+pub use message::{CreateMessageRequest, Message, MessageType};
 use serde::{Deserialize, Serialize};
 pub use setup::SetupRequest;
 pub use setup::SetupResponse;

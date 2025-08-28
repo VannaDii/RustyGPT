@@ -4,6 +4,8 @@ use std::env;
 use tracing::{error, info, instrument};
 use uuid::Uuid;
 
+use super::user_service::UserService;
+
 #[instrument(skip(pool))]
 pub async fn handle_apple_oauth(
     pool: &Option<PgPool>,
@@ -48,15 +50,23 @@ pub async fn handle_apple_oauth(
         sqlx::Error::PoolClosed
     })?;
 
-    let row = sqlx::query!("SELECT register_oauth_user(NULL, $1, NULL)", apple_id)
-        .fetch_one(pool_ref)
-        .await?;
-    info!(
-        "Apple OAuth user registered with ID: {:?}",
-        row.register_oauth_user
-    );
+    let user_service = UserService::new(pool_ref.clone());
+    // TODO: Fetch actual user info from Apple OAuth response
+    // For now, using access token as temporary identifier
+    let username = format!("apple_user_{}", &apple_id[..8]); // Use first 8 chars as temp username
+    let email = format!("{}@appleid.com", &apple_id[..8]); // Temporary email format
 
-    Ok(row.register_oauth_user.unwrap())
+    let user_id = user_service
+        .register_oauth_user(&username, &email, Some(&apple_id), None)
+        .await
+        .map_err(|e| {
+            error!("Failed to register Apple OAuth user: {}", e);
+            sqlx::Error::RowNotFound
+        })?;
+
+    info!("Apple OAuth user registered with ID: {}", user_id);
+
+    Ok(user_id)
 }
 
 /// Creates an HTTP client with security-focused configuration.
@@ -118,15 +128,23 @@ pub async fn handle_github_oauth(
         sqlx::Error::PoolClosed
     })?;
 
-    let row = sqlx::query!("SELECT register_oauth_user(NULL, NULL, $1)", github_id)
-        .fetch_one(pool_ref)
-        .await?;
-    info!(
-        "GitHub OAuth user registered with ID: {:?}",
-        row.register_oauth_user
-    );
+    let user_service = UserService::new(pool_ref.clone());
+    // TODO: Fetch actual user info from GitHub OAuth response
+    // For now, using access token as temporary identifier
+    let username = format!("github_user_{}", &github_id[..8]); // Use first 8 chars as temp username
+    let email = format!("{}@github.com", &github_id[..8]); // Temporary email format
 
-    Ok(row.register_oauth_user.unwrap())
+    let user_id = user_service
+        .register_oauth_user(&username, &email, None, Some(&github_id))
+        .await
+        .map_err(|e| {
+            error!("Failed to register GitHub OAuth user: {}", e);
+            sqlx::Error::RowNotFound
+        })?;
+
+    info!("GitHub OAuth user registered with ID: {}", user_id);
+
+    Ok(user_id)
 }
 
 #[cfg(test)]

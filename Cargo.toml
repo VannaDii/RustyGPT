@@ -41,7 +41,7 @@ tower-service = "0.3"
 oauth2 = "5"
 
 # Database
-sqlx = { version = "0.8", features = ["postgres", "macros", "runtime-tokio", "uuid"] }
+sqlx = { version = "0.8", features = ["postgres", "macros", "runtime-tokio", "uuid", "chrono"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

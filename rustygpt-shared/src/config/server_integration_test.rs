@@ -25,7 +25,12 @@ mod tests {
         assert_eq!(config.server_port, 8080);
         assert!(config.database_url.contains("postgres"));
         assert_eq!(config.log_level, "info");
-        assert!(config.frontend_path.to_string_lossy().contains("frontend"));
+        assert!(
+            config
+                .frontend_path
+                .to_string_lossy()
+                .contains("rustygpt-web")
+        );
 
         // Verify LLM configuration is accessible
         assert_eq!(config.llm.default_provider, "llama_cpp");

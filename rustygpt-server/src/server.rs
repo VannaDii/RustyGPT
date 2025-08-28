@@ -1,14 +1,14 @@
+use crate::handlers::streaming::SharedState;
 use app_state::AppState;
 use axum::{
-    Router,
+    Extension, Router,
     middleware::{self},
     serve,
 };
 use routes::openapi::openapi_routes;
 use shared::config::server::Config;
 use sqlx::postgres::PgPoolOptions;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -87,6 +87,11 @@ pub fn create_api_router() -> Router<Arc<AppState>> {
                 .route_layer(middleware::from_fn(auth_middleware)),
         )
         .merge(routes::copilot::create_router_copilot())
+        // Add SSE endpoint as unprotected route for connection stability
+        .route(
+            "/stream/{user_id}",
+            axum::routing::get(crate::handlers::streaming::sse_handler),
+        )
 }
 
 /// Creates the static file service for serving frontend assets.
@@ -114,7 +119,10 @@ pub fn create_app_router(
     cors: CorsLayer,
     frontend_path: std::path::PathBuf,
 ) -> Router {
-    let api_router = create_api_router();
+    // Create shared state for SSE connections
+    let shared_state: SharedState = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+    let api_router = create_api_router().layer(Extension(shared_state));
     let static_files_service = create_static_service(frontend_path);
 
     Router::new()
@@ -221,7 +229,7 @@ mod tests {
         let config = Config::with_defaults();
 
         assert_eq!(config.server_port, 8080);
-        assert_eq!(config.frontend_path, PathBuf::from("../frontend/dist"));
+        assert_eq!(config.frontend_path, PathBuf::from("../rustygpt-web/dist"));
         assert_eq!(config.log_level, "info");
     }
 

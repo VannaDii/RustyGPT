@@ -1,4 +1,7 @@
-use crate::handlers::{conversation::*, streaming::SharedState};
+use crate::{
+    app_state::AppState,
+    handlers::{conversation::*, streaming::SharedState},
+};
 use axum::{
     extract::{Extension, Json, Path},
     http::StatusCode,
@@ -13,36 +16,30 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_get_conversation_returns_mock_data() {
-        let response = get_conversation().await;
+    async fn test_get_conversation_returns_empty_list() {
+        let app_state = Arc::new(AppState::default());
+        let response = get_conversation(Extension(app_state)).await;
 
-        assert_eq!(response.len(), 1);
-        assert_eq!(response[0].title, "Sample Chat");
-        assert_eq!(response[0].participant_ids.len(), 1);
-        assert_eq!(response[0].messages.len(), 1);
-        assert_eq!(response[0].messages[0].content, "Hello, world!");
+        // Should be ok and return empty list since no authentication/user context
+        assert!(response.is_ok());
+        let conversations = response.unwrap().0;
+        assert_eq!(conversations.len(), 0);
     }
 
     #[tokio::test]
     async fn test_get_conversation_response_structure() {
-        let response = get_conversation().await;
-        let conversation = &response[0];
+        let app_state = Arc::new(AppState::default());
+        let response = get_conversation(Extension(app_state)).await;
 
-        // Verify all required fields are present and valid
-        assert!(!conversation.id.to_string().is_empty());
-        assert!(!conversation.title.is_empty());
-        assert!(!conversation.participant_ids.is_empty());
-        assert!(!conversation.messages.is_empty());
-
-        let message = &conversation.messages[0];
-        assert!(!message.id.to_string().is_empty());
-        assert!(!message.sender_id.to_string().is_empty());
-        assert!(!message.conversation_id.to_string().is_empty());
-        assert!(!message.content.is_empty());
+        // Should succeed and return empty conversations
+        assert!(response.is_ok());
+        let conversations = response.unwrap().0;
+        assert_eq!(conversations.len(), 0);
     }
 
     #[tokio::test]
     async fn test_send_message_with_valid_data() {
+        let app_state = Arc::new(AppState::default());
         let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
@@ -53,6 +50,7 @@ mod tests {
         };
 
         let response = send_message(
+            Extension(app_state),
             Extension(shared_state),
             Path(conversation_id),
             Json(request),
@@ -64,6 +62,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_message_with_invalid_conversation_id() {
+        let app_state = Arc::new(AppState::default());
         let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let invalid_conversation_id = "invalid-uuid".to_string();
         let user_id = Uuid::new_v4();
@@ -74,6 +73,7 @@ mod tests {
         };
 
         let response = send_message(
+            Extension(app_state),
             Extension(shared_state),
             Path(invalid_conversation_id),
             Json(request),
@@ -85,6 +85,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_message_with_invalid_user_id() {
+        let app_state = Arc::new(AppState::default());
         let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let conversation_id = Uuid::new_v4().to_string();
 
@@ -94,6 +95,7 @@ mod tests {
         };
 
         let response = send_message(
+            Extension(app_state),
             Extension(shared_state),
             Path(conversation_id),
             Json(request),
@@ -105,6 +107,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_message_with_empty_content() {
+        let app_state = Arc::new(AppState::default());
         let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
@@ -115,6 +118,7 @@ mod tests {
         };
 
         let response = send_message(
+            Extension(app_state),
             Extension(shared_state),
             Path(conversation_id),
             Json(request),
@@ -135,6 +139,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_message_response_content_type() {
+        let app_state = Arc::new(AppState::default());
         let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
@@ -145,6 +150,7 @@ mod tests {
         };
 
         let response = send_message(
+            Extension(app_state),
             Extension(shared_state),
             Path(conversation_id),
             Json(request),
@@ -160,16 +166,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_conversation_generates_unique_ids() {
-        let response1 = get_conversation().await;
-        let response2 = get_conversation().await;
+    async fn test_get_conversation_with_database() {
+        // Test that get_conversation works with app state containing no database
+        let app_state = Arc::new(AppState::default());
+        let response1 = get_conversation(Extension(app_state.clone())).await;
+        let response2 = get_conversation(Extension(app_state)).await;
 
-        // Each call should generate unique IDs
-        assert_ne!(response1[0].id, response2[0].id);
-        assert_ne!(response1[0].messages[0].id, response2[0].messages[0].id);
-        assert_ne!(
-            response1[0].participant_ids[0],
-            response2[0].participant_ids[0]
-        );
+        // Both should succeed and return empty lists
+        assert!(response1.is_ok());
+        assert!(response2.is_ok());
+
+        let conversations1 = response1.unwrap().0;
+        let conversations2 = response2.unwrap().0;
+
+        assert_eq!(conversations1.len(), 0);
+        assert_eq!(conversations2.len(), 0);
+    }
+
+    #[test]
+    fn test_verify_password_matching() {
+        // Test password verification with matching password
+        let password = "test_password";
+        let stored_hash = "test_password"; // Simple string comparison for now
+
+        assert!(super::verify_password(password, stored_hash));
+    }
+
+    #[test]
+    fn test_verify_password_not_matching() {
+        // Test password verification with non-matching password
+        let password = "test_password";
+        let stored_hash = "different_password";
+
+        assert!(!super::verify_password(password, stored_hash));
+    }
+
+    #[test]
+    fn test_verify_password_empty_strings() {
+        // Test password verification with empty strings
+        let password = "";
+        let stored_hash = "";
+
+        assert!(super::verify_password(password, stored_hash));
+    }
+
+    #[test]
+    fn test_verify_password_case_sensitive() {
+        // Test password verification is case sensitive
+        let password = "TestPassword";
+        let stored_hash = "testpassword";
+
+        assert!(!super::verify_password(password, stored_hash));
     }
 }
