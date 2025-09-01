@@ -371,7 +371,7 @@ mod tests {
 
         // Validate input
         assert!(!user_input.is_empty());
-        assert!(user_input.len() > 0);
+        assert!(!user_input.is_empty());
         assert!(user_input.ends_with("?"));
 
         // Test input sanitization

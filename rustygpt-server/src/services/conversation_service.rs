@@ -169,7 +169,6 @@ mod tests {
             .expect("Failed to create test pool");
 
         let _service = ConversationService::new(pool);
-        // Simply test that the service was created without panicking
-        assert!(true);
+        // Service creation test - if we reach here without panicking, the test passes
     }
 }

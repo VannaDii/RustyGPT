@@ -3,11 +3,12 @@ use axum::{
     http::StatusCode,
     response::sse::{Event, Sse},
 };
-use futures_util::stream::{self, Stream};
+use futures_util::stream::Stream;
 use serde_json::json;
 use shared::models::MessageChunk;
 use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, mpsc};
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -23,27 +24,41 @@ pub async fn sse_handler(
 
     info!("Setting up SSE connection for user {}", user_uuid);
 
-    // Create a channel for streaming data to this user
-    let (tx, _rx) = mpsc::channel::<String>(100);
-
-    // Add the user to the shared state
-    {
+    // Check if user already exists in state to prevent duplicate connections
+    let (tx, rx) = {
         let mut state = shared_state.lock().await;
+        if let Some(existing_tx) = state.get(&user_uuid) {
+            // User already has a connection, check if it's still active
+            if existing_tx.is_closed() {
+                // Remove stale connection and create new one
+                state.remove(&user_uuid);
+            } else {
+                // Return error to prevent duplicate connections
+                info!("User {} already has active SSE connection", user_uuid);
+                return Err(StatusCode::CONFLICT);
+            }
+        }
+
+        // Create a new channel for this user
+        let (tx, rx) = mpsc::channel::<String>(100);
         state.insert(user_uuid, tx.clone());
         info!("Added user {} to SSE state", user_uuid);
-    }
+        (tx, rx)
+    };
 
-    // Send an initial connection message
-    if let Err(e) = tx
-        .send(
-            json!({
-                "type": "connected",
-                "user_id": user_uuid.to_string()
-            })
-            .to_string(),
-        )
-        .await
-    {
+    // Send an initial connection message as proper MessageChunk
+    let initial_chunk = MessageChunk {
+        conversation_id: user_uuid,
+        message_id: user_uuid,
+        content_type: "connection".to_string(),
+        content: "Connected to SSE stream".to_string(),
+        is_final: false,
+    };
+
+    let initial_message = serde_json::to_string(&initial_chunk)
+        .unwrap_or_else(|_| r#"{"error":"serialization_failed"}"#.to_string());
+
+    if let Err(e) = tx.send(initial_message).await {
         warn!(
             "Failed to send initial message to user {}: {}",
             user_uuid, e
@@ -51,42 +66,49 @@ pub async fn sse_handler(
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    // Create a simple infinite keep-alive stream that sends proper MessageChunk objects
-    let test_user_id = user_uuid;
-    let test_stream = stream::unfold(0, move |counter| async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+    // Start keep-alive task to send periodic pings
+    let tx_keepalive = tx.clone();
+    let keepalive_user_id = user_uuid;
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        let mut counter = 0;
 
-        // Create a proper MessageChunk that the frontend expects
-        let chunk = MessageChunk {
-            conversation_id: test_user_id, // Use user_id as a dummy conversation_id for keep-alive
-            message_id: test_user_id,      // Use user_id as a dummy message_id for keep-alive
-            content_type: "keep-alive".to_string(),
-            content: format!("ping-{}", counter),
-            is_final: false,
-        };
+        loop {
+            interval.tick().await;
+            counter += 1;
 
-        let message = match serde_json::to_string(&chunk) {
-            Ok(json_data) => {
-                info!("Sending SSE MessageChunk: {}", json_data);
-                json_data
+            let keepalive_chunk = MessageChunk {
+                conversation_id: keepalive_user_id,
+                message_id: keepalive_user_id,
+                content_type: "keep-alive".to_string(),
+                content: format!("ping-{}", counter),
+                is_final: false,
+            };
+
+            let message = serde_json::to_string(&keepalive_chunk)
+                .unwrap_or_else(|_| r#"{"error":"keepalive_serialization_failed"}"#.to_string());
+
+            if tx_keepalive.send(message).await.is_err() {
+                info!(
+                    "Keep-alive task ending for user {} (client disconnected)",
+                    keepalive_user_id
+                );
+                break;
             }
-            Err(e) => {
-                warn!("Failed to serialize MessageChunk: {}", e);
-                // Send a simple fallback MessageChunk as JSON string
-                format!(
-                    r#"{{"conversation_id":"{}","message_id":"{}","content_type":"error","content":"serialization_error","is_final":false}}"#,
-                    test_user_id, test_user_id
-                )
-            }
-        };
-
-        Some((Ok(Event::default().data(message)), counter + 1))
+        }
     });
 
-    // Create SSE response
-    let sse_stream = Sse::new(test_stream);
+    // Create stream from the channel receiver
+    let sse_stream = ReceiverStream::new(rx).map(|data| Ok(Event::default().data(data)));
 
-    Ok(sse_stream)
+    // Create SSE response
+    let sse_response = Sse::new(sse_stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    );
+
+    Ok(sse_response)
 }
 
 /// Stream a partial response to a user

@@ -706,6 +706,97 @@ pub async fn get_user_by_id(
     }
 }
 
+/// Send a message to a user's default conversation
+#[utoipa::path(
+    post,
+    path = "/messages",
+    request_body = SendMessageRequest,
+    responses(
+        (status = 200, description = "Message sent to default conversation", body = SendMessageResponse),
+        (status =500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Chat"
+)]
+pub async fn send_message_to_default_conversation(
+    axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
+    Extension(stream_state): Extension<SharedState>,
+    Json(request): Json<SendMessageRequest>,
+) -> Response {
+    // Parse user ID
+    let user_id = match Uuid::parse_str(&request.user_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(axum::body::Body::from("Invalid user ID"))
+                .unwrap();
+        }
+    };
+
+    if let Some(pool) = app_state.pool.as_ref() {
+        let conversation_service = ConversationService::new(pool.clone());
+
+        // Try to get or create a default conversation for this user
+        let conversation_id =
+            match get_or_create_default_conversation(&conversation_service, user_id).await {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::error!("Failed to get or create default conversation: {}", e);
+                    return Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(axum::body::Body::from("Failed to create conversation"))
+                        .unwrap();
+                }
+            };
+
+        // Forward to the existing send_message handler
+        let send_message_request = SendMessageRequest {
+            content: request.content,
+            user_id: request.user_id,
+        };
+
+        return send_message(
+            Extension(app_state),
+            Extension(stream_state),
+            Path(conversation_id.to_string()),
+            Json(send_message_request),
+        )
+        .await;
+    }
+
+    Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(axum::body::Body::from("Database not available"))
+        .unwrap()
+}
+
+/// Helper function to get or create a default conversation for a user
+async fn get_or_create_default_conversation(
+    conversation_service: &ConversationService,
+    user_id: Uuid,
+) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
+    // Try to find an existing conversation for this user
+    let existing_conversations = conversation_service
+        .list_user_conversations(user_id)
+        .await?;
+
+    if let Some(conversation) = existing_conversations.first() {
+        // Use the first existing conversation
+        return Ok(conversation.id);
+    }
+
+    // Create a new default conversation
+    let create_request = shared::models::CreateConversationRequest {
+        title: "Chat".to_string(),
+        creator_id: user_id,
+    };
+
+    let conversation_id = conversation_service
+        .create_conversation(create_request)
+        .await?;
+    Ok(conversation_id)
+}
+
 // Function to register the conversation routes
 pub fn conversation_routes() -> Router<Arc<AppState>> {
     Router::new()

@@ -1,10 +1,6 @@
 use crate::handlers::streaming::SharedState;
 use app_state::AppState;
-use axum::{
-    Extension, Router,
-    middleware::{self},
-    serve,
-};
+use axum::{Extension, Router, middleware, serve};
 use routes::openapi::openapi_routes;
 use shared::config::server::Config;
 use sqlx::postgres::PgPoolOptions;
@@ -92,6 +88,13 @@ pub fn create_api_router() -> Router<Arc<AppState>> {
             "/stream/{user_id}",
             axum::routing::get(crate::handlers::streaming::sse_handler),
         )
+        // Add messages endpoint as unprotected route for initial setup experience
+        .route(
+            "/messages",
+            axum::routing::post(
+                crate::handlers::conversation::send_message_to_default_conversation,
+            ),
+        )
 }
 
 /// Creates the static file service for serving frontend assets.
@@ -100,9 +103,21 @@ pub fn create_api_router() -> Router<Arc<AppState>> {
 /// * `frontend_path` - Path to the frontend build directory.
 ///
 /// # Returns
-/// Returns a configured [`ServeDir`] service with fallback.
-pub fn create_static_service(frontend_path: std::path::PathBuf) -> ServeDir {
-    ServeDir::new(frontend_path).append_index_html_on_directories(true)
+/// Returns a configured static file service with SPA fallback.
+pub fn create_static_service<S>(frontend_path: std::path::PathBuf) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    use axum::routing::get_service;
+    use tower_http::services::ServeFile;
+
+    let index_path = frontend_path.join("index.html");
+
+    Router::new().fallback_service(
+        ServeDir::new(frontend_path)
+            .append_index_html_on_directories(true)
+            .fallback(get_service(ServeFile::new(index_path))),
+    )
 }
 
 /// Creates the main application router with all middleware and routes.
@@ -130,7 +145,7 @@ pub fn create_app_router(
         .layer(tracer::create_trace_layer())
         .nest("/api", api_router)
         .merge(openapi_routes()) // OpenAPI routes defined in routes/openapi.rs
-        .fallback_service(static_files_service)
+        .merge(static_files_service)
         .with_state(state)
 }
 
@@ -579,7 +594,7 @@ mod tests {
         // Test static service creation
         use std::path::PathBuf;
         let path = PathBuf::from("./static");
-        let service = create_static_service(path);
+        let service: Router<()> = create_static_service(path);
         assert!(!format!("{:?}", service).is_empty());
     }
 
@@ -626,7 +641,7 @@ mod tests {
         // Test individual components
         let cors = create_cors_layer();
         let api_router = create_api_router();
-        let static_service = create_static_service(PathBuf::from("./test"));
+        let static_service: Router<()> = create_static_service(PathBuf::from("./test"));
         let state = create_app_state(None);
 
         // Verify all components can be created

@@ -96,12 +96,24 @@ mod tests {
 
         for route in routes {
             match route {
-                MainRoute::Home => assert!(true),
-                MainRoute::Chat => assert!(true),
-                MainRoute::ChatConversation { .. } => assert!(true),
-                MainRoute::AdminRoot => assert!(true),
-                MainRoute::Admin => assert!(true),
-                MainRoute::NotFound => assert!(true),
+                MainRoute::Home => {
+                    // Route validation passes by reaching this point
+                }
+                MainRoute::Chat => {
+                    // Route validation passes by reaching this point
+                }
+                MainRoute::ChatConversation { .. } => {
+                    // Route validation passes by reaching this point
+                }
+                MainRoute::AdminRoot => {
+                    // Route validation passes by reaching this point
+                }
+                MainRoute::Admin => {
+                    // Route validation passes by reaching this point
+                }
+                MainRoute::NotFound => {
+                    // Route validation passes by reaching this point
+                }
             }
         }
     }
