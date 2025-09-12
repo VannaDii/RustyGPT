@@ -1,14 +1,10 @@
-use crate::{
-    app_state::AppState,
-    handlers::{conversation::*, streaming::SharedState},
-};
+use crate::{app_state::AppState, handlers::conversation::*};
 use axum::{
     extract::{Extension, Json, Path},
     http::StatusCode,
 };
 use shared::models::conversation::SendMessageRequest;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::Mutex;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -40,7 +36,6 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_valid_data() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 
@@ -49,13 +44,8 @@ mod tests {
             content: "Test message content".to_string(),
         };
 
-        let response = send_message(
-            Extension(app_state),
-            Extension(shared_state),
-            Path(conversation_id),
-            Json(request),
-        )
-        .await;
+        let response =
+            send_message(Extension(app_state), Path(conversation_id), Json(request)).await;
 
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -63,7 +53,6 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_invalid_conversation_id() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let invalid_conversation_id = "invalid-uuid".to_string();
         let user_id = Uuid::new_v4();
 
@@ -74,7 +63,6 @@ mod tests {
 
         let response = send_message(
             Extension(app_state),
-            Extension(shared_state),
             Path(invalid_conversation_id),
             Json(request),
         )
@@ -86,7 +74,6 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_invalid_user_id() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let conversation_id = Uuid::new_v4().to_string();
 
         let request = SendMessageRequest {
@@ -94,13 +81,8 @@ mod tests {
             content: "Test message".to_string(),
         };
 
-        let response = send_message(
-            Extension(app_state),
-            Extension(shared_state),
-            Path(conversation_id),
-            Json(request),
-        )
-        .await;
+        let response =
+            send_message(Extension(app_state), Path(conversation_id), Json(request)).await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
@@ -108,7 +90,6 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_empty_content() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 
@@ -117,13 +98,8 @@ mod tests {
             content: "".to_string(),
         };
 
-        let response = send_message(
-            Extension(app_state),
-            Extension(shared_state),
-            Path(conversation_id),
-            Json(request),
-        )
-        .await;
+        let response =
+            send_message(Extension(app_state), Path(conversation_id), Json(request)).await;
 
         // Should still accept empty content (may be valid for some use cases)
         assert_eq!(response.status(), StatusCode::OK);
@@ -140,7 +116,6 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_response_content_type() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 
@@ -149,13 +124,8 @@ mod tests {
             content: "Content type test".to_string(),
         };
 
-        let response = send_message(
-            Extension(app_state),
-            Extension(shared_state),
-            Path(conversation_id),
-            Json(request),
-        )
-        .await;
+        let response =
+            send_message(Extension(app_state), Path(conversation_id), Json(request)).await;
 
         assert_eq!(response.status(), StatusCode::OK);
 

@@ -13,12 +13,10 @@ use shared::models::{
     conversation::{SendMessageRequest, SendMessageResponse},
     user::AuthenticateRequest,
 };
-use tokio::spawn;
 use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
-    handlers::streaming::{SharedState, stream_partial_response},
     services::{
         MessageService, conversation_service::ConversationService, user_service::UserService,
     },
@@ -68,7 +66,7 @@ pub async fn get_conversation(
     }
 }
 
-/// Send a message to a conversation with streaming response
+/// Send a message to a conversation and echo the response
 #[utoipa::path(
     post,
     path = "/conversation/{conversation_id}/messages",
@@ -80,7 +78,6 @@ pub async fn get_conversation(
 )]
 pub async fn send_message(
     Extension(app_state): Extension<Arc<AppState>>,
-    Extension(stream_state): Extension<SharedState>,
     Path(conversation_id): Path<String>,
     Json(request): Json<SendMessageRequest>,
 ) -> Response {
@@ -125,60 +122,36 @@ pub async fn send_message(
         }
     }
 
-    // Create a new message ID for the assistant response
-    let message_id = Uuid::new_v4();
+    // Create and save assistant echo message
+    let assistant_message = Message {
+        id: Uuid::new_v4(),
+        sender_id: user_id,
+        conversation_id,
+        content: request.content.clone(),
+        message_type: MessageType::Assistant,
+        timestamp: shared::models::timestamp::Timestamp(chrono::Utc::now()),
+    };
 
-    // Simulate generating a response in chunks
-    // In a real application, this would come from an AI model
-    // Use the content from the request to personalize the response
-    let content = request.content.clone();
-    let response_chunks = vec![
-        "I'm ".to_string(),
-        "thinking ".to_string(),
-        "about ".to_string(),
-        "your ".to_string(),
-        format!("question: '{}'. ", content),
-        "Here's ".to_string(),
-        "my ".to_string(),
-        "response.".to_string(),
-    ];
-
-    // Spawn a task to stream the response
-    let stream_state_clone = stream_state.clone();
-    let app_state_clone = app_state.clone();
-    spawn(async move {
-        stream_partial_response(
-            stream_state_clone,
-            user_id,
+    if let Some(pool) = app_state.pool.as_ref() {
+        let message_service = MessageService::new(pool.clone());
+        let create_request = CreateMessageRequest {
             conversation_id,
-            message_id,
-            response_chunks,
-        )
-        .await;
+            sender_id: user_id,
+            content: assistant_message.content.clone(),
+            message_type: MessageType::Assistant,
+        };
 
-        // After streaming, save the complete assistant message to the database
-        if let Some(pool) = app_state_clone.pool.as_ref() {
-            let message_service = MessageService::new(pool.clone());
-
-            let assistant_message = CreateMessageRequest {
-                conversation_id,
-                sender_id: user_id, // Assistant messages still need a sender_id for the schema
-                content: format!(
-                    "I'm thinking about your question: '{}'. Here's my response.",
-                    content
-                ),
-                message_type: MessageType::Assistant,
-            };
-
-            if let Err(e) = message_service.create_message(assistant_message).await {
-                tracing::error!("Failed to save assistant message: {}", e);
-            }
+        if let Err(e) = message_service.create_message(create_request).await {
+            tracing::error!("Failed to save assistant message: {}", e);
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(axum::body::Body::from("Failed to save message"))
+                .unwrap();
         }
-    });
+    }
 
-    // Return the message ID immediately
     let response_body = serde_json::to_string(&SendMessageResponse {
-        message_id: message_id.to_string(),
+        message: assistant_message,
     })
     .unwrap();
 
@@ -719,7 +692,6 @@ pub async fn get_user_by_id(
 )]
 pub async fn send_message_to_default_conversation(
     axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
-    Extension(stream_state): Extension<SharedState>,
     Json(request): Json<SendMessageRequest>,
 ) -> Response {
     // Parse user ID
@@ -757,7 +729,6 @@ pub async fn send_message_to_default_conversation(
 
         return send_message(
             Extension(app_state),
-            Extension(stream_state),
             Path(conversation_id.to_string()),
             Json(send_message_request),
         )

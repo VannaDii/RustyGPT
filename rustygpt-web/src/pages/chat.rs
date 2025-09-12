@@ -1,8 +1,9 @@
 use crate::api::RustyGPTClient;
 use crate::components::StreamingMessage;
+use chrono::Utc;
 use i18nrs::yew::use_translation;
 use shared::models::conversation::SendMessageRequest;
-use shared::models::{Conversation, Message, MessageChunk};
+use shared::models::{Conversation, Message, MessageChunk, MessageType, Timestamp};
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -91,6 +92,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
         let user_id = *user_id;
         let error_message = error_message.clone();
         let input_ref = input_ref.clone();
+        let messages_state = messages.clone();
 
         move || {
             let message_content = (*current_input).clone();
@@ -110,16 +112,33 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
             spawn_local(async move {
                 let client = RustyGPTClient::new("http://localhost:8080/api");
                 let request = SendMessageRequest {
-                    content: message_content,
+                    content: message_content.clone(),
                     user_id: user_id.to_string(),
                 };
 
                 match client.send_message(&request).await {
-                    Ok(_response) => {
+                    Ok(response) => {
                         // Clear input on success
                         if let Some(input) = input_ref.cast::<HtmlInputElement>() {
                             input.set_value("");
                         }
+
+                        let mut new_messages = (*messages_state).clone();
+
+                        // Add user message
+                        new_messages.push(Message {
+                            id: Uuid::new_v4(),
+                            sender_id: user_id,
+                            conversation_id: response.message.conversation_id,
+                            content: message_content,
+                            message_type: MessageType::User,
+                            timestamp: Timestamp(Utc::now()),
+                        });
+
+                        // Add assistant echo message
+                        new_messages.push(response.message);
+
+                        messages_state.set(new_messages);
                     }
                     Err(err) => {
                         error_message.set(Some(format!("Failed to send message: {}", err)));

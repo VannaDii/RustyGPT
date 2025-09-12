@@ -31,7 +31,8 @@ pub struct SendMessageRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct SendMessageResponse {
-    pub message_id: String,
+    /// The assistant's response message echoing the user's input.
+    pub message: Message,
 }
 
 /// Request structure for creating a new conversation.
