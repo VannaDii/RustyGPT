@@ -1,0 +1,34 @@
+name: Dependabot Auto Merge
+
+on:
+  pull_request_review:
+    types:
+      - submitted
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-auto-merge:
+    if: >
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.review.user.login != 'dependabot[bot]' &&
+      github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure auto-merge is enabled
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          automerge_enabled=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" --json autoMergeRequest --jq '.autoMergeRequest != null')
+
+          if [[ "${automerge_enabled}" == "true" ]]; then
+            echo "Auto-merge already enabled for #${PR_NUMBER}. Nothing to do."
+            exit 0
+          fi
+
+          gh pr merge "${PR_NUMBER}" --repo "${REPO}" --squash --auto --delete-branch
