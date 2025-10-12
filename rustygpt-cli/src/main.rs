@@ -101,6 +101,10 @@ enum Commands {
         )]
         format: Option<String>,
     },
+    /// Perform a device login and store session cookies
+    Login(commands::session::LoginArgs),
+    /// Call /api/auth/me using the stored session
+    Me(commands::session::MeArgs),
 }
 
 #[tokio::main]
@@ -134,6 +138,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Commands::Config { format } => {
             let format = format.unwrap_or_else(|| "yaml".to_string());
             commands::config::generate_config(&format)?;
+        }
+        Commands::Login(args) => {
+            commands::session::login(args).await?;
+        }
+        Commands::Me(args) => {
+            commands::session::me(args).await?;
         }
     }
 
@@ -180,6 +190,28 @@ mod tests {
         match cli.unwrap().command {
             Commands::Completion { shell } => assert_eq!(shell, "bash"),
             _ => panic!("Expected Completion command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_login_command() {
+        let cli = Cli::try_parse_from(["cli", "login"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Login(args) => assert!(args.config.is_none()),
+            _ => panic!("Expected Login command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_me_command() {
+        let cli = Cli::try_parse_from(["cli", "me", "--config", "./conf.toml"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Me(args) => assert_eq!(args.config, Some(PathBuf::from("./conf.toml"))),
+            _ => panic!("Expected Me command"),
         }
     }
 
