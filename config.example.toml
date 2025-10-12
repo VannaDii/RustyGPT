@@ -61,6 +61,15 @@ heartbeat_seconds = 20
 channel_capacity = 128
 id_prefix = "evt_"
 
+[sse.persistence]
+enabled = false
+max_events_per_user = 500
+prune_batch_size = 100
+
+[sse.backpressure]
+drop_strategy = "drop_tokens"
+warn_queue_ratio = 0.75
+
 [features]
 auth_v1 = false
 well_known = false

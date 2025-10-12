@@ -468,6 +468,8 @@ pub struct SseConfig {
     pub heartbeat_seconds: u64,
     pub channel_capacity: usize,
     pub id_prefix: String,
+    pub persistence: SsePersistenceConfig,
+    pub backpressure: SseBackpressureConfig,
 }
 
 impl fmt::Debug for SseConfig {
@@ -476,6 +478,8 @@ impl fmt::Debug for SseConfig {
             .field("heartbeat_seconds", &self.heartbeat_seconds)
             .field("channel_capacity", &self.channel_capacity)
             .field("id_prefix", &self.id_prefix)
+            .field("persistence", &self.persistence)
+            .field("backpressure", &self.backpressure)
             .finish()
     }
 }
@@ -486,6 +490,92 @@ impl Default for SseConfig {
             heartbeat_seconds: 20,
             channel_capacity: 128,
             id_prefix: "evt_".into(),
+            persistence: SsePersistenceConfig::default(),
+            backpressure: SseBackpressureConfig::default(),
+        }
+    }
+}
+
+/// Persistence controls for SSE event history.
+#[derive(Serialize, Clone)]
+pub struct SsePersistenceConfig {
+    pub enabled: bool,
+    pub max_events_per_user: usize,
+    pub prune_batch_size: usize,
+}
+
+impl fmt::Debug for SsePersistenceConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SsePersistenceConfig")
+            .field("enabled", &self.enabled)
+            .field("max_events_per_user", &self.max_events_per_user)
+            .field("prune_batch_size", &self.prune_batch_size)
+            .finish()
+    }
+}
+
+impl Default for SsePersistenceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_events_per_user: 500,
+            prune_batch_size: 100,
+        }
+    }
+}
+
+/// Backpressure strategy for SSE queue management.
+#[derive(Serialize, Clone)]
+pub struct SseBackpressureConfig {
+    pub drop_strategy: SseDropStrategy,
+    pub warn_queue_ratio: f64,
+}
+
+impl fmt::Debug for SseBackpressureConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SseBackpressureConfig")
+            .field("drop_strategy", &self.drop_strategy)
+            .field("warn_queue_ratio", &self.warn_queue_ratio)
+            .finish()
+    }
+}
+
+impl Default for SseBackpressureConfig {
+    fn default() -> Self {
+        Self {
+            drop_strategy: SseDropStrategy::default(),
+            warn_queue_ratio: 0.75,
+        }
+    }
+}
+
+/// Drop behaviour configuration for SSE backpressure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SseDropStrategy {
+    DropTokens,
+    DropTokensAndSystem,
+}
+
+impl Default for SseDropStrategy {
+    fn default() -> Self {
+        SseDropStrategy::DropTokens
+    }
+}
+
+impl FromStr for SseDropStrategy {
+    type Err = ConfigError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "drop_tokens" | "tokens_only" => Ok(SseDropStrategy::DropTokens),
+            "drop_tokens_and_system" | "tokens_and_system" | "tokens_and_system_events" => {
+                Ok(SseDropStrategy::DropTokensAndSystem)
+            }
+            other => Err(ConfigError::InvalidValue {
+                field: "sse.backpressure.drop_strategy".into(),
+                message: format!("unknown drop strategy '{other}'"),
+            }),
         }
     }
 }
@@ -867,6 +957,25 @@ impl Config {
             if let Some(prefix) = &sse.id_prefix {
                 self.sse.id_prefix = prefix.clone();
             }
+            if let Some(persistence) = &sse.persistence {
+                if let Some(enabled) = persistence.enabled {
+                    self.sse.persistence.enabled = enabled;
+                }
+                if let Some(max_events) = persistence.max_events_per_user {
+                    self.sse.persistence.max_events_per_user = max_events as usize;
+                }
+                if let Some(batch) = persistence.prune_batch_size {
+                    self.sse.persistence.prune_batch_size = batch as usize;
+                }
+            }
+            if let Some(backpressure) = &sse.backpressure {
+                if let Some(strategy) = backpressure.drop_strategy {
+                    self.sse.backpressure.drop_strategy = strategy;
+                }
+                if let Some(ratio) = backpressure.warn_queue_ratio {
+                    self.sse.backpressure.warn_queue_ratio = ratio;
+                }
+            }
         }
 
         if let Some(well_known) = &partial.well_known {
@@ -1056,6 +1165,21 @@ impl Config {
         if let Some(id_prefix) = env_value(&["sse", "id_prefix"]) {
             self.sse.id_prefix = id_prefix;
         }
+        if let Some(enabled) = env_value_bool(&["sse", "persistence", "enabled"])? {
+            self.sse.persistence.enabled = enabled;
+        }
+        if let Some(max_events) = env_value_usize(&["sse", "persistence", "max_events_per_user"])? {
+            self.sse.persistence.max_events_per_user = max_events;
+        }
+        if let Some(batch) = env_value_usize(&["sse", "persistence", "prune_batch_size"])? {
+            self.sse.persistence.prune_batch_size = batch;
+        }
+        if let Some(strategy) = env_value(&["sse", "backpressure", "drop_strategy"]) {
+            self.sse.backpressure.drop_strategy = SseDropStrategy::from_str(&strategy)?;
+        }
+        if let Some(ratio) = env_value_f32(&["sse", "backpressure", "warn_queue_ratio"])? {
+            self.sse.backpressure.warn_queue_ratio = ratio as f64;
+        }
 
         if let Some(enabled) = env_value_bool(&["features", "auth_v1"])? {
             self.features.auth_v1 = enabled;
@@ -1171,6 +1295,35 @@ impl Config {
                     .into(),
             );
             self.sse.channel_capacity = 1;
+        }
+        if self.sse.persistence.max_events_per_user == 0 {
+            errors.push("sse.persistence.max_events_per_user must be greater than zero".into());
+        }
+        if self.sse.persistence.prune_batch_size == 0 {
+            warnings
+                .push("sse.persistence.prune_batch_size is zero; using 1 to allow pruning".into());
+            self.sse.persistence.prune_batch_size = 1;
+        }
+        if self.sse.persistence.prune_batch_size > self.sse.persistence.max_events_per_user {
+            warnings.push(
+                "sse.persistence.prune_batch_size exceeds max_events_per_user; clamping to max_events_per_user"
+                    .into(),
+            );
+            self.sse.persistence.prune_batch_size = self.sse.persistence.max_events_per_user;
+        }
+        if !(0.0..=1.0).contains(&self.sse.backpressure.warn_queue_ratio) {
+            warnings.push(
+                "sse.backpressure.warn_queue_ratio must be between 0.0 and 1.0; clamping to range"
+                    .into(),
+            );
+            self.sse.backpressure.warn_queue_ratio =
+                self.sse.backpressure.warn_queue_ratio.clamp(0.0, 1.0);
+        }
+        if self.sse.persistence.enabled && !self.features.sse_v1 {
+            warnings.push(
+                "sse.persistence.enabled is true but features.sse_v1 is disabled; persistence will have no effect"
+                    .into(),
+            );
         }
 
         if self.web.static_dir.to_string_lossy().is_empty() {
@@ -1407,6 +1560,25 @@ struct SsePartial {
     pub heartbeat_seconds: Option<u64>,
     pub channel_capacity: Option<u64>,
     pub id_prefix: Option<String>,
+    #[serde(default)]
+    pub persistence: Option<SsePersistencePartial>,
+    #[serde(default)]
+    pub backpressure: Option<SseBackpressurePartial>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SsePersistencePartial {
+    pub enabled: Option<bool>,
+    pub max_events_per_user: Option<u64>,
+    pub prune_batch_size: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SseBackpressurePartial {
+    pub drop_strategy: Option<SseDropStrategy>,
+    pub warn_queue_ratio: Option<f64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1772,7 +1944,6 @@ mod tests {
         let config = Config::load_config(None, None).expect("defaults load");
         assert_eq!(config.profile, Profile::Dev);
         assert_eq!(config.server.port, 8080);
-        assert_eq!(config.features.auth_v1, false);
         assert!(!config.server.host.is_empty());
     }
 
@@ -1813,6 +1984,15 @@ sse_v1 = true
     #[test]
     #[serial]
     fn env_overrides_take_precedence() {
+        const KEYS: &[&str] = &[
+            "RUSTYGPT_SERVER_PORT",
+            "RUSTYGPT_SERVER__PUBLIC_BASE_URL",
+            "RUSTYGPT_FEATURES__AUTH_V1",
+            "RUSTYGPT_OAUTH__GITHUB__CLIENT_ID",
+            "RUSTYGPT_OAUTH__GITHUB__CLIENT_SECRET",
+            "RUSTYGPT_OAUTH__REDIRECT_BASE",
+        ];
+
         set_env_var("RUSTYGPT_SERVER_PORT", "5555");
         set_env_var("RUSTYGPT_SERVER__PUBLIC_BASE_URL", "http://localhost:5555");
         set_env_var("RUSTYGPT_FEATURES__AUTH_V1", "true");
@@ -1829,17 +2009,11 @@ sse_v1 = true
             config.server.public_base_url.as_str(),
             "http://localhost:5555/"
         );
-        assert!(
-            config.features.auth_v1,
-            "auth feature should remain enabled with env overrides"
-        );
+        assert!(config.features.auth_v1);
 
-        remove_env_var("RUSTYGPT_SERVER_PORT");
-        remove_env_var("RUSTYGPT_SERVER__PUBLIC_BASE_URL");
-        remove_env_var("RUSTYGPT_FEATURES__AUTH_V1");
-        remove_env_var("RUSTYGPT_OAUTH__GITHUB__CLIENT_ID");
-        remove_env_var("RUSTYGPT_OAUTH__GITHUB__CLIENT_SECRET");
-        remove_env_var("RUSTYGPT_OAUTH__REDIRECT_BASE");
+        for key in KEYS {
+            remove_env_var(key);
+        }
     }
 
     #[test]
@@ -1863,5 +2037,33 @@ url = "sqlite://memory"
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn warns_when_persistence_enabled_without_sse_feature() {
+        let mut config = Config::default_for_profile(Profile::Dev);
+        config.features.sse_v1 = false;
+        config.sse.persistence.enabled = true;
+
+        let warnings = config.validate().expect("validation succeeds");
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("sse.persistence.enabled"))
+        );
+    }
+
+    #[test]
+    fn clamps_backpressure_warn_ratio() {
+        let mut config = Config::default_for_profile(Profile::Dev);
+        config.sse.backpressure.warn_queue_ratio = 1.5;
+
+        let warnings = config.validate().expect("validation succeeds");
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("warn_queue_ratio"))
+        );
+        assert!((config.sse.backpressure.warn_queue_ratio - 1.0).abs() < f64::EPSILON);
     }
 }

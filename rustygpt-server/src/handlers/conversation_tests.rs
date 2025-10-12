@@ -9,7 +9,7 @@ use axum::{
     extract::{Extension, Json, Path},
     http::StatusCode,
 };
-use shared::models::conversation::SendMessageRequest;
+use shared::{config::server::SseBackpressureConfig, models::conversation::SendMessageRequest};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -42,7 +42,13 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_valid_data() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(
+            16,
+            "evt_".into(),
+            None,
+            None,
+            SseBackpressureConfig::default(),
+        ));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 
@@ -65,7 +71,13 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_invalid_conversation_id() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(
+            16,
+            "evt_".into(),
+            None,
+            None,
+            SseBackpressureConfig::default(),
+        ));
         let invalid_conversation_id = "invalid-uuid".to_string();
         let user_id = Uuid::new_v4();
 
@@ -88,7 +100,13 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_invalid_user_id() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(
+            16,
+            "evt_".into(),
+            None,
+            None,
+            SseBackpressureConfig::default(),
+        ));
         let conversation_id = Uuid::new_v4().to_string();
 
         let request = SendMessageRequest {
@@ -110,7 +128,13 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_empty_content() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(
+            16,
+            "evt_".into(),
+            None,
+            None,
+            SseBackpressureConfig::default(),
+        ));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 
@@ -142,7 +166,13 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_response_content_type() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(
+            16,
+            "evt_".into(),
+            None,
+            None,
+            SseBackpressureConfig::default(),
+        ));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 

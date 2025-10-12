@@ -1,7 +1,7 @@
-use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::{cmp::Ordering, time::Instant};
 
 use sqlx::PgPool;
 use thiserror::Error;
@@ -15,6 +15,41 @@ const STAGES: &[(&str, ScriptStage)] = &[
     ("indexes", ScriptStage::Indexes),
     ("seed", ScriptStage::Seed),
 ];
+
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
+
+#[cfg(test)]
+static READINESS_OVERRIDE: OnceLock<Mutex<Option<Result<(), sqlx::Error>>>> = OnceLock::new();
+#[cfg(test)]
+static LIVENESS_OVERRIDE: OnceLock<Mutex<Option<Result<(), sqlx::Error>>>> = OnceLock::new();
+
+#[cfg(test)]
+fn readiness_override_take() -> Option<Result<(), sqlx::Error>> {
+    READINESS_OVERRIDE
+        .get()
+        .and_then(|lock| lock.lock().expect("override poisoned").take())
+}
+
+#[cfg(test)]
+pub(crate) fn set_readiness_override(result: Option<Result<(), sqlx::Error>>) {
+    let lock = READINESS_OVERRIDE.get_or_init(|| Mutex::new(None));
+    *lock.lock().expect("override poisoned") = result;
+}
+
+#[cfg(test)]
+fn liveness_override_take() -> Option<Result<(), sqlx::Error>> {
+    LIVENESS_OVERRIDE
+        .get()
+        .and_then(|lock| lock.lock().expect("override poisoned").take())
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn set_liveness_override(result: Option<Result<(), sqlx::Error>>) {
+    let lock = LIVENESS_OVERRIDE.get_or_init(|| Mutex::new(None));
+    *lock.lock().expect("override poisoned") = result;
+}
 
 #[derive(Debug, Clone, Copy)]
 enum ScriptStage {
@@ -92,9 +127,50 @@ pub async fn run(pool: &PgPool, config: &DatabaseConfig) -> Result<(), Bootstrap
         }
 
         info!(stage = %stage, count = files.len(), "applying bootstrap scripts");
+        metrics::counter!(
+            "db_bootstrap_batches_total",
+            "stage" => stage.label(),
+            "status" => "started"
+        )
+        .increment(1);
         for path in files {
-            apply_script(pool, &path).await?;
+            let timer = Instant::now();
+            match apply_script(pool, &path).await {
+                Ok(_) => {
+                    metrics::counter!(
+                        "db_bootstrap_scripts_total",
+                        "stage" => stage.label(),
+                        "status" => "ok"
+                    )
+                    .increment(1);
+                    metrics::histogram!(
+                        "db_bootstrap_script_duration_seconds",
+                        "stage" => stage.label()
+                    )
+                    .record(timer.elapsed().as_secs_f64());
+                }
+                Err(err) => {
+                    metrics::counter!(
+                        "db_bootstrap_scripts_total",
+                        "stage" => stage.label(),
+                        "status" => "error"
+                    )
+                    .increment(1);
+                    metrics::histogram!(
+                        "db_bootstrap_script_duration_seconds",
+                        "stage" => stage.label()
+                    )
+                    .record(timer.elapsed().as_secs_f64());
+                    return Err(err);
+                }
+            }
         }
+        metrics::counter!(
+            "db_bootstrap_batches_total",
+            "stage" => stage.label(),
+            "status" => "completed"
+        )
+        .increment(1);
     }
 
     Ok(())
@@ -102,15 +178,40 @@ pub async fn run(pool: &PgPool, config: &DatabaseConfig) -> Result<(), Bootstrap
 
 /// Simple liveness check used during startup.
 pub async fn ensure_liveness(pool: &PgPool) -> Result<(), sqlx::Error> {
-    sqlx::query("SELECT 1").execute(pool).await.map(|_| ())
+    #[cfg(test)]
+    if let Some(result) = liveness_override_take() {
+        return result;
+    }
+
+    match sqlx::query("SELECT 1").execute(pool).await {
+        Ok(_) => {
+            metrics::counter!("db_liveness_checks_total", "status" => "ok").increment(1);
+            Ok(())
+        }
+        Err(err) => {
+            metrics::counter!("db_liveness_checks_total", "status" => "error").increment(1);
+            Err(err)
+        }
+    }
 }
 
 /// Readiness probe that expects the health stored procedure to exist.
 pub async fn ensure_readiness(pool: &PgPool) -> Result<(), sqlx::Error> {
-    sqlx::query("CALL sp_healthz()")
-        .execute(pool)
-        .await
-        .map(|_| ())
+    #[cfg(test)]
+    if let Some(result) = readiness_override_take() {
+        return result;
+    }
+
+    match sqlx::query("CALL sp_healthz()").execute(pool).await {
+        Ok(_) => {
+            metrics::counter!("db_readiness_checks_total", "status" => "ok").increment(1);
+            Ok(())
+        }
+        Err(err) => {
+            metrics::counter!("db_readiness_checks_total", "status" => "error").increment(1);
+            Err(err)
+        }
+    }
 }
 
 fn collect_sql_files(dir: &Path) -> Result<Vec<PathBuf>, BootstrapError> {
@@ -183,6 +284,8 @@ async fn apply_script(pool: &PgPool, path: &Path) -> Result<(), BootstrapError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::postgres::PgPoolOptions;
+    use std::io;
     use tempfile::tempdir;
 
     #[test]
@@ -201,5 +304,34 @@ mod tests {
                 .to_string_lossy()
                 .starts_with("001")
         );
+    }
+
+    fn test_pool() -> PgPool {
+        PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://postgres:postgres@localhost:5432/rustygpt_test")
+            .expect("lazy pool creation should succeed")
+    }
+
+    #[tokio::test]
+    async fn ensure_liveness_uses_override() {
+        let pool = test_pool();
+        super::set_liveness_override(Some(Ok(())));
+        assert!(super::ensure_liveness(&pool).await.is_ok());
+        super::set_liveness_override(None);
+    }
+
+    #[tokio::test]
+    async fn ensure_readiness_override_errors() {
+        let pool = test_pool();
+        super::set_readiness_override(Some(Err(sqlx::Error::Io(io::Error::new(
+            io::ErrorKind::Other,
+            "simulated failure",
+        )))));
+
+        let result = super::ensure_readiness(&pool).await;
+        assert!(result.is_err());
+
+        super::set_readiness_override(None);
     }
 }

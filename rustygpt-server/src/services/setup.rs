@@ -6,11 +6,11 @@ pub async fn is_setup(pool: &Option<PgPool>) -> Result<bool, Error> {
     // Check if database pool is available
     let pool_ref = pool.as_ref().ok_or(Error::PoolClosed)?;
 
-    let row = sqlx::query!("SELECT is_setup() AS configured")
+    let configured = sqlx::query_scalar::<_, Option<bool>>("SELECT is_setup()")
         .fetch_one(pool_ref)
         .await?;
 
-    Ok(row.configured.unwrap_or(false))
+    Ok(configured.unwrap_or(false))
 }
 
 /// Performs the setup.
@@ -24,16 +24,14 @@ pub async fn init_setup(pool: &Option<PgPool>, config: &SetupRequest) -> Result<
     let pool_ref = pool.as_ref().ok_or(Error::PoolClosed)?;
 
     // Perform the setup
-    let result = sqlx::query!(
-        "SELECT init_setup($1, $2, $3) AS success",
-        config.username,
-        config.email,
-        config.password,
-    )
-    .fetch_one(pool_ref)
-    .await?;
+    let result = sqlx::query_scalar::<_, Option<bool>>("SELECT init_setup($1, $2, $3)")
+        .bind(&config.username)
+        .bind(&config.email)
+        .bind(&config.password)
+        .fetch_one(pool_ref)
+        .await?;
 
-    Ok(result.success.unwrap_or(false))
+    Ok(result.unwrap_or(false))
 }
 
 #[cfg(test)]

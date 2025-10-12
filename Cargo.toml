@@ -55,6 +55,8 @@ serde_json = "1.0"
 serde_yml = "0.0"
 toml = "0.9"
 cookie = "0.18"
+metrics = "0.24"
+metrics-exporter-prometheus = "0.17"
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }
@@ -128,7 +130,7 @@ url = { version = "2.5", features = ["serde"] }
 directories = "6.0"
 
 # Logging and tracing
-tracing = "0.1"
+tracing = { version = "0.1", features = ["std"] }
 tracing-subscriber = { version = "0.3", features = [
   "env-filter",
   "fmt",

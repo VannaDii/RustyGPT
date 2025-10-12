@@ -5,10 +5,14 @@
 #[cfg(test)]
 mod tests {
     use super::super::tracer::*;
+    use crate::middleware::request_context::RequestContext;
     use axum::body::Body;
-    use axum::http::{Method, Request, Version};
+    use axum::http::{Method, Request, Response, StatusCode, Version};
     use std::time::Duration;
-    use tower_http::classify::ServerErrorsFailureClass;
+    use tower_http::{
+        classify::ServerErrorsFailureClass,
+        trace::{MakeSpan, OnResponse},
+    };
     use tracing::{Level, span};
     use tracing_subscriber::util::SubscriberInitExt;
 
@@ -311,5 +315,41 @@ mod tests {
             ServerErrorsFailureClass::StatusCode(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
         let latency = Duration::from_millis(100);
         on_failure_handler(error, latency, &span);
+    }
+
+    #[test]
+    fn http_metrics_recorded_for_response() {
+        let handle = crate::server::metrics_handle();
+
+        let mut request = Request::builder()
+            .method(Method::GET)
+            .uri("/metrics-test")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(RequestContext {
+            request_id: "req-1".into(),
+            user_id: None,
+        });
+
+        let mut make_span = HttpMakeSpan::default();
+        let span = make_span.make_span(&request);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::empty())
+            .unwrap();
+
+        HttpOnResponse::default().on_response(&response, Duration::from_millis(10), &span);
+
+        let metrics = handle.render();
+        assert!(
+            metrics.contains(
+                "http_requests_total{method=\"GET\",path=\"/metrics-test\",status=\"200\"}"
+            ),
+            "expected counter line for request metrics"
+        );
+        assert!(
+            metrics.contains("http_request_duration_seconds"),
+            "expected histogram samples for request duration"
+        );
     }
 }
