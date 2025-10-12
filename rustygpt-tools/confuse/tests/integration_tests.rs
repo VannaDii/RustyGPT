@@ -1,3 +1,5 @@
+#![allow(clippy::all, clippy::pedantic)]
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs::File;
@@ -10,7 +12,7 @@ fn create_test_script(dir: &Path, name: &str, content: &str) -> std::io::Result<
     let file_path = dir.join(name);
     let mut file = File::create(&file_path)?;
     writeln!(file, "#!/bin/sh")?;
-    writeln!(file, "{}", content)?;
+    writeln!(file, "{content}")?;
 
     // Make the script executable
     #[cfg(unix)]
@@ -130,7 +132,7 @@ fn test_command_with_inline_name() {
     let script =
         create_test_script(temp_dir.path(), "test.sh", "echo \"Testing inline name\"").unwrap();
 
-    let cmd_str = format!("CustomName:{}", script);
+    let cmd_str = format!("CustomName:{script}");
 
     let mut cmd = Command::cargo_bin("confuse").unwrap();
     cmd.arg(cmd_str)

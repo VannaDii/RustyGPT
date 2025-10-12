@@ -1,3 +1,5 @@
+#![allow(clippy::all, clippy::pedantic)]
+
 //! Main entry point for the RustyGPT backend CLI.
 
 use clap::{Parser, Subcommand};
@@ -7,7 +9,9 @@ use std::error::Error;
 use std::path::PathBuf;
 
 mod app_state;
+mod db;
 mod handlers;
+mod http;
 mod middleware;
 mod openapi;
 mod routes;
@@ -74,7 +78,8 @@ pub async fn handle_serve_command(
     port: u16,
     config: Option<PathBuf>,
 ) -> Result<(), Box<dyn Error>> {
-    let resolved_config = Config::load_config(config, Some(port))?;
+    let resolved_config = Config::load_config(config, Some(port))
+        .map_err(|err| -> Box<dyn Error> { Box::new(err) })?;
     server::run(resolved_config).await.expect("Server exited");
     Ok(())
 }

@@ -1,14 +1,16 @@
 use crate::{
     app_state::AppState,
-    handlers::{conversation::*, streaming::SharedState},
+    handlers::{
+        conversation::*,
+        streaming::{SharedState, SseCoordinator},
+    },
 };
 use axum::{
     extract::{Extension, Json, Path},
     http::StatusCode,
 };
 use shared::models::conversation::SendMessageRequest;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::Mutex;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -40,7 +42,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_valid_data() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 
@@ -63,7 +65,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_invalid_conversation_id() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
         let invalid_conversation_id = "invalid-uuid".to_string();
         let user_id = Uuid::new_v4();
 
@@ -86,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_invalid_user_id() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
         let conversation_id = Uuid::new_v4().to_string();
 
         let request = SendMessageRequest {
@@ -108,7 +110,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_with_empty_content() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 
@@ -140,7 +142,7 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_response_content_type() {
         let app_state = Arc::new(AppState::default());
-        let shared_state: SharedState = Arc::new(Mutex::new(HashMap::new()));
+        let shared_state: SharedState = Arc::new(SseCoordinator::new(16, "evt_".into()));
         let conversation_id = Uuid::new_v4().to_string();
         let user_id = Uuid::new_v4();
 

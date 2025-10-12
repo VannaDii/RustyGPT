@@ -96,7 +96,7 @@ pub fn handle_dynamic_route_keys(keys: &mut HashSet<String>, src_dir: &Path) -> 
     let admin_route_pattern = Regex::new(r"enum\s+AdminRoute\s*\{([\s\S]*?)\}")?;
     if let Some(cap) = admin_route_pattern.captures(&routes_content) {
         if let Some(enum_content) = cap.get(1) {
-            let variant_pattern = Regex::new(r##"#\[at\("([^"]+)"\)\]\s*([A-Za-z0-9_]+)"##)?;
+            let variant_pattern = Regex::new(r#"#\[at\("([^"]+)"\)\]\s*([A-Za-z0-9_]+)"#)?;
 
             for var_cap in variant_pattern.captures_iter(enum_content.as_str()) {
                 if let (Some(path), Some(_variant)) = (var_cap.get(1), var_cap.get(2)) {
@@ -120,10 +120,11 @@ pub fn handle_dynamic_route_keys(keys: &mut HashSet<String>, src_dir: &Path) -> 
 }
 
 /// Helper function to find a file by name in a directory (recursively)
+#[allow(clippy::unnecessary_wraps)]
 pub fn find_file(dir: &Path, filename: &str) -> Result<Option<PathBuf>> {
     for entry in WalkDir::new(dir)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
     {
         if entry.file_name().to_string_lossy() == filename {

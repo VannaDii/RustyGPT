@@ -200,6 +200,7 @@ pub fn create_merged_translation(
 }
 
 #[cfg(test)]
+#[allow(clippy::similar_names)]
 mod tests {
     use super::*;
     use assert_fs::prelude::*;

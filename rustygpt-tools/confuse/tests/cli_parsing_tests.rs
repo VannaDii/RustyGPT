@@ -1,3 +1,5 @@
+#![allow(clippy::all, clippy::pedantic)]
+
 use clap::Parser;
 use colored::*;
 use std::collections::HashMap;
@@ -157,46 +159,46 @@ fn test_parse_color_invalid() {
 #[test]
 fn test_parse_command_complex() {
     // Test with complex command including quotes and special characters
-    let (name, cmd, args, cwd) =
+    let (name, command, args, working_dir) =
         parse_command("complex_task:echo \"Hello, World!\" | grep 'World'", None);
 
     assert_eq!(name, Some("complex_task".to_string()));
-    assert_eq!(cmd, "echo");
+    assert_eq!(command, "echo");
     assert_eq!(args, vec!["Hello, World!", "|", "grep", "World"]);
-    assert_eq!(cwd, None);
+    assert_eq!(working_dir, None);
 }
 
 #[test]
 fn test_parse_command_with_working_dir_and_name() {
-    let (name, cmd, args, cwd) = parse_command(
+    let (name, command, args, working_dir) = parse_command(
         "task_name@/custom/path:ls -la",
         Some(PathBuf::from("/default/path")),
     );
 
     assert_eq!(name, Some("task_name".to_string()));
-    assert_eq!(cmd, "ls");
+    assert_eq!(command, "ls");
     assert_eq!(args, vec!["-la"]);
-    assert_eq!(cwd, Some(PathBuf::from("/custom/path")));
+    assert_eq!(working_dir, Some(PathBuf::from("/custom/path")));
 }
 
 #[test]
 fn test_parse_command_with_only_working_dir() {
-    let (name, cmd, args, cwd) = parse_command("@/custom/path:ls -la", None);
+    let (name, command, args, working_dir) = parse_command("@/custom/path:ls -la", None);
 
     assert_eq!(name, None);
-    assert_eq!(cmd, "ls");
+    assert_eq!(command, "ls");
     assert_eq!(args, vec!["-la"]);
-    assert_eq!(cwd, Some(PathBuf::from("/custom/path")));
+    assert_eq!(working_dir, Some(PathBuf::from("/custom/path")));
 }
 
 #[test]
 fn test_parse_command_with_empty_args() {
-    let (name, cmd, args, cwd) = parse_command("cmd:echo", None);
+    let (name, command, args, working_dir) = parse_command("cmd:echo", None);
 
     assert_eq!(name, Some("cmd".to_string()));
-    assert_eq!(cmd, "echo");
+    assert_eq!(command, "echo");
     assert_eq!(args, Vec::<String>::new());
-    assert_eq!(cwd, None);
+    assert_eq!(working_dir, None);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::Write;
 
-use shared::config::server::Config;
+use shared::config::server::{Config, Profile};
 
 /// Generates a configuration file in the specified format.
 ///
@@ -11,16 +11,18 @@ use shared::config::server::Config;
 /// # Errors
 /// Returns an error if the format is unsupported or if writing the file fails.
 pub fn generate_config(format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::with_defaults();
+    let config = Config::default_for_profile(Profile::Dev);
     let file_name = match format {
         "yaml" => "config.yaml",
         "json" => "config.json",
-        _ => return Err("Unsupported format. Use 'yaml' or 'json'.".into()),
+        "toml" => "config.toml",
+        _ => return Err("Unsupported format. Use 'yaml', 'json', or 'toml'.".into()),
     };
 
     let serialized = match format {
-        "yaml" => serde_yaml::to_string(&config)?,
+        "yaml" => serde_yml::to_string(&config)?,
         "json" => serde_json::to_string_pretty(&config)?,
+        "toml" => toml::to_string_pretty(&config)?,
         _ => unreachable!(),
     };
 
@@ -86,13 +88,35 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
+    fn test_generate_config_toml_format() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+
+        let result = generate_config("toml");
+        assert!(result.is_ok());
+
+        let path = temp_dir.path().join("config.toml");
+        assert!(path.exists());
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(!content.is_empty());
+        assert!(content.contains("server"));
+
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
     fn test_generate_config_unsupported_format() {
         let result = generate_config("xml");
         assert!(result.is_err());
 
         let error_message = result.unwrap_err().to_string();
         assert!(error_message.contains("Unsupported format"));
-        assert!(error_message.contains("yaml") || error_message.contains("json"));
+        assert!(error_message.contains("yaml"));
+        assert!(error_message.contains("json"));
+        assert!(error_message.contains("toml"));
     }
 
     #[test]
@@ -121,6 +145,9 @@ mod tests {
 
         let result2 = generate_config("json.ext");
         assert!(result2.is_err());
+
+        let result3 = generate_config("toml.txt");
+        assert!(result3.is_err());
     }
 
     #[test]
@@ -133,27 +160,33 @@ mod tests {
         let result = std::panic::catch_unwind(|| {
             std::env::set_current_dir(temp_dir.path()).unwrap();
 
-            // Generate both formats
+            // Generate all supported formats
             let yaml_result = generate_config("yaml");
             let json_result = generate_config("json");
+            let toml_result = generate_config("toml");
 
             assert!(yaml_result.is_ok());
             assert!(json_result.is_ok());
+            assert!(toml_result.is_ok());
 
             // Check for files in temp directory using full paths
             let yaml_path = temp_dir.path().join("config.yaml");
             let json_path = temp_dir.path().join("config.json");
+            let toml_path = temp_dir.path().join("config.toml");
 
             // Both files should exist in temp directory
             assert!(yaml_path.exists());
             assert!(json_path.exists());
+            assert!(toml_path.exists());
 
             // Both should have content
             let yaml_content = fs::read_to_string(&yaml_path).unwrap();
             let json_content = fs::read_to_string(&json_path).unwrap();
+            let toml_content = fs::read_to_string(&toml_path).unwrap();
 
             assert!(!yaml_content.is_empty());
             assert!(!json_content.is_empty());
+            assert!(!toml_content.is_empty());
         });
 
         // Always restore directory, even on panic

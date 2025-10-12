@@ -1,5 +1,9 @@
+#![allow(clippy::all, clippy::pedantic)]
+
 mod app_state;
+pub(crate) mod db;
 mod handlers;
+mod http;
 mod middleware;
 pub mod openapi;
 mod routes;

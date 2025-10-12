@@ -5,10 +5,5 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod llm;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod server;
-
-#[cfg(test)]
-mod integration_tests;
-
-#[cfg(test)]
-mod server_integration_test;

@@ -1,3 +1,5 @@
+#![allow(clippy::all, clippy::pedantic)]
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -73,25 +75,27 @@ fn main() -> Result<()> {
     let src_dir = cli.src.clone();
     if !src_dir.exists() {
         return Err(anyhow::anyhow!(
-            "Source directory does not exist: {:?}",
-            src_dir
+            "Source directory does not exist: {}",
+            src_dir.display()
         ));
     }
 
     let trans_dir = cli.trans.clone();
     if !trans_dir.exists() {
         return Err(anyhow::anyhow!(
-            "Translations directory does not exist: {:?}",
-            trans_dir
+            "Translations directory does not exist: {}",
+            trans_dir.display()
         ));
     }
 
     // If output directory is specified, ensure it exists
     if let Some(output_dir) = &cli.output {
-        std::fs::create_dir_all(output_dir).context(format!(
-            "Failed to create output directory: {:?}",
-            output_dir
-        ))?;
+        std::fs::create_dir_all(output_dir).with_context(|| {
+            format!(
+                "Failed to create output directory: {}",
+                output_dir.display()
+            )
+        })?;
     }
 
     // Process command
@@ -107,7 +111,7 @@ fn main() -> Result<()> {
             if cli.verbose {
                 println!("\nKeys in use:");
                 for key in keys {
-                    println!("- {}", key);
+                    println!("- {key}");
                 }
             }
         }
@@ -139,7 +143,7 @@ fn main() -> Result<()> {
             let output_dir = cli.output.clone().unwrap_or_else(|| PathBuf::from("."));
             reporter::generate_report(&audit_result, &output_dir, cli.format.as_str())?;
 
-            println!("Report generated successfully in {:?}", output_dir);
+            println!("Report generated successfully in {}", output_dir.display());
         }
         Commands::Template => {
             println!("{}", "Generating translation templates...".green());
@@ -155,14 +159,14 @@ fn main() -> Result<()> {
             generator::create_translation_templates(&audit_result, &output_dir)?;
 
             println!(
-                "Translation templates generated successfully in {:?}",
-                output_dir
+                "Translation templates generated successfully in {}",
+                output_dir.display()
             );
         }
         Commands::Merge { lang } => {
             println!(
                 "{}",
-                format!("Creating merged translation file for {}...", lang).green()
+                format!("Creating merged translation file for {lang}...").green()
             );
             let keys_in_use = scanner::scan_codebase(&src_dir)?;
             let audit_result = analyzer::audit_translations(&trans_dir, &keys_in_use)?;

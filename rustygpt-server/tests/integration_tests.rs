@@ -1,4 +1,4 @@
-//! Integration tests for the RustyGPT server CLI.
+//! Integration tests for the `RustyGPT` server CLI.
 
 use serial_test::serial;
 use std::env;

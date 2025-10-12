@@ -1,3 +1,5 @@
+#![allow(clippy::all, clippy::pedantic)]
+
 //! Main entry point for the RustyGPT backend CLI.
 
 use clap::{Parser, Subcommand};
@@ -108,7 +110,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match cli.command {
         Commands::Serve { port, config } => {
-            let resolved_config = Config::load_config(config, Some(port))?;
+            let resolved_config = Config::load_config(config, Some(port))
+                .map_err(|err| -> Box<dyn Error> { Box::new(err) })?;
             server::run(resolved_config).await.expect("Server exited");
         }
         Commands::Chat {

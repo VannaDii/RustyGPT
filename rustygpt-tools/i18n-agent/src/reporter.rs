@@ -375,6 +375,7 @@ fn generate_html_report(audit_result: &AuditResult, output_dir: &Path) -> Result
 }
 
 #[cfg(test)]
+#[allow(clippy::similar_names)]
 mod tests {
     use super::*;
     use assert_fs::TempDir;

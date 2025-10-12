@@ -262,32 +262,31 @@ pub fn set_value_by_path(json: &mut Value, key_path: &str, new_value: Value) -> 
             if let Value::Object(map) = current {
                 map.insert(part.to_string(), new_value);
                 return true;
-            } else {
-                return false;
             }
-        } else {
-            // Navigate deeper
-            if let Value::Object(map) = current {
-                if !map.contains_key(*part) {
-                    // Create intermediate objects if they don't exist
-                    map.insert(part.to_string(), Value::Object(Map::new()));
-                }
-
-                if let Some(next) = map.get_mut(*part) {
-                    current = next;
-                } else {
-                    return false;
-                }
-            } else {
-                return false;
-            }
+            return false;
         }
+
+        // Navigate deeper
+        if let Value::Object(map) = current {
+            if !map.contains_key(*part) {
+                // Create intermediate objects if they don't exist
+                map.insert(part.to_string(), Value::Object(Map::new()));
+            }
+
+            if let Some(next) = map.get_mut(*part) {
+                current = next;
+                continue;
+            }
+            return false;
+        }
+        return false;
     }
 
     false
 }
 
 #[cfg(test)]
+#[allow(clippy::similar_names)]
 mod tests {
     use super::*;
     use assert_fs::prelude::*;
@@ -387,8 +386,8 @@ mod tests {
         let temp_dir = TempDir::new()?;
 
         // Create English translation file (reference language)
-        let en_file = temp_dir.child("en.json");
-        en_file.write_str(
+        let english_file = temp_dir.child("en.json");
+        english_file.write_str(
             r#"
             {
                 "common": {
@@ -406,8 +405,8 @@ mod tests {
         )?;
 
         // Create Spanish translation file (missing some keys)
-        let es_file = temp_dir.child("es.json");
-        es_file.write_str(
+        let spanish_file = temp_dir.child("es.json");
+        spanish_file.write_str(
             r#"
             {
                 "common": {
@@ -443,16 +442,18 @@ mod tests {
         assert!(audit_result.translations.contains_key("es"));
 
         // Check English translation data
-        let en_data = &audit_result.translations["en"];
-        assert_eq!(en_data.all_keys.len(), 4);
-        assert_eq!(en_data.unused_keys.len(), 1);
-        assert!(en_data.unused_keys.contains("common.button.reset"));
+        let english_translation = &audit_result.translations["en"];
+        assert_eq!(english_translation.all_keys.len(), 4);
+        assert_eq!(english_translation.unused_keys.len(), 1);
+        assert!(english_translation
+            .unused_keys
+            .contains("common.button.reset"));
 
         // Check Spanish translation data
-        let es_data = &audit_result.translations["es"];
-        assert_eq!(es_data.all_keys.len(), 4);
-        assert_eq!(es_data.unused_keys.len(), 1);
-        assert!(es_data.unused_keys.contains("unused.key"));
+        let spanish_translation = &audit_result.translations["es"];
+        assert_eq!(spanish_translation.all_keys.len(), 4);
+        assert_eq!(spanish_translation.unused_keys.len(), 1);
+        assert!(spanish_translation.unused_keys.contains("unused.key"));
 
         Ok(())
     }
@@ -468,32 +469,32 @@ mod tests {
         let mut translations = HashMap::new();
 
         // English has all keys
-        let mut en_all_keys = HashSet::new();
-        en_all_keys.insert("common.button.submit".to_string());
-        en_all_keys.insert("common.button.cancel".to_string());
-        en_all_keys.insert("profile.title".to_string());
-        en_all_keys.insert("unused.key".to_string());
+        let mut english_all_keys = HashSet::new();
+        english_all_keys.insert("common.button.submit".to_string());
+        english_all_keys.insert("common.button.cancel".to_string());
+        english_all_keys.insert("profile.title".to_string());
+        english_all_keys.insert("unused.key".to_string());
 
-        let en_data = TranslationData {
+        let english_data = TranslationData {
             file_path: PathBuf::from("en.json"),
-            all_keys: en_all_keys,
+            all_keys: english_all_keys,
             unused_keys: HashSet::from(["unused.key".to_string()]),
             content: json!({}),
         };
-        translations.insert("en".to_string(), en_data);
+        translations.insert("en".to_string(), english_data);
 
         // Spanish is missing some keys
-        let mut es_all_keys = HashSet::new();
-        es_all_keys.insert("common.button.submit".to_string());
-        es_all_keys.insert("profile.title".to_string());
+        let mut spanish_all_keys = HashSet::new();
+        spanish_all_keys.insert("common.button.submit".to_string());
+        spanish_all_keys.insert("profile.title".to_string());
 
-        let es_data = TranslationData {
+        let spanish_data = TranslationData {
             file_path: PathBuf::from("es.json"),
-            all_keys: es_all_keys,
+            all_keys: spanish_all_keys,
             unused_keys: HashSet::new(),
             content: json!({}),
         };
-        translations.insert("es".to_string(), es_data);
+        translations.insert("es".to_string(), spanish_data);
 
         let audit_result = AuditResult {
             keys_in_use,
@@ -502,15 +503,15 @@ mod tests {
         };
 
         // Test get_missing_translations
-        let missing_en = get_missing_translations(&audit_result, "en");
-        let missing_es = get_missing_translations(&audit_result, "es");
-        let missing_fr = get_missing_translations(&audit_result, "fr"); // Non-existent language
+        let missing_english = get_missing_translations(&audit_result, "en");
+        let missing_spanish = get_missing_translations(&audit_result, "es");
+        let missing_french = get_missing_translations(&audit_result, "fr"); // Non-existent language
 
         // Verify results
-        assert_eq!(missing_en.len(), 0); // Reference language has no missing translations
-        assert_eq!(missing_es.len(), 1);
-        assert!(missing_es.contains("common.button.cancel"));
-        assert_eq!(missing_fr.len(), 0); // Non-existent language returns empty set
+        assert_eq!(missing_english.len(), 0); // Reference language has no missing translations
+        assert_eq!(missing_spanish.len(), 1);
+        assert!(missing_spanish.contains("common.button.cancel"));
+        assert_eq!(missing_french.len(), 0); // Non-existent language returns empty set
 
         Ok(())
     }
@@ -527,32 +528,32 @@ mod tests {
         let mut translations = HashMap::new();
 
         // English has all keys
-        let mut en_all_keys = HashSet::new();
-        en_all_keys.insert("common.button.submit".to_string());
-        en_all_keys.insert("common.button.cancel".to_string());
-        en_all_keys.insert("profile.title".to_string());
-        en_all_keys.insert("profile.description".to_string());
+        let mut english_all_keys = HashSet::new();
+        english_all_keys.insert("common.button.submit".to_string());
+        english_all_keys.insert("common.button.cancel".to_string());
+        english_all_keys.insert("profile.title".to_string());
+        english_all_keys.insert("profile.description".to_string());
 
-        let en_data = TranslationData {
+        let english_data = TranslationData {
             file_path: PathBuf::from("en.json"),
-            all_keys: en_all_keys,
+            all_keys: english_all_keys,
             unused_keys: HashSet::new(),
             content: json!({}),
         };
-        translations.insert("en".to_string(), en_data);
+        translations.insert("en".to_string(), english_data);
 
         // Spanish has 50% coverage
-        let mut es_all_keys = HashSet::new();
-        es_all_keys.insert("common.button.submit".to_string());
-        es_all_keys.insert("profile.title".to_string());
+        let mut spanish_all_keys = HashSet::new();
+        spanish_all_keys.insert("common.button.submit".to_string());
+        spanish_all_keys.insert("profile.title".to_string());
 
-        let es_data = TranslationData {
+        let spanish_data = TranslationData {
             file_path: PathBuf::from("es.json"),
-            all_keys: es_all_keys,
+            all_keys: spanish_all_keys,
             unused_keys: HashSet::new(),
             content: json!({}),
         };
-        translations.insert("es".to_string(), es_data);
+        translations.insert("es".to_string(), spanish_data);
 
         // French has 75% coverage
         let mut fr_all_keys = HashSet::new();
@@ -575,16 +576,16 @@ mod tests {
         };
 
         // Test calculate_coverage
-        let en_coverage = calculate_coverage(&audit_result, "en");
-        let es_coverage = calculate_coverage(&audit_result, "es");
-        let fr_coverage = calculate_coverage(&audit_result, "fr");
-        let de_coverage = calculate_coverage(&audit_result, "de"); // Non-existent language
+        let english_coverage = calculate_coverage(&audit_result, "en");
+        let spanish_coverage = calculate_coverage(&audit_result, "es");
+        let french_coverage = calculate_coverage(&audit_result, "fr");
+        let german_coverage = calculate_coverage(&audit_result, "de"); // Non-existent language
 
         // Verify results
-        assert_eq!(en_coverage, 100.0); // Reference language has 100% coverage
-        assert_eq!(es_coverage, 50.0); // 2 out of 4 keys
-        assert_eq!(fr_coverage, 75.0); // 3 out of 4 keys
-        assert_eq!(de_coverage, 0.0); // Non-existent language has 0% coverage
+        assert_eq!(english_coverage, 100.0); // Reference language has 100% coverage
+        assert_eq!(spanish_coverage, 50.0); // 2 out of 4 keys
+        assert_eq!(french_coverage, 75.0); // 3 out of 4 keys
+        assert_eq!(german_coverage, 0.0); // Non-existent language has 0% coverage
 
         Ok(())
     }

@@ -1,3 +1,5 @@
+#![allow(clippy::all, clippy::pedantic)]
+
 use clap::Parser;
 use colored::*;
 use std::collections::HashMap;

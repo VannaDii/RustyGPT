@@ -20,7 +20,7 @@ regex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+serde_yml = { workspace = true }
 shared = { workspace = true, features = ["server"] }
 sqlx = { workspace = true }
 tokio = { workspace = true }
@@ -30,6 +30,8 @@ tower-http = { workspace = true }
 tower-service = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+cookie = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
@@ -39,3 +41,4 @@ uuid = { workspace = true }
 axum-test = { workspace = true }
 serial_test = { workspace = true }
 tower = { workspace = true }
+tempfile = { workspace = true }
