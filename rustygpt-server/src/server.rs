@@ -217,6 +217,7 @@ pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
             request_context::assign_request_id,
         ))
         .nest("/api", api_router)
+        .merge(routes::well_known::create_router_well_known())
         .merge(openapi_routes())
         .merge(static_files_service)
         .with_state(state)

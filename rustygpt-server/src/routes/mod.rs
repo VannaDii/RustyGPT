@@ -3,6 +3,7 @@ pub mod copilot;
 pub mod openapi;
 pub mod protected;
 pub mod setup;
+pub mod well_known;
 
 #[cfg(test)]
 mod auth_test;
