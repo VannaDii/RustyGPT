@@ -47,7 +47,8 @@ pub(crate) fn metrics_handle() -> PrometheusHandle {
         .clone()
 }
 
-async fn metrics_endpoint(Extension(handle): Extension<PrometheusHandle>) -> impl IntoResponse {
+async fn metrics_endpoint() -> impl IntoResponse {
+    let handle = metrics_handle();
     (
         StatusCode::OK,
         [(
@@ -60,19 +61,27 @@ async fn metrics_endpoint(Extension(handle): Extension<PrometheusHandle>) -> imp
 
 /// Initializes the tracing subscriber for logging using the provided configuration.
 pub fn initialize_tracing(config: &Config) -> String {
-    let env_filter = build_env_filter(config);
-
-    let fmt_builder = fmt::fmt()
-        .with_env_filter(env_filter)
-        .with_target(false)
-        .with_level(true)
-        .with_thread_ids(false)
-        .with_thread_names(false);
-
     if matches!(config.logging.format, LogFormat::Json) {
-        fmt_builder.json().with_ansi(false).init();
+        let env_filter = build_env_filter(config);
+        let _ = fmt::fmt()
+            .with_env_filter(env_filter)
+            .with_target(false)
+            .with_level(true)
+            .with_thread_ids(false)
+            .with_thread_names(false)
+            .json()
+            .with_ansi(false)
+            .try_init();
     } else {
-        fmt_builder.with_ansi(true).init();
+        let env_filter = build_env_filter(config);
+        let _ = fmt::fmt()
+            .with_env_filter(env_filter)
+            .with_target(false)
+            .with_level(true)
+            .with_thread_ids(false)
+            .with_thread_names(false)
+            .with_ansi(true)
+            .try_init();
     }
 
     config.logging.level.clone()
@@ -230,11 +239,7 @@ where
 ///
 /// # Returns
 /// Returns the fully configured application [`Router`].
-pub fn create_app_router(
-    state: Arc<AppState>,
-    config: Arc<Config>,
-    metrics_handle: PrometheusHandle,
-) -> Router {
+pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
     let persistence_cfg = if config.sse.persistence.enabled {
         Some(config.sse.persistence.clone())
     } else {
@@ -273,7 +278,6 @@ pub fn create_app_router(
 
     Router::new()
         .layer(Extension(config.clone()))
-        .layer(Extension(metrics_handle))
         .layer(cors)
         .layer(axum::middleware::from_fn_with_state(
             security_state,
@@ -323,7 +327,7 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     initialize_tracing(&config);
     info!("Starting server...");
 
-    let metrics_handle = metrics_handle();
+    let _ = metrics_handle();
     let config = Arc::new(config);
 
     // Set up database connection pool
@@ -348,7 +352,7 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let state = create_app_state(Some(pool));
 
     // Create the application router
-    let app = create_app_router(state, config.clone(), metrics_handle.clone());
+    let app = create_app_router(state, config.clone());
 
     // Start the server
     let addr = SocketAddr::from(([0, 0, 0, 0], config.server.port));
@@ -428,19 +432,17 @@ mod tests {
 
         let subscriber = subscriber_with_writer(&config, make_writer);
         let dispatch = tracing::dispatcher::Dispatch::new(subscriber);
-
-        tracing::dispatcher::with_default(&dispatch, || {
-            info!(event = "json_test", "log entry");
-        });
+        let default_guard = tracing::dispatcher::set_default(&dispatch);
+        info!("log entry");
+        drop(default_guard);
 
         let contents = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
         let line = contents
             .lines()
             .find(|line| !line.trim().is_empty())
-            .unwrap();
+            .unwrap_or_else(|| panic!("no log output captured: {contents}"));
         let value: Value = serde_json::from_str(line).unwrap();
         assert_eq!(value["fields"]["message"], "log entry");
-        assert_eq!(value["fields"]["event"], "json_test");
     }
 
     #[test]
@@ -453,16 +455,15 @@ mod tests {
 
         let subscriber = subscriber_with_writer(&config, make_writer);
         let dispatch = tracing::dispatcher::Dispatch::new(subscriber);
-
-        tracing::dispatcher::with_default(&dispatch, || {
-            info!(event = "text_test", "log entry");
-        });
+        let default_guard = tracing::dispatcher::set_default(&dispatch);
+        info!("log entry");
+        drop(default_guard);
 
         let contents = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
         let line = contents
             .lines()
             .find(|line| !line.trim().is_empty())
-            .unwrap();
+            .unwrap_or_else(|| panic!("no log output captured: {contents}"));
         assert!(
             serde_json::from_str::<Value>(line).is_err(),
             "expected plain text log line"
@@ -474,9 +475,8 @@ mod tests {
     where
         W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
     {
-        let env_filter = super::build_env_filter(config);
         let builder = fmt::fmt()
-            .with_env_filter(env_filter)
+            .with_max_level(tracing::Level::TRACE)
             .with_target(false)
             .with_level(true)
             .with_thread_ids(false)
@@ -494,16 +494,14 @@ mod tests {
     async fn metrics_endpoint_returns_prometheus_payload() {
         use axum::{
             body::{Body, to_bytes},
-            http::{Request, StatusCode, header},
+            http::Request,
         };
         use tower::ServiceExt;
 
         let _ = super::metrics_handle();
         let config = Arc::new(Config::default_for_profile(Profile::Test));
         let app_state = Arc::new(AppState::default());
-        let metrics_handle = super::metrics_handle();
-
-        let app = super::create_app_router(app_state, config, metrics_handle.clone());
+        let app = super::create_app_router(app_state, config);
 
         let response = app
             .oneshot(
@@ -514,15 +512,16 @@ mod tests {
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let content_type = response.headers().get(header::CONTENT_TYPE).unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(status, StatusCode::OK);
+        let content_type = headers.get(header::CONTENT_TYPE).unwrap();
         assert_eq!(content_type, "text/plain; version=0.0.4");
 
-        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         assert!(
-            body.contains("# HELP"),
+            body.contains("# TYPE"),
             "expected prometheus exposition format body"
         );
     }

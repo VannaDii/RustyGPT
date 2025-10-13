@@ -75,6 +75,7 @@ pub async fn handle_apple_oauth(
 /// A [`reqwest::Client`] configured to prevent SSRF vulnerabilities by disabling redirects.
 pub fn create_http_client() -> reqwest::Client {
     reqwest::ClientBuilder::new()
+        .no_proxy()
         // Following redirects opens the client up to SSRF vulnerabilities.
         .redirect(reqwest::redirect::Policy::none())
         .build()

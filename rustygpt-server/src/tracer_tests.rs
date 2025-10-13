@@ -320,6 +320,10 @@ mod tests {
     #[test]
     fn http_metrics_recorded_for_response() {
         let handle = crate::server::metrics_handle();
+        let _subscriber_guard = tracing_subscriber::fmt()
+            .with_max_level(Level::TRACE)
+            .finish()
+            .set_default();
 
         let mut request = Request::builder()
             .method(Method::GET)

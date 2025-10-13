@@ -71,6 +71,7 @@ pub fn create_health_router() -> Router<Arc<AppState>> {
 mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
+    use serial_test::serial;
     use sqlx::postgres::PgPoolOptions;
     use std::io;
     use tower::ServiceExt;
@@ -99,6 +100,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn readyz_returns_ready_when_database_is_healthy() {
         let _ = crate::server::metrics_handle();
         crate::db::bootstrap::set_readiness_override(Some(Ok(())));
@@ -123,6 +125,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn readyz_returns_service_unavailable_when_database_fails() {
         let _ = crate::server::metrics_handle();
         crate::db::bootstrap::set_readiness_override(Some(Err(sqlx::Error::Io(io::Error::new(

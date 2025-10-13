@@ -37,6 +37,8 @@ The project follows a clean architecture with clear separation of concerns:
 - **Unit-tested architecture** ensuring reliability and maintainability
 - **Accessibility compliance** with WCAG 2.2 AA standards
 - **Configuration-based URLs** for flexible deployment across environments
+- **Built-in observability** with Prometheus metrics, JSON/text logging, and health probes
+- **Durable SSE streams** with optional persistent cursors and backpressure metrics
 
 ## Chat & Streaming Functionality
 
@@ -101,6 +103,58 @@ cargo run --bin cli config
 # Start the backend server
 cargo run --bin cli serve --port 8080
 ```
+
+## Observability
+
+RustyGPT exposes production-ready telemetry out of the box:
+
+| Signal            | Endpoint / Location           | Notes                                                                              |
+| ----------------- | ----------------------------- | ---------------------------------------------------------------------------------- |
+| **Metrics**       | `GET /metrics`                | Prometheus exposition including HTTP, SSE, DB bootstrap, and health counters/gauges |
+| **Liveness**      | `GET /healthz`                | Returns `200` when the API process is running                                      |
+| **Readiness**     | `GET /readyz`                 | Verifies database connectivity and stored procedure availability                   |
+| **Structured logs** | stdout / stderr             | `logging.format = "json"` enables machine-readable JSON logs for aggregation       |
+
+### Metrics Quick Start
+
+Add the following scrape config to your Prometheus deployment:
+
+```yaml
+scrape_configs:
+  - job_name: rustygpt
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - rustygpt.example.com:8080
+```
+
+Key metric families include:
+
+- `http_requests_total` / `http_request_duration_seconds` for inbound API traffic
+- `sse_events_sent_total`, `sse_events_dropped_total`, and `sse_queue_depth` for streaming health
+- `db_bootstrap_*` and `db_{liveness,readiness}_checks_total` covering database lifecycle
+
+### Structured Logging
+
+Configure JSON logs in `config.toml`:
+
+```toml
+[logging]
+level = "info"
+format = "json"
+```
+
+With this enabled, each log line includes request identifiers, matched routes, status codes, and latencies to simplify ingestion into log pipelines such as Loki, CloudWatch, or ELK.
+
+## SSE Durability & Backpressure
+
+The SSE coordinator supports optional on-disk persistence and queue instrumentation:
+
+- Enable durable cursors by setting `sse.persistence.enabled = true`; the coordinator stores events in PostgreSQL via stored procedures.
+- Configure retention with `sse.persistence.max_events_per_user` and `sse.persistence.prune_batch_size`.
+- Control congestion handling with `sse.backpressure.drop_strategy` (`drop_tokens` or `drop_tokens_and_system`) and monitor queue pressure through `sse_queue_depth`/`sse_queue_occupancy_ratio`.
+
+These knobs allow operators to tune RustyGPT for multi-tenant workloads while maintaining delivery guarantees for critical events.
 
 ## Authentication Flow
 

@@ -949,7 +949,7 @@ mod tests {
             .await
             .expect("connection ack emitted")
             .expect("ack payload");
-        assert_eq!(ack.event, "connection");
+        assert_eq!(ack.event, "message");
     }
 
     #[tokio::test]

@@ -47,7 +47,7 @@ async fn well_known_handler(
 }
 
 pub fn create_router_well_known() -> Router<Arc<AppState>> {
-    Router::new().route("/.well-known/:path", get(well_known_handler))
+    Router::new().route("/.well-known/{path}", get(well_known_handler))
 }
 
 #[cfg(test)]
