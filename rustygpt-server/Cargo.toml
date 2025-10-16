@@ -12,6 +12,7 @@ clap = { workspace = true }
 clap_complete = { workspace = true }
 dotenv = { workspace = true }
 futures-util = { workspace = true }
+futures = { workspace = true }
 http = { workspace = true }
 hyper = { workspace = true }
 hyper-rustls = { workspace = true }

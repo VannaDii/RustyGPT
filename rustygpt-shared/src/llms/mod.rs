@@ -30,6 +30,7 @@
 //! let response = model.generate(request).await?;
 //! ```
 
+pub mod context;
 pub mod errors;
 pub mod examples;
 pub mod hardware;
@@ -38,6 +39,7 @@ pub mod traits;
 pub mod types;
 
 // Re-export the main public APIs
+pub use context::ThreadContextBuilder;
 pub use errors::{LLMError, LLMResult};
 pub use hardware::{GpuType, OptimalParams, SystemHardware};
 pub use traits::{LLMModel, LLMProvider};

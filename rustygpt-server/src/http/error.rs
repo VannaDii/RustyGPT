@@ -3,6 +3,7 @@ use serde_json::json;
 use thiserror::Error;
 
 use super::problem::ProblemDetails;
+use crate::services::chat_service::ChatServiceError;
 
 pub type AppResult<T> = Result<T, ApiError>;
 
@@ -97,6 +98,19 @@ impl From<std::io::Error> for ApiError {
             std::io::ErrorKind::NotFound => Self::not_found(err.to_string()),
             std::io::ErrorKind::PermissionDenied => Self::forbidden(err.to_string()),
             _ => Self::internal_server_error(err.to_string()),
+        }
+    }
+}
+
+impl From<ChatServiceError> for ApiError {
+    fn from(err: ChatServiceError) -> Self {
+        match err {
+            ChatServiceError::Validation(message) => {
+                ApiError::new(StatusCode::BAD_REQUEST, "validation_failed", message)
+            }
+            ChatServiceError::NotFound(message) => ApiError::not_found(message),
+            ChatServiceError::Forbidden(message) => ApiError::forbidden(message),
+            ChatServiceError::Database(db_err) => ApiError::from(db_err),
         }
     }
 }

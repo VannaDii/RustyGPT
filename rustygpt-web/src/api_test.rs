@@ -1,58 +1,59 @@
-//! Tests for the API client functionality
-//!
-//! Validates HTTP client operations including conversation management,
-//! message sending, and proper error handling for API communication.
-
 #[cfg(test)]
 mod tests {
     use crate::api::RustyGPTClient;
     use chrono::Utc;
-    use shared::models::Timestamp;
-    use shared::models::conversation::Conversation;
-    use shared::models::message::Message;
+    use shared::models::{
+        ConversationStreamEvent, MessageRole, MessageView, ThreadSummary, Timestamp,
+    };
     use uuid::Uuid;
 
     /// Tests API client creation
     #[test]
     fn test_api_client_creation() {
-        let _client = RustyGPTClient::new("http://localhost:8080");
+        let _client = RustyGPTClient::new("/api");
         // Client should be created successfully
     }
 
-    /// Tests conversation retrieval request structure
+    /// Tests conversation thread listing endpoint string
     #[test]
-    fn test_get_conversation_request() {
-        let conversation_id = "conv-12345";
-        let url = format!("/api/conversations/{}", conversation_id);
-        assert_eq!(url, "/api/conversations/conv-12345");
+    fn test_list_threads_endpoint() {
+        let conversation_id = Uuid::nil();
+        let url = format!("/api/conversations/{}/threads", conversation_id);
+        assert!(url.contains("/threads"));
     }
 
-    /// Tests conversation model structure
+    /// Tests thread summary model structure
     #[test]
-    fn test_conversation_model() {
-        let conversation = Conversation {
-            id: Uuid::new_v4(),
-            title: "Test Conversation".to_string(),
-            last_updated: Timestamp(Utc::now()),
-            participant_ids: vec![Uuid::new_v4(), Uuid::new_v4()],
-            messages: vec![],
+    fn test_thread_summary_model() {
+        let summary = ThreadSummary {
+            root_id: Uuid::new_v4(),
+            root_excerpt: "Hello".into(),
+            root_author: Some(Uuid::new_v4()),
+            created_at: Timestamp(Utc::now()),
+            last_activity_at: Timestamp(Utc::now()),
+            message_count: 1_i64,
+            participant_count: 2_i64,
         };
 
-        assert!(!conversation.title.is_empty());
-        assert_eq!(conversation.participant_ids.len(), 2);
-        assert!(conversation.messages.is_empty());
+        assert_eq!(summary.message_count, 1);
+        assert_eq!(summary.participant_count, 2);
+        assert!(!summary.root_excerpt.is_empty());
     }
 
     /// Tests message model structure
     #[test]
     fn test_message_model() {
-        let message = Message {
+        let message = MessageView {
             id: Uuid::new_v4(),
+            root_id: Uuid::new_v4(),
+            parent_id: None,
             conversation_id: Uuid::new_v4(),
-            sender_id: Uuid::new_v4(),
+            author_user_id: Some(Uuid::new_v4()),
             content: "Test message".to_string(),
-            message_type: shared::models::message::MessageType::User,
-            timestamp: Timestamp(Utc::now()),
+            role: MessageRole::User,
+            path: "mroot".into(),
+            depth: 1,
+            created_at: Timestamp(Utc::now()),
         };
 
         assert_eq!(message.content, "Test message");
@@ -68,13 +69,13 @@ mod tests {
         let conv_url = format!("/api/conversations/{}", conversation_id);
         assert_eq!(conv_url, "/api/conversations/test-conv-123");
 
-        // Send message endpoint
-        let msg_url = format!("/api/conversations/{}/messages", conversation_id);
-        assert_eq!(msg_url, "/api/conversations/test-conv-123/messages");
+        // Thread listing endpoint
+        let thread_url = format!("/api/conversations/{}/threads", conversation_id);
+        assert_eq!(thread_url, "/api/conversations/test-conv-123/threads");
 
         // Stream endpoint
-        let stream_url = format!("/api/stream/{}", "user-123");
-        assert_eq!(stream_url, "/api/stream/user-123");
+        let stream_url = format!("/api/stream/conversations/{}", conversation_id);
+        assert_eq!(stream_url, "/api/stream/conversations/test-conv-123");
     }
 
     /// Tests error response handling
@@ -136,5 +137,23 @@ mod tests {
         assert!(!short_message.is_empty());
         assert!(!normal_message.is_empty());
         assert!(!long_message.is_empty());
+    }
+
+    /// Tests SSE event deserialization contract
+    #[test]
+    fn test_stream_event_deserialization() {
+        let root_id = Uuid::new_v4();
+        let json = format!(
+            "{{\"type\":\"thread.activity\",\"payload\":{{\"root_id\":\"{}\",\"last_activity_at\":\"2024-01-01T00:00:00Z\"}}}}",
+            root_id
+        );
+
+        let event: ConversationStreamEvent = serde_json::from_str(&json).expect("parse event");
+        match event {
+            ConversationStreamEvent::ThreadActivity { payload } => {
+                assert_eq!(payload.root_id, root_id);
+            }
+            _ => panic!("unexpected event variant"),
+        }
     }
 }

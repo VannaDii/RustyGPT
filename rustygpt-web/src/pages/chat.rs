@@ -1,22 +1,38 @@
-use crate::api::RustyGPTClient;
-use crate::components::StreamingMessage;
-use i18nrs::yew::use_translation;
-use shared::models::conversation::SendMessageRequest;
-use shared::models::{Conversation, Message, MessageChunk};
-use uuid::Uuid;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
-use web_sys::HtmlInputElement;
-use yew::{
-    Callback, Html, Properties, TargetCast, function_component, html, use_effect_with,
-    use_node_ref, use_state,
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
 };
-use yew_icons::{Icon, IconId};
 
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
+use crate::api::RustyGPTClient;
+use crate::components::{
+    StreamingDisplay, ThreadComposer, ThreadList, ThreadView, TypingIndicator,
+};
+use chrono::Utc;
+use serde_json::from_str;
+use shared::models::{
+    ConversationStreamEvent, MessageRole, MessageView, PostRootMessageRequest, ReplyMessageRequest,
+    ThreadSummary, Timestamp,
+};
+use uuid::Uuid;
+use wasm_bindgen::{JsCast, closure::Closure};
+use wasm_bindgen_futures::spawn_local;
+use web_sys::{EventSource, MessageEvent};
+use yew::{
+    Callback, Html, Properties, UseStateHandle, function_component, html, use_effect_with,
+    use_state,
+};
+
+const API_BASE: &str = "/api";
+
+#[derive(Clone, PartialEq, Eq)]
+struct StreamingEntry {
+    message_id: Uuid,
+    root_id: Uuid,
+    parent_id: Option<Uuid>,
+    depth: i32,
+    conversation_id: Uuid,
+    content: String,
 }
 
 #[derive(Properties, PartialEq)]
@@ -25,461 +41,687 @@ pub struct ChatPageProps {
     pub conversation_id: Option<String>,
 }
 
-/// Chat page component for the main chat interface
-#[function_component(ChatPage)]
-pub fn chat_page(props: &ChatPageProps) -> Html {
-    let (i18n, _) = use_translation();
-
-    // State for the current conversation
-    let conversation = use_state(|| None::<Conversation>);
-    let messages = use_state(Vec::<Message>::new);
-    let streaming_chunks = use_state(Vec::<MessageChunk>::new);
-    let current_input = use_state(String::new);
-    let is_sending = use_state(|| false);
-    let error_message = use_state(|| None::<String>);
-
-    // Input ref for focusing
-    let input_ref = use_node_ref();
-
-    // Mock user ID for now - this would come from authentication
-    let user_id = use_state(Uuid::new_v4);
-
-    // Load conversation if conversation_id is provided
+fn register_stream_listeners(
+    event_source: &EventSource,
+    listeners: &Rc<RefCell<Vec<Closure<dyn FnMut(MessageEvent)>>>>,
+    threads: &UseStateHandle<Vec<ThreadSummary>>,
+    selected_thread: &UseStateHandle<Option<Uuid>>,
+    messages: &UseStateHandle<Vec<MessageView>>,
+    error: &UseStateHandle<Option<String>>,
+    typing: &UseStateHandle<bool>,
+    streaming: &UseStateHandle<HashMap<Uuid, StreamingEntry>>,
+    pending_activity: &UseStateHandle<HashSet<Uuid>>,
+) {
+    // thread.new
     {
-        let conversation_id = props.conversation_id.clone();
-        let conversation_clone = conversation.clone();
-        let messages_clone = messages.clone();
-        let error_clone = error_message.clone();
+        let threads = threads.clone();
+        let listener =
+            Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
+                if let Some(data) = event.data().as_string() {
+                    if let Ok(ConversationStreamEvent::ThreadNew { payload }) = from_str(&data) {
+                        threads.set({
+                            let mut next = (*threads).clone();
+                            next.retain(|item| item.root_id != payload.root_id);
+                            next.push(payload.summary.clone());
+                            next.sort_by(|a, b| b.last_activity_at.0.cmp(&a.last_activity_at.0));
+                            next
+                        });
+                    }
+                }
+            }));
+        event_source
+            .add_event_listener_with_callback("thread.new", listener.as_ref().unchecked_ref())
+            .expect("thread.new listener");
+        listeners.borrow_mut().push(listener);
+    }
 
-        use_effect_with(conversation_id, move |conversation_id| {
-            if let Some(id) = conversation_id {
-                let conversation = conversation_clone.clone();
-                let messages = messages_clone.clone();
-                let error = error_clone.clone();
-                let id = id.clone();
+    // thread.activity
+    {
+        let threads = threads.clone();
+        let selected_thread = selected_thread.clone();
+        let messages = messages.clone();
+        let error = error.clone();
+        let pending_activity = pending_activity.clone();
+        let listener =
+            Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
+                if let Some(data) = event.data().as_string() {
+                    if let Ok(ConversationStreamEvent::ThreadActivity { payload }) = from_str(&data)
+                    {
+                        let skip_fetch = (*pending_activity).contains(&payload.root_id);
 
-                spawn_local(async move {
-                    let client = RustyGPTClient::new("http://localhost:8080/api");
-                    match client.get_conversation(&id).await {
-                        Ok(conv) => {
-                            messages.set(conv.messages.clone());
-                            conversation.set(Some(conv));
-                        }
-                        Err(err) => {
-                            error.set(Some(format!("Failed to load conversation: {}", err)));
+                        threads.set({
+                            let mut next = (*threads).clone();
+                            if let Some(thread) =
+                                next.iter_mut().find(|t| t.root_id == payload.root_id)
+                            {
+                                thread.last_activity_at = payload.last_activity_at.clone();
+                                if skip_fetch {
+                                    thread.message_count += 1;
+                                }
+                            }
+                            next.sort_by(|a, b| b.last_activity_at.0.cmp(&a.last_activity_at.0));
+                            next
+                        });
+
+                        if skip_fetch {
+                            let mut updated = (*pending_activity).clone();
+                            updated.remove(&payload.root_id);
+                            pending_activity.set(updated);
+                        } else if (*selected_thread)
+                            .map(|id| id == payload.root_id)
+                            .unwrap_or(false)
+                        {
+                            let messages = messages.clone();
+                            let error = error.clone();
+                            spawn_local(async move {
+                                let client = RustyGPTClient::new(API_BASE);
+                                match client
+                                    .get_thread_tree(&payload.root_id, None, Some(200))
+                                    .await
+                                {
+                                    Ok(tree) => {
+                                        messages.set(tree.messages);
+                                        error.set(None);
+                                    }
+                                    Err(err) => {
+                                        error.set(Some(format!("Failed to refresh thread: {err}")));
+                                    }
+                                }
+                            });
                         }
                     }
-                });
+                }
+            }));
+        event_source
+            .add_event_listener_with_callback("thread.activity", listener.as_ref().unchecked_ref())
+            .expect("thread.activity listener");
+        listeners.borrow_mut().push(listener);
+    }
+
+    // message.delta
+    {
+        let selected_thread = selected_thread.clone();
+        let typing = typing.clone();
+        let streaming = streaming.clone();
+        let listener =
+            Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
+                if let Some(data) = event.data().as_string() {
+                    if let Ok(ConversationStreamEvent::MessageDelta { payload }) = from_str(&data) {
+                        if let Some(chunk) = payload
+                            .choices
+                            .iter()
+                            .filter_map(|choice| choice.delta.content.clone())
+                            .reduce(|mut acc, part| {
+                                acc.push_str(&part);
+                                acc
+                            })
+                        {
+                            streaming.set({
+                                let mut next = (*streaming).clone();
+                                next.entry(payload.message_id)
+                                    .and_modify(|entry| {
+                                        entry.content.push_str(&chunk);
+                                        entry.depth = payload.depth.unwrap_or(entry.depth);
+                                        entry.parent_id = payload.parent_id;
+                                        entry.root_id = payload.root_id;
+                                        entry.conversation_id = payload.conversation_id;
+                                    })
+                                    .or_insert(StreamingEntry {
+                                        message_id: payload.message_id,
+                                        root_id: payload.root_id,
+                                        parent_id: payload.parent_id,
+                                        conversation_id: payload.conversation_id,
+                                        depth: payload.depth.unwrap_or(1),
+                                        content: chunk.clone(),
+                                    });
+                                next
+                            });
+                        }
+
+                        if (*selected_thread)
+                            .map(|id| id == payload.root_id)
+                            .unwrap_or(false)
+                        {
+                            typing.set(true);
+                        }
+                    }
+                }
+            }));
+        event_source
+            .add_event_listener_with_callback("message.delta", listener.as_ref().unchecked_ref())
+            .expect("message.delta listener");
+        listeners.borrow_mut().push(listener);
+    }
+
+    // message.done
+    {
+        let typing = typing.clone();
+        let messages = messages.clone();
+        let error = error.clone();
+        let streaming = streaming.clone();
+        let pending_activity = pending_activity.clone();
+        let listener =
+            Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
+                if let Some(data) = event.data().as_string() {
+                    if let Ok(ConversationStreamEvent::MessageDone { payload }) = from_str(&data) {
+                        typing.set(false);
+                        error.set(None);
+
+                        let entry = {
+                            let mut buffer = (*streaming).clone();
+                            let removed = buffer.remove(&payload.message_id);
+                            streaming.set(buffer);
+                            removed
+                        };
+
+                        if let Some(entry) = entry {
+                            messages.set({
+                                let mut next = (*messages).clone();
+                                if let Some(existing) =
+                                    next.iter_mut().find(|msg| msg.id == payload.message_id)
+                                {
+                                    existing.content = entry.content.clone();
+                                    existing.role = MessageRole::Assistant;
+                                } else {
+                                    next.push(MessageView {
+                                        id: payload.message_id,
+                                        root_id: entry.root_id,
+                                        parent_id: entry.parent_id,
+                                        conversation_id: entry.conversation_id,
+                                        author_user_id: None,
+                                        role: MessageRole::Assistant,
+                                        content: entry.content.clone(),
+                                        path: String::new(),
+                                        depth: entry.depth,
+                                        created_at: Timestamp(Utc::now()),
+                                    });
+                                }
+                                next.sort_by(|a, b| a.created_at.0.cmp(&b.created_at.0));
+                                next
+                            });
+
+                            pending_activity.set({
+                                let mut roots = (*pending_activity).clone();
+                                roots.insert(entry.root_id);
+                                roots
+                            });
+                        }
+                    }
+                }
+            }));
+        event_source
+            .add_event_listener_with_callback("message.done", listener.as_ref().unchecked_ref())
+            .expect("message.done listener");
+        listeners.borrow_mut().push(listener);
+    }
+
+    // errors
+    {
+        let error = error.clone();
+        let listener =
+            Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
+                if let Some(data) = event.data().as_string() {
+                    if let Ok(ConversationStreamEvent::Error { payload }) = from_str(&data) {
+                        error.set(Some(format!(
+                            "Stream error {}: {}",
+                            payload.code, payload.message
+                        )));
+                    }
+                }
+            }));
+        event_source
+            .add_event_listener_with_callback("error", listener.as_ref().unchecked_ref())
+            .expect("error listener");
+        listeners.borrow_mut().push(listener);
+    }
+}
+
+#[derive(Clone, PartialEq)]
+enum ComposerTarget {
+    Root,
+    Reply { parent_id: Uuid, root_id: Uuid },
+}
+
+#[function_component(ChatPage)]
+pub fn chat_page(props: &ChatPageProps) -> Html {
+    let conversation_uuid = props
+        .conversation_id
+        .as_ref()
+        .and_then(|value| Uuid::parse_str(value).ok());
+
+    let threads = use_state(Vec::<ThreadSummary>::new);
+    let selected_thread = use_state(|| None::<Uuid>);
+    let messages = use_state(Vec::<MessageView>::new);
+    let composer_text = use_state(String::new);
+    let composer_target = use_state(|| ComposerTarget::Root);
+    let composer_busy = use_state(|| false);
+    let typing_active = use_state(|| false);
+    let streaming_buffers = use_state(|| HashMap::<Uuid, StreamingEntry>::new());
+    let pending_activity_roots = use_state(HashSet::<Uuid>::new);
+    let error_message = use_state(|| None::<String>);
+
+    // Refresh threads when the conversation changes
+    {
+        let conversation_id_prop = props.conversation_id.clone();
+        let threads_handle = threads.clone();
+        let selected_thread_handle = selected_thread.clone();
+        let messages_handle = messages.clone();
+        let composer_text_handle = composer_text.clone();
+        let composer_target_handle = composer_target.clone();
+        let streaming_handle = streaming_buffers.clone();
+        let error_handle = error_message.clone();
+        use_effect_with(conversation_id_prop, move |id_opt| {
+            threads_handle.set(Vec::new());
+            selected_thread_handle.set(None);
+            messages_handle.set(Vec::new());
+            composer_text_handle.set(String::new());
+            composer_target_handle.set(ComposerTarget::Root);
+            streaming_handle.set(HashMap::new());
+
+            if let Some(id) = id_opt {
+                match Uuid::parse_str(id) {
+                    Ok(conv_id) => {
+                        let threads = threads_handle.clone();
+                        let selected_thread = selected_thread_handle.clone();
+                        let composer_target = composer_target_handle.clone();
+                        let error = error_handle.clone();
+                        spawn_local(async move {
+                            let client = RustyGPTClient::new(API_BASE);
+                            match client.list_threads(&conv_id, None, Some(50)).await {
+                                Ok(mut response) => {
+                                    response.threads.sort_by(|a, b| {
+                                        b.last_activity_at.0.cmp(&a.last_activity_at.0)
+                                    });
+                                    let first_root =
+                                        response.threads.first().map(|item| item.root_id);
+                                    threads.set(response.threads);
+                                    if let Some(root_id) = first_root {
+                                        selected_thread.set(Some(root_id));
+                                        composer_target.set(ComposerTarget::Reply {
+                                            parent_id: root_id,
+                                            root_id,
+                                        });
+                                    }
+                                    error.set(None);
+                                }
+                                Err(err) => {
+                                    error.set(Some(format!("Failed to load threads: {err}")));
+                                }
+                            }
+                        });
+                    }
+                    Err(_) => {
+                        error_handle.set(Some("Invalid conversation ID".to_string()));
+                    }
+                }
             }
+
             || ()
         });
     }
 
-    // Handle message input change
-    let on_input_change = {
-        let current_input = current_input.clone();
-        Callback::from(move |e: yew::events::InputEvent| {
-            let input: HtmlInputElement = e.target_unchecked_into();
-            current_input.set(input.value());
+    // Load thread messages when selection changes
+    {
+        let selected_thread_handle = selected_thread.clone();
+        let messages_handle = messages.clone();
+        let error_handle = error_message.clone();
+        let composer_target_handle = composer_target.clone();
+        let composer_text_handle = composer_text.clone();
+        use_effect_with(*selected_thread_handle, move |root_opt| {
+            if let Some(root_id) = *root_opt {
+                messages_handle.set(Vec::new());
+                composer_text_handle.set(String::new());
+                composer_target_handle.set(ComposerTarget::Reply {
+                    parent_id: root_id,
+                    root_id,
+                });
+
+                let messages = messages_handle.clone();
+                let error = error_handle.clone();
+                let current_root = root_id;
+                spawn_local(async move {
+                    let client = RustyGPTClient::new(API_BASE);
+                    match client.get_thread_tree(&current_root, None, Some(200)).await {
+                        Ok(tree) => {
+                            messages.set(tree.messages);
+                            error.set(None);
+                        }
+                        Err(err) => {
+                            error.set(Some(format!("Failed to load thread: {err}")));
+                        }
+                    }
+                });
+            }
+
+            || ()
+        });
+    }
+
+    // Subscribe to SSE updates for the conversation
+    {
+        let conversation_id_prop = props.conversation_id.clone();
+        let threads_handle = threads.clone();
+        let selected_thread_handle = selected_thread.clone();
+        let messages_handle = messages.clone();
+        let error_handle = error_message.clone();
+        let typing_handle = typing_active.clone();
+        let streaming_handle = streaming_buffers.clone();
+        let pending_activity_handle = pending_activity_roots.clone();
+
+        use_effect_with(conversation_id_prop, move |id_opt| {
+            let mut cleanup: Option<(
+                EventSource,
+                Rc<RefCell<Vec<Closure<dyn FnMut(MessageEvent)>>>>,
+            )> = None;
+
+            if let Some(id) = id_opt {
+                if let Ok(conv_id) = Uuid::parse_str(id) {
+                    let client = RustyGPTClient::new(API_BASE);
+                    if let Ok(event_source) =
+                        EventSource::new(&client.conversation_stream_url(&conv_id))
+                    {
+                        let listeners: Rc<RefCell<Vec<Closure<dyn FnMut(MessageEvent)>>>> =
+                            Rc::new(RefCell::new(Vec::new()));
+
+                        register_stream_listeners(
+                            &event_source,
+                            &listeners,
+                            &threads_handle,
+                            &selected_thread_handle,
+                            &messages_handle,
+                            &error_handle,
+                            &typing_handle,
+                            &streaming_handle,
+                            &pending_activity_handle,
+                        );
+
+                        cleanup = Some((event_source.clone(), listeners));
+                    }
+                }
+            }
+
+            move || {
+                if let Some((event_source, listeners)) = cleanup {
+                    event_source.close();
+                    listeners.borrow_mut().clear();
+                }
+            }
+        });
+    }
+
+    let on_select_thread = {
+        let selected_thread = selected_thread.clone();
+        Callback::from(move |root_id: Uuid| {
+            selected_thread.set(Some(root_id));
         })
     };
 
-    // Handle sending a message
-    let send_message_logic = {
-        let current_input = current_input.clone();
-        let is_sending = is_sending.clone();
-        let user_id = *user_id;
-        let error_message = error_message.clone();
-        let input_ref = input_ref.clone();
+    let on_new_thread = {
+        let selected_thread = selected_thread.clone();
+        let composer_target = composer_target.clone();
+        let messages = messages.clone();
+        let composer_text = composer_text.clone();
+        Callback::from(move |_| {
+            selected_thread.set(None);
+            messages.set(Vec::new());
+            composer_text.set(String::new());
+            composer_target.set(ComposerTarget::Root);
+        })
+    };
 
-        move || {
-            let message_content = (*current_input).clone();
-            if message_content.trim().is_empty() || *is_sending {
+    let on_reply_to_message = {
+        let composer_target = composer_target.clone();
+        let composer_text = composer_text.clone();
+        Callback::from(move |message: MessageView| {
+            composer_text.set(String::new());
+            composer_target.set(ComposerTarget::Reply {
+                parent_id: message.id,
+                root_id: message.root_id,
+            });
+        })
+    };
+
+    let on_composer_text = {
+        let composer_text = composer_text.clone();
+        Callback::from(move |value: String| composer_text.set(value))
+    };
+
+    let on_cancel_reply = {
+        let composer_target = composer_target.clone();
+        let composer_text = composer_text.clone();
+        let selected_thread = selected_thread.clone();
+        Callback::from(move |_| {
+            composer_text.set(String::new());
+            if let Some(root_id) = *selected_thread {
+                composer_target.set(ComposerTarget::Reply {
+                    parent_id: root_id,
+                    root_id,
+                });
+            } else {
+                composer_target.set(ComposerTarget::Root);
+            }
+        })
+    };
+
+    let on_submit_message = {
+        let conversation_uuid = conversation_uuid.clone();
+        let composer_target = composer_target.clone();
+        let composer_text = composer_text.clone();
+        let composer_busy = composer_busy.clone();
+        let selected_thread = selected_thread.clone();
+        let messages = messages.clone();
+        let error = error_message.clone();
+        let typing = typing_active.clone();
+        let threads_handle = threads.clone();
+        Callback::from(move |_| {
+            if *composer_busy {
                 return;
             }
 
-            let current_input = current_input.clone();
-            let is_sending = is_sending.clone();
-            let error_message = error_message.clone();
-            let input_ref = input_ref.clone();
+            let Some(conv_id) = conversation_uuid else {
+                error.set(Some("Conversation not selected".to_string()));
+                return;
+            };
 
-            current_input.set(String::new());
-            is_sending.set(true);
-            error_message.set(None);
+            let content = (*composer_text).trim().to_string();
+            if content.is_empty() {
+                return;
+            }
 
-            spawn_local(async move {
-                let client = RustyGPTClient::new("http://localhost:8080/api");
-                let request = SendMessageRequest {
-                    content: message_content,
-                    user_id: user_id.to_string(),
-                };
+            composer_busy.set(true);
 
-                match client.send_message(&request).await {
-                    Ok(_response) => {
-                        // Clear input on success
-                        if let Some(input) = input_ref.cast::<HtmlInputElement>() {
-                            input.set_value("");
+            match (*composer_target).clone() {
+                ComposerTarget::Root => {
+                    let composer_text = composer_text.clone();
+                    let composer_busy = composer_busy.clone();
+                    let selected_thread = selected_thread.clone();
+                    let composer_target = composer_target.clone();
+                    let messages = messages.clone();
+                    let error = error.clone();
+                    let text_to_send = content.clone();
+                    spawn_local(async move {
+                        let client = RustyGPTClient::new(API_BASE);
+                        let request = PostRootMessageRequest {
+                            content: text_to_send,
+                            role: Some(MessageRole::User),
+                        };
+                        match client.post_root_message(&conv_id, &request).await {
+                            Ok(response) => {
+                                composer_text.set(String::new());
+                                composer_busy.set(false);
+                                composer_target.set(ComposerTarget::Reply {
+                                    parent_id: response.root_id,
+                                    root_id: response.root_id,
+                                });
+                                selected_thread.set(Some(response.root_id));
+                                let messages = messages.clone();
+                                let error = error.clone();
+                                spawn_local(async move {
+                                    let client = RustyGPTClient::new(API_BASE);
+                                    match client
+                                        .get_thread_tree(&response.root_id, None, Some(200))
+                                        .await
+                                    {
+                                        Ok(tree) => {
+                                            messages.set(tree.messages);
+                                            error.set(None);
+                                        }
+                                        Err(err) => {
+                                            error.set(Some(format!(
+                                                "Failed to load new thread: {err}"
+                                            )));
+                                        }
+                                    }
+                                });
+                            }
+                            Err(err) => {
+                                composer_busy.set(false);
+                                error.set(Some(format!("Failed to post message: {err}")));
+                            }
                         }
-                    }
-                    Err(err) => {
-                        error_message.set(Some(format!("Failed to send message: {}", err)));
-                    }
+                    });
                 }
-
-                is_sending.set(false);
-            });
-        }
-    };
-
-    let on_send_message = {
-        let send_message_logic = send_message_logic.clone();
-        Callback::from(move |_: yew::events::MouseEvent| {
-            send_message_logic();
-        })
-    };
-
-    // Handle Enter key press
-    let on_key_press = {
-        let send_message_logic = send_message_logic.clone();
-        Callback::from(move |e: yew::events::KeyboardEvent| {
-            if e.key() == "Enter" && !e.shift_key() {
-                e.prevent_default();
-                send_message_logic();
+                ComposerTarget::Reply { parent_id, root_id } => {
+                    let composer_text = composer_text.clone();
+                    let composer_busy = composer_busy.clone();
+                    let messages = messages.clone();
+                    let error = error.clone();
+                    let typing = typing.clone();
+                    let threads_handle = threads_handle.clone();
+                    spawn_local(async move {
+                        let client = RustyGPTClient::new(API_BASE);
+                        let request = ReplyMessageRequest {
+                            content: content.clone(),
+                            role: Some(MessageRole::User),
+                        };
+                        match client.reply_message(&parent_id, &request).await {
+                            Ok(_) => {
+                                composer_text.set(String::new());
+                                composer_busy.set(false);
+                                typing.set(true);
+                                let messages = messages.clone();
+                                let error = error.clone();
+                                let threads_handle = threads_handle.clone();
+                                spawn_local(async move {
+                                    let client = RustyGPTClient::new(API_BASE);
+                                    match client.get_thread_tree(&root_id, None, Some(200)).await {
+                                        Ok(tree) => {
+                                            messages.set(tree.messages.clone());
+                                            error.set(None);
+                                            typing.set(false);
+                                            threads_handle.set({
+                                                let mut next = (*threads_handle).clone();
+                                                if let Some(summary) = next
+                                                    .iter_mut()
+                                                    .find(|item| item.root_id == root_id)
+                                                {
+                                                    summary.last_activity_at = tree
+                                                        .messages
+                                                        .last()
+                                                        .map(|msg| msg.created_at.clone())
+                                                        .unwrap_or(
+                                                            summary.last_activity_at.clone(),
+                                                        );
+                                                    summary.message_count += 1;
+                                                }
+                                                next.sort_by(|a, b| {
+                                                    b.last_activity_at.0.cmp(&a.last_activity_at.0)
+                                                });
+                                                next
+                                            });
+                                        }
+                                        Err(err) => {
+                                            error.set(Some(format!(
+                                                "Failed to refresh thread: {err}"
+                                            )));
+                                            typing.set(false);
+                                        }
+                                    }
+                                });
+                            }
+                            Err(err) => {
+                                composer_busy.set(false);
+                                error.set(Some(format!("Failed to send reply: {err}")));
+                            }
+                        }
+                    });
+                }
             }
         })
     };
 
-    // Handle streaming message chunks
-    let on_message_chunk = {
-        let streaming_chunks = streaming_chunks.clone();
-        Callback::from(move |chunk: MessageChunk| {
-            let mut chunks = (*streaming_chunks).clone();
-            chunks.push(chunk);
-            streaming_chunks.set(chunks);
-        })
+    let mut streaming_for_selected: Vec<StreamingDisplay> = {
+        let selected = *selected_thread;
+        (*streaming_buffers)
+            .clone()
+            .into_iter()
+            .filter_map(|(message_id, entry)| {
+                if Some(entry.root_id) == selected {
+                    Some(StreamingDisplay {
+                        message_id,
+                        root_id: entry.root_id,
+                        parent_id: entry.parent_id,
+                        conversation_id: entry.conversation_id,
+                        depth: entry.depth,
+                        content: entry.content,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    streaming_for_selected.sort_by_key(|entry| entry.message_id);
+    let typing_display = *typing_active || !streaming_for_selected.is_empty();
+
+    let (placeholder, show_cancel) = match &*composer_target {
+        ComposerTarget::Root => ("Start a new thread".to_string(), false),
+        ComposerTarget::Reply { .. } => ("Reply in thread".to_string(), true),
     };
 
-    // Render a single message
-    let render_message = |message: &Message| {
-        let is_user = message.sender_id == *user_id;
-        let message_class = if is_user {
-            "ml-auto bg-primary text-primary-content"
-        } else {
-            "mr-auto bg-base-200 text-base-content"
-        };
-
-        html! {
-            <div class={format!("chat {}", if is_user { "chat-end" } else { "chat-start" })}>
-                <div class="chat-image avatar">
-                    <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center">
-                        {
-                            if is_user {
-                                html! { <Icon icon_id={IconId::HeroiconsOutlineUser} class="w-6 h-6" /> }
-                            } else {
-                                html! { <Icon icon_id={IconId::HeroiconsOutlineCpuChip} class="w-6 h-6" /> }
-                            }
-                        }
-                    </div>
-                </div>
-                <div class={format!("chat-bubble {}", message_class)}>
-                    { &message.content }
-                </div>
-                <div class="chat-footer opacity-50 text-xs">
-                    { format!("{}", message.timestamp.0.format("%H:%M")) }
-                </div>
-            </div>
-        }
+    let submit_label = match &*composer_target {
+        ComposerTarget::Root => "Create Thread".to_string(),
+        ComposerTarget::Reply { .. } => "Send Reply".to_string(),
     };
 
     html! {
-        <div class="flex flex-col h-full max-h-screen">
-            // Header
-            <div class="bg-base-200 border-b border-base-300 p-4">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <h1 class="text-xl font-semibold">{ i18n.t("chat.title") }</h1>
-                        {
-                            if let Some(conv) = &*conversation {
-                                html! {
-                                    <p class="text-sm text-base-content/70">{ &conv.title }</p>
-                                }
-                            } else {
-                                html! {
-                                    <p class="text-sm text-base-content/70">{ i18n.t("chat.new_conversation") }</p>
-                                }
-                            }
-                        }
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <button class="btn btn-sm btn-ghost">
-                            <Icon icon_id={IconId::HeroiconsOutlineCog6Tooth} class="w-4 h-4" />
-                        </button>
-                    </div>
+        <div class="h-full flex">
+            <div class="w-full md:w-1/3 border-r border-base-300 flex flex-col">
+                <div class="flex items-center justify-between p-3 border-b border-base-300">
+                    <h2 class="font-semibold">{"Threads"}</h2>
+                    <button class="btn btn-sm btn-primary" type="button" onclick={on_new_thread}> {"New Thread"} </button>
+                </div>
+                <div class="flex-1 overflow-y-auto">
+                    <ThreadList threads={(*threads).clone()} selected={*selected_thread} on_select={on_select_thread} />
                 </div>
             </div>
-
-            // Messages area
-            <div class="flex-1 overflow-y-auto p-4 space-y-4">
-                {
-                    if messages.is_empty() && streaming_chunks.is_empty() {
-                        html! {
-                            <div class="flex flex-col items-center justify-center h-full text-center">
-                                <Icon icon_id={IconId::HeroiconsOutlineChatBubbleLeftRight} class="w-16 h-16 text-base-content/30 mb-4" />
-                                <h2 class="text-xl font-semibold text-base-content/70 mb-2">{ i18n.t("chat.welcome") }</h2>
-                                <p class="text-base-content/50">{ i18n.t("chat.start_conversation") }</p>
-                            </div>
-                        }
-                    } else {
-                        html! {
-                            <div class="space-y-4">
-                                {
-                                    messages.iter().map(|message| {
-                                        render_message(message)
-                                    }).collect::<Html>()
-                                }
-                                {
-                                    if !streaming_chunks.is_empty() {
-                                        html! {
-                                            <div class="chat chat-start">
-                                                <div class="chat-image avatar">
-                                                    <div class="w-10 h-10 rounded-full bg-base-300 flex items-center justify-center">
-                                                        <Icon icon_id={IconId::HeroiconsOutlineCpuChip} class="w-6 h-6" />
-                                                    </div>
-                                                </div>
-                                                <div class="chat-bubble bg-base-200 text-base-content">
-                                                    { streaming_chunks.iter().map(|chunk| chunk.content.clone()).collect::<String>() }
-                                                    <span class="inline-block w-2 h-4 bg-current animate-pulse ml-1"></span>
-                                                </div>
-                                            </div>
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
-                            </div>
-                        }
-                    }
-                }
-            </div>
-
-            // Error message
-            {
-                if let Some(error) = &*error_message {
-                    html! {
-                        <div class="px-4 pb-2">
-                            <div class="alert alert-error">
-                                <Icon icon_id={IconId::HeroiconsOutlineExclamationTriangle} class="w-4 h-4" />
-                                <span>{ error }</span>
-                            </div>
-                        </div>
-                    }
+            <div class="flex-1 flex flex-col">
+                { if let Some(error) = (*error_message).clone() {
+                    html! { <div class="alert alert-error rounded-none">{ error }</div> }
                 } else {
                     html! {}
-                }
-            }
-
-            // Input area
-            <div class="bg-base-200 border-t border-base-300 p-4">
-                <div class="flex gap-2">
-                    <div class="flex-1 relative">
-                        <input
-                            ref={input_ref}
-                            type="text"
-                            placeholder={i18n.t("chat.type_message")}
-                            class="input input-bordered w-full pr-12"
-                            value={(*current_input).clone()}
-                            disabled={*is_sending}
-                            oninput={on_input_change}
-                            onkeydown={on_key_press}
-                        />
-                        <button
-                            class={format!("btn btn-sm btn-circle absolute right-2 top-1/2 -translate-y-1/2 {}",
-                                if current_input.trim().is_empty() || *is_sending { "btn-disabled" } else { "btn-primary" }
-                            )}
-                            disabled={current_input.trim().is_empty() || *is_sending}
-                            onclick={on_send_message}
-                        >
-                            {
-                                if *is_sending {
-                                    html! { <span class="loading loading-spinner loading-xs"></span> }
-                                } else {
-                                    html! { <Icon icon_id={IconId::HeroiconsOutlinePaperAirplane} class="w-4 h-4" /> }
-                                }
-                            }
-                        </button>
-                    </div>
+                }}
+                <div class="flex-1 overflow-y-auto p-4 space-y-2">
+                    <ThreadView
+                        messages={(*messages).clone()}
+                        streaming={streaming_for_selected.clone()}
+                        on_reply={on_reply_to_message}
+                    />
+                    <TypingIndicator active={typing_display} />
                 </div>
-                <div class="text-xs text-base-content/50 mt-2 text-center">
-                    { i18n.t("chat.hint") }
+                <div class="border-t border-base-300 p-4 bg-base-200">
+                    <ThreadComposer
+                        text={(*composer_text).clone()}
+                        on_text_change={on_composer_text}
+                        on_submit={on_submit_message}
+                        disabled={*composer_busy}
+                        placeholder={placeholder}
+                        submit_label={submit_label}
+                        show_cancel={show_cancel}
+                        on_cancel={on_cancel_reply}
+                    />
                 </div>
             </div>
-
-            // Streaming connection
-            <StreamingMessage user_id={*user_id} on_message_chunk={on_message_chunk} />
         </div>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::routes::MainRoute;
-
-    /// Tests that conversation ID can be extracted from route
-    #[test]
-    fn test_conversation_id_extraction() {
-        let route = MainRoute::ChatConversation {
-            conversation_id: "conv-test-123".to_string(),
-        };
-
-        match route {
-            MainRoute::ChatConversation { conversation_id } => {
-                assert_eq!(conversation_id, "conv-test-123");
-                assert!(!conversation_id.is_empty());
-            }
-            _ => panic!("Expected ChatConversation route"),
-        }
-    }
-
-    /// Tests that chat route is properly defined
-    #[test]
-    fn test_chat_route() {
-        let chat_route = MainRoute::Chat;
-        assert!(format!("{:?}", chat_route).contains("Chat"));
-    }
-
-    /// Tests message content validation
-    #[test]
-    fn test_message_content_validation() {
-        // Test empty message
-        let empty_message = "";
-        assert!(empty_message.trim().is_empty());
-
-        // Test whitespace-only message
-        let whitespace_message = "   \n\t  ";
-        assert!(whitespace_message.trim().is_empty());
-
-        // Test valid message
-        let valid_message = "Hello, this is a test message!";
-        assert!(!valid_message.trim().is_empty());
-        assert!(valid_message.len() > 5);
-    }
-
-    /// Tests message input handling
-    #[test]
-    fn test_message_input_handling() {
-        let user_input = "What is the weather like today?";
-
-        // Validate input
-        assert!(!user_input.is_empty());
-        assert!(!user_input.is_empty());
-        assert!(user_input.ends_with("?"));
-
-        // Test input sanitization
-        let trimmed_input = user_input.trim();
-        assert_eq!(trimmed_input, user_input);
-    }
-
-    /// Tests conversation management
-    #[test]
-    fn test_conversation_management() {
-        let conversation_ids = vec!["conv-123", "conv-456", "conv-789"];
-
-        for id in conversation_ids {
-            assert!(!id.is_empty());
-            assert!(id.starts_with("conv-"));
-            assert!(id.len() > 5);
-        }
-    }
-
-    /// Tests message rendering data structures
-    #[test]
-    fn test_message_rendering() {
-        // Test message structure
-        let message_content = "This is a test message for rendering";
-        let sender = "user";
-        let timestamp = "2024-01-01T12:00:00Z";
-
-        assert!(!message_content.is_empty());
-        assert!(sender == "user" || sender == "assistant");
-        assert!(timestamp.contains("T"));
-        assert!(timestamp.contains("Z"));
-    }
-
-    /// Tests error handling scenarios
-    #[test]
-    fn test_error_handling() {
-        // Test network error simulation
-        let network_error = "Failed to send message: Network error";
-        assert!(network_error.contains("Network error"));
-
-        // Test validation error
-        let validation_error = "Message cannot be empty";
-        assert!(validation_error.contains("empty"));
-
-        // Test authentication error
-        let auth_error = "Unauthorized: Please log in";
-        assert!(auth_error.contains("Unauthorized"));
-    }
-
-    /// Tests conversation loading states
-    #[test]
-    fn test_conversation_loading_states() {
-        // Test loading state
-        let is_loading = true;
-        assert!(is_loading);
-
-        // Test loaded state
-        let is_loaded = true;
-        let has_error = false;
-        assert!(is_loaded);
-        assert!(!has_error);
-
-        // Test error state
-        let has_error = true;
-        let error_message = "Failed to load conversation";
-        assert!(has_error);
-        assert!(!error_message.is_empty());
-    }
-
-    /// Tests internationalization keys
-    #[test]
-    fn test_i18n_keys() {
-        let translation_keys = vec![
-            "chat.send_message",
-            "chat.type_message",
-            "chat.loading",
-            "chat.error",
-            "chat.conversation_not_found",
-        ];
-
-        for key in translation_keys {
-            assert!(key.starts_with("chat."));
-            assert!(!key.is_empty());
-            assert!(key.len() > 5);
-        }
-    }
-
-    /// Tests URL parameter parsing
-    #[test]
-    fn test_url_parameter_parsing() {
-        let conversation_url = "/chat/conv-abc123";
-        let parts: Vec<&str> = conversation_url.split('/').collect();
-
-        assert_eq!(parts.len(), 3);
-        assert_eq!(parts[0], "");
-        assert_eq!(parts[1], "chat");
-        assert_eq!(parts[2], "conv-abc123");
-
-        let conversation_id = parts[2];
-        assert!(conversation_id.starts_with("conv-"));
-    }
-
-    /// Tests streaming message integration
-    #[test]
-    fn test_streaming_integration() {
-        let stream_url = "/api/stream/user-123";
-        assert!(stream_url.starts_with("/api/stream/"));
-        assert!(stream_url.contains("user-"));
-        assert!(stream_url.len() > 15);
     }
 }

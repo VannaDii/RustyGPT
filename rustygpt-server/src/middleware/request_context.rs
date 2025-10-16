@@ -15,7 +15,6 @@ use shared::config::server::Config;
 #[derive(Clone, Debug, Default)]
 pub struct RequestContext {
     pub request_id: String,
-    #[allow(dead_code)]
     pub user_id: Option<Uuid>,
 }
 

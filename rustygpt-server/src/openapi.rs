@@ -1,6 +1,4 @@
-use shared::models::{
-    Conversation, ErrorResponse, SetupRequest, SetupResponse, conversation::SendMessageResponse,
-};
+use shared::models::{ErrorResponse, SetupRequest, SetupResponse};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -19,22 +17,17 @@ use utoipa::OpenApi;
         crate::handlers::apple_auth::apple_oauth_init,
         crate::handlers::apple_auth::apple_oauth_callback,
         crate::handlers::apple_auth::apple_oauth_manual,
-        crate::handlers::conversation::get_conversation,
-        crate::handlers::conversation::send_message,
     ),
     components(
         schemas(
             SetupRequest,
             SetupResponse,
             ErrorResponse,
-            Conversation,
-            SendMessageResponse,
         )
     ),
     tags(
         (name = "Setup", description = "Setup-related endpoints"),
-        (name = "Auth", description = "Authentication-related endpoints"),
-        (name = "Chat", description = "Chat-related endpoints")
+        (name = "Auth", description = "Authentication-related endpoints")
     )
 )]
 pub struct ApiDoc;

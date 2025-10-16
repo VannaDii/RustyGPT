@@ -192,7 +192,7 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
 - [X] Build components
   - [X] ChatBox
   - [ ] Streaming tokens
-  - [ ] Threaded view
+  - [X] Threaded view
 - [X] Use shared types via `rustygpt-shared`
 
 ---

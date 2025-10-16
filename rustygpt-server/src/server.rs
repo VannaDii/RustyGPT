@@ -1,4 +1,4 @@
-use crate::handlers::streaming::{SharedState, SseCoordinator};
+use crate::handlers::streaming::{SharedStreamHub, StreamHub};
 use app_state::AppState;
 use axum::{Extension, Router, middleware, response::IntoResponse, routing::get, serve};
 use routes::openapi::openapi_routes;
@@ -29,7 +29,10 @@ use crate::{
         security::{self, SecurityHeadersState},
     },
     routes,
-    services::sse_persistence::{self, SsePersistenceStore},
+    services::{
+        assistant_service::AssistantService,
+        sse_persistence::{SsePersistence, SsePersistenceStore},
+    },
     tracer,
 };
 use axum::http::{HeaderValue, StatusCode, header};
@@ -128,8 +131,16 @@ pub async fn create_database_pool(db: &DatabaseConfig) -> Result<sqlx::PgPool, s
 ///
 /// # Returns
 /// Returns an [`Arc<AppState>`] for sharing across the application.
-pub fn create_app_state(pool: Option<sqlx::PgPool>) -> Arc<AppState> {
-    Arc::new(AppState { pool })
+pub fn create_app_state(
+    pool: Option<sqlx::PgPool>,
+    assistant: Option<Arc<AssistantService>>,
+    sse_store: Option<Arc<dyn SsePersistence>>,
+) -> Arc<AppState> {
+    Arc::new(AppState {
+        pool,
+        assistant,
+        sse_store,
+    })
 }
 
 /// Creates the CORS layer for the application.
@@ -192,16 +203,13 @@ pub fn create_api_router(config: Arc<Config>) -> Router<Arc<AppState>> {
 
     if config.features.sse_v1 && config.features.auth_v1 {
         router = router.route(
-            "/stream",
-            axum::routing::get(crate::handlers::streaming::sse_handler)
+            "/stream/conversations/:conversation_id",
+            axum::routing::get(crate::handlers::streaming::conversation_stream)
                 .route_layer(middleware::from_fn(auth_middleware)),
         );
     }
 
-    router.route(
-        "/messages",
-        axum::routing::post(crate::handlers::conversation::send_message_to_default_conversation),
-    )
+    router
 }
 
 /// Creates the static file service for serving frontend assets.
@@ -240,33 +248,18 @@ where
 /// # Returns
 /// Returns the fully configured application [`Router`].
 pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
-    let persistence_cfg = if config.sse.persistence.enabled {
+    let persistence_config = if config.sse.persistence.enabled {
         Some(config.sse.persistence.clone())
     } else {
         None
     };
-
-    let persistence_store: Option<Arc<dyn sse_persistence::SsePersistence>> =
-        if config.sse.persistence.enabled {
-            state.pool.as_ref().map(|pool| {
-                Arc::new(SsePersistenceStore::new(
-                    pool.clone(),
-                    config.sse.persistence.clone(),
-                )) as Arc<dyn sse_persistence::SsePersistence>
-            })
-        } else {
-            None
-        };
-
-    let shared_state: SharedState = Arc::new(SseCoordinator::new(
+    let stream_hub: SharedStreamHub = Arc::new(StreamHub::new(
         config.sse.channel_capacity,
-        config.sse.id_prefix.clone(),
-        persistence_store,
-        persistence_cfg,
-        config.sse.backpressure.clone(),
+        state.sse_store.clone(),
+        persistence_config,
     ));
 
-    let api_router = create_api_router(config.clone()).layer(Extension(shared_state));
+    let api_router = create_api_router(config.clone()).layer(Extension(stream_hub.clone()));
     let static_files_service =
         create_static_service(config.web.static_dir.clone(), config.web.spa_index.clone());
 
@@ -348,8 +341,18 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
 
+    let assistant = Arc::new(AssistantService::new(config.clone()));
+    let sse_store: Option<Arc<dyn SsePersistence>> = if config.sse.persistence.enabled {
+        Some(Arc::new(SsePersistenceStore::new(
+            pool.clone(),
+            config.sse.persistence.clone(),
+        )))
+    } else {
+        None
+    };
+
     // Create application state
-    let state = create_app_state(Some(pool));
+    let state = create_app_state(Some(pool.clone()), Some(assistant), sse_store.clone());
 
     // Create the application router
     let app = create_app_router(state, config.clone());

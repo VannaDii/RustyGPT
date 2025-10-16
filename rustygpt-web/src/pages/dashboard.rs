@@ -105,7 +105,7 @@ pub fn dashboard_page() -> Html {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::*;
     use wasm_bindgen_test::*;
@@ -113,7 +113,6 @@ mod tests {
     wasm_bindgen_test_configure!(run_in_browser);
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_dashboard_page_function_exists() {
         // Test that the dashboard page component can be referenced
         let config = FrontendConfig::new();
@@ -121,7 +120,6 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_frontend_config_integration() {
         let config = FrontendConfig::new();
         assert!(!config.documentation_url().is_empty());
@@ -129,7 +127,6 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_frontend_config_default_url() {
         let config = FrontendConfig::default();
         let url = config.documentation_url();
@@ -137,7 +134,6 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_frontend_config_clone() {
         let config1 = FrontendConfig::new();
         let config2 = config1.clone();
@@ -145,7 +141,6 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_frontend_config_debug() {
         let config = FrontendConfig::new();
         let debug_str = format!("{:?}", config);
@@ -154,7 +149,6 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_dashboard_component_creation() {
         // Test that we can create the dashboard component without panicking
         let config = FrontendConfig::new();
@@ -163,7 +157,6 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_dashboard_uses_configuration() {
         // Test that dashboard properly uses the configuration system
         let config = FrontendConfig::new();

@@ -12,65 +12,50 @@ async fn test_chat_command_help() {
         .stdout(predicates::str::contains(
             "Start an interactive chat session with the AI",
         ))
-        .stdout(predicates::str::contains("--model"))
-        .stdout(predicates::str::contains("--max-tokens"))
-        .stdout(predicates::str::contains("--temperature"))
-        .stdout(predicates::str::contains("--system"));
+        .stdout(predicates::str::contains("--conversation"))
+        .stdout(predicates::str::contains("--root"))
+        .stdout(predicates::str::contains("--limit"))
+        .stdout(predicates::str::contains("--server"));
 }
 
 #[tokio::test]
-async fn test_chat_command_with_nonexistent_model() {
+async fn test_chat_command_requires_conversation() {
     let mut cmd = Command::cargo_bin("cli").unwrap();
-    cmd.arg("chat")
-        .arg("--model")
-        .arg("/nonexistent/model.gguf")
-        .timeout(std::time::Duration::from_secs(5))
-        .write_stdin("");
+    cmd.arg("chat").timeout(std::time::Duration::from_secs(5));
 
     cmd.assert()
         .failure()
-        .stderr(predicates::str::contains("Failed to load LLM model"));
+        .stderr(predicates::str::contains(
+            "the following required arguments were not provided",
+        ))
+        .stderr(predicates::str::contains("--conversation <CONVERSATION>"));
 }
 
 #[tokio::test]
-async fn test_chat_command_invalid_temperature() {
+async fn test_chat_command_invalid_conversation_uuid() {
     let mut cmd = Command::cargo_bin("cli").unwrap();
     cmd.arg("chat")
-        .arg("--temperature")
-        .arg("1.5")
+        .arg("--conversation")
+        .arg("not-a-uuid")
         .timeout(std::time::Duration::from_secs(5));
-
-    cmd.assert().failure().stderr(predicates::str::contains(
-        "Temperature must be between 0.0 and 1.0",
-    ));
-}
-
-#[tokio::test]
-async fn test_chat_command_invalid_max_tokens() {
-    let mut cmd = Command::cargo_bin("cli").unwrap();
-    cmd.arg("chat")
-        .arg("--max-tokens")
-        .arg("0")
-        .timeout(std::time::Duration::from_secs(5));
-
-    cmd.assert().failure().stderr(predicates::str::contains(
-        "Max tokens must be greater than 0",
-    ));
-}
-
-#[tokio::test]
-async fn test_chat_command_with_mock_model() {
-    // Test that the chat command properly handles model loading errors
-    // (The mock implementation has realistic hardware validation)
-    let mut cmd = Command::cargo_bin("cli").unwrap();
-    cmd.arg("chat")
-        .arg("--system")
-        .arg("You are a test assistant.")
-        .timeout(std::time::Duration::from_secs(5))
-        .write_stdin("exit\n");
 
     cmd.assert()
-        .failure() // Expect failure due to missing model
-        .stdout(predicates::str::contains("🚀 Starting RustyGPT Chat..."))
-        .stderr(predicates::str::contains("Failed to load LLM model"));
+        .failure()
+        .stderr(predicates::str::contains("invalid value"))
+        .stderr(predicates::str::contains("--conversation <CONVERSATION>"));
+}
+
+#[tokio::test]
+async fn test_chat_command_connection_failure() {
+    let mut cmd = Command::cargo_bin("cli").unwrap();
+    cmd.arg("chat")
+        .arg("--conversation")
+        .arg("00000000-0000-0000-0000-000000000001")
+        .arg("--limit")
+        .arg("5")
+        .timeout(std::time::Duration::from_secs(10));
+
+    cmd.assert()
+        .failure()
+        .stderr(predicates::str::contains("failed to fetch threads"));
 }

@@ -1,16 +1,11 @@
 pub mod apple_auth;
-pub mod conversation;
+pub mod conversations;
 pub mod copilot;
 pub mod github_auth;
 pub mod oauth_testable;
 pub mod setup;
 pub mod streaming;
-
-#[cfg(test)]
-mod conversation_test;
-
-#[cfg(test)]
-mod conversation_tests;
+pub mod threads;
 
 #[cfg(test)]
 mod apple_auth_test;

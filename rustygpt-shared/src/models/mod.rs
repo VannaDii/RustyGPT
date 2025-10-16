@@ -1,19 +1,30 @@
-pub mod conversation;
+pub mod chat;
 pub mod errors;
-pub mod message;
 pub mod oauth;
 pub mod setup;
 pub mod streaming;
+pub mod threads;
 pub mod timestamp;
 pub mod user;
 
-pub use conversation::{Conversation, CreateConversationRequest};
+pub use chat::{
+    AddParticipantRequest, ChatDelta, ChatDeltaChoice, ChatDeltaChunk, ConversationCreateRequest,
+    ConversationCreateResponse, ConversationRole, ConversationStreamEvent, MessageChunkPayload,
+    MessageDoneEvent, MessageRole, MessageView, PostRootMessageRequest, PostRootMessageResponse,
+    ReplyMessageRequest, ReplyMessageResponse, StreamErrorEvent, ThreadActivityEvent,
+    ThreadListResponse, ThreadNewEvent, ThreadSummary, ThreadTreeResponse, UsageBreakdown,
+};
 pub use errors::ErrorResponse;
-pub use message::{CreateMessageRequest, Message, MessageType};
 use serde::{Deserialize, Serialize};
 pub use setup::SetupRequest;
 pub use setup::SetupResponse;
 pub use streaming::MessageChunk;
+pub use threads::{
+    AcceptInviteRequest, CreateInviteRequest, CreateInviteResponse, MarkThreadReadRequest,
+    MembershipChangeAction, MembershipChangedEvent, MessageDeleteRequest, MessageEditRequest,
+    PresenceHeartbeatRequest, PresenceStatus, PresenceUpdate, TypingRequest, TypingUpdate,
+    UnreadSummaryResponse, UnreadThreadSummary, UnreadUpdateEvent,
+};
 pub use timestamp::Timestamp;
 pub use user::User;
 

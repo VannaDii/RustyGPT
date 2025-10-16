@@ -31,7 +31,7 @@ impl FrontendConfig {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::*;
     use wasm_bindgen_test::*;
@@ -39,7 +39,6 @@ mod tests {
     wasm_bindgen_test_configure!(run_in_browser);
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_frontend_config_default() {
         let config = FrontendConfig::default();
         assert!(!config.documentation_url.is_empty());
@@ -47,14 +46,12 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_frontend_config_new() {
         let config = FrontendConfig::new();
         assert!(!config.documentation_url().is_empty());
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_frontend_config_clone() {
         let config1 = FrontendConfig::new();
         let config2 = config1.clone();
@@ -62,7 +59,6 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    #[allow(dead_code)] // WASM tests may not be run in regular test suite
     fn test_frontend_config_debug() {
         let config = FrontendConfig::new();
         let debug_str = format!("{:?}", config);

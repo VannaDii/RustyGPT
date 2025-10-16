@@ -22,11 +22,13 @@ tokio = { workspace = true, optional = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
+async-stream = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 directories = { workspace = true }
 toml = { workspace = true }
 url = { workspace = true }
+llama_cpp = { version = "0.3" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true }

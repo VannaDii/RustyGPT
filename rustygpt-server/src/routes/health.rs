@@ -107,6 +107,8 @@ mod tests {
 
         let state = Arc::new(AppState {
             pool: Some(test_pool()),
+            assistant: None,
+            sse_store: None,
         });
 
         let app = create_health_router().with_state(state);
@@ -135,6 +137,8 @@ mod tests {
 
         let state = Arc::new(AppState {
             pool: Some(test_pool()),
+            assistant: None,
+            sse_store: None,
         });
 
         let app = create_health_router().with_state(state);

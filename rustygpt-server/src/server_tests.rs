@@ -31,7 +31,7 @@ mod tests {
         let state = AppState::default();
 
         // Verify default state is created correctly
-        assert!(!state.has_database());
+        assert!(state.pool.is_none());
     }
 
     #[test]
@@ -57,7 +57,7 @@ mod tests {
         let state = AppState::default();
 
         // Verify state initialization
-        assert!(!state.has_database());
+        assert!(state.pool.is_none());
     }
 
     #[tokio::test]

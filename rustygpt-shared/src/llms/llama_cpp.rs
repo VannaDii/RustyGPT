@@ -1,834 +1,710 @@
-//! # Mock Llama.cpp Implementation
-//!
-//! This module provides a mock implementation of the LLM traits for development and testing.
-//! This can be replaced with a real `llama-cpp-rs` implementation once the build issues are resolved.
-//!
-//! The mock implementation provides realistic interfaces and can be used to test the trait system
-//! and develop the server/CLI integration without requiring actual model files.
-//!
-//! ## Hardware Optimization
-//!
-//! This implementation includes intelligent hardware detection and parameter optimization
-//! to ensure models load safely and efficiently on the target system.
+//! Llama.cpp backed provider.
 
-use crate::llms::{
-    errors::{LLMError, LLMResult},
-    hardware::{OptimalParams, SystemHardware},
-    traits::{LLMModel, LLMProvider, StreamingResponseStream},
-    types::{
-        FinishReason, LLMConfig, LLMRequest, LLMResponse, ModelCapabilities, ModelInfo,
-        StreamingResponse, TokenUsage,
-    },
-};
-use async_trait::async_trait;
-use chrono::Utc;
-use futures_util::{StreamExt, stream};
-#[cfg(all(target_arch = "wasm32", not(feature = "tokio")))]
-use gloo_timers::future::sleep;
-use std::{collections::HashMap, path::Path, time::Duration};
-#[cfg(feature = "tokio")]
-use tokio::time::sleep;
+#[cfg(not(target_arch = "wasm32"))]
+mod native {
+    use std::{
+        collections::HashMap,
+        convert::TryInto,
+        path::{Path, PathBuf},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Instant,
+    };
 
-/// Async sleep function that works across different environments
-#[cfg(feature = "tokio")]
-async fn async_sleep(duration: Duration) {
-    sleep(duration).await;
-}
+    use async_stream::try_stream;
+    use chrono::Utc;
+    use futures_util::StreamExt;
+    use llama_cpp::{
+        LlamaContextError, LlamaLoadError, LlamaModel, LlamaParams, LlamaSession,
+        LlamaTokenizationError, SessionParams,
+        standard_sampler::{SamplerStage, StandardSampler},
+    };
+    use tokio::task;
+    use tracing::info;
 
-#[cfg(all(target_arch = "wasm32", not(feature = "tokio")))]
-async fn async_sleep(duration: Duration) {
-    sleep(duration).await;
-}
+    use crate::llms::{
+        errors::{LLMError, LLMResult},
+        traits::{LLMModel, LLMProvider, StreamingResponseStream},
+        types::{
+            FinishReason, LLMConfig, LLMRequest, LLMResponse, ModelCapabilities, ModelInfo,
+            StreamingResponse, TokenUsage,
+        },
+    };
 
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "tokio")))]
-async fn async_sleep(_duration: Duration) {
-    // No-op for non-tokio, non-WASM environments
-    // This is acceptable for a mock implementation
-}
-use tracing::{info, warn};
+    #[derive(Debug, Clone)]
+    pub struct LlamaCppProvider {
+        base_config: LLMConfig,
+    }
 
-/// Mock Llama.cpp provider implementation
-///
-/// This is a development implementation that simulates the behavior of a real LLM
-/// without requiring actual model files or the `llama-cpp-rs` dependency.
-///
-/// The provider automatically detects hardware capabilities and optimizes
-/// loading parameters for the best performance and stability.
-#[derive(Debug, Clone)]
-pub struct LlamaCppProvider {
-    /// Configuration used to initialize models
-    config: LLMConfig,
-    /// Detected hardware information
-    hardware_info: Option<SystemHardware>,
-    /// Optimal parameters for this hardware
-    optimal_params: Option<OptimalParams>,
-}
+    #[derive(Clone)]
+    pub struct LlamaCppModel {
+        config: LLMConfig,
+        model: Arc<LlamaModel>,
+        info: ModelInfo,
+        ready: Arc<AtomicBool>,
+    }
 
-/// Mock Llama.cpp model implementation
-///
-/// Provides realistic responses for development and testing purposes.
-#[derive(Debug, Clone)]
-pub struct LlamaCppModel {
-    /// Model configuration
-    config: LLMConfig,
-    /// Model information
-    info: ModelInfo,
-    /// Whether the model is ready for inference
-    ready: bool,
-    /// Simulated memory usage
-    memory_usage: usize,
-}
-
-#[async_trait]
-impl LLMProvider for LlamaCppProvider {
-    type Model = LlamaCppModel;
-
-    async fn new(config: LLMConfig) -> LLMResult<Self> {
-        // Validate configuration
-        if config.model_path.is_empty() {
-            return Err(LLMError::invalid_config(
-                "model_path",
-                "Model path cannot be empty",
-            ));
+    impl LlamaCppProvider {
+        fn model_params(config: &LLMConfig) -> LlamaParams {
+            let mut params = LlamaParams::default();
+            if let Some(layers) = config.n_gpu_layers {
+                params.n_gpu_layers = layers;
+            }
+            if let Some(use_mmap) = config
+                .additional_params
+                .get("use_mmap")
+                .and_then(|value| value.as_bool())
+            {
+                params.use_mmap = use_mmap;
+            }
+            if let Some(use_mlock) = config
+                .additional_params
+                .get("use_mlock")
+                .and_then(|value| value.as_bool())
+            {
+                params.use_mlock = use_mlock;
+            }
+            params
         }
 
-        // Detect hardware and calculate optimal parameters
-        let (hardware_info, optimal_params) = match SystemHardware::detect() {
-            Ok(hardware) => {
-                let params = hardware.calculate_optimal_params(None);
-                (Some(hardware), Some(params))
-            }
-            Err(e) => {
-                // Log warning but continue without hardware optimization
-                warn!(
-                    message = "Failed to detect hardware, using default parameters",
-                    error = %e
-                );
-                (None, None)
-            }
-        };
+        fn build_model_info(model: &LlamaModel, config: &LLMConfig) -> ModelInfo {
+            let name = Path::new(&config.model_path)
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_else(|| config.model_path.clone());
 
-        Ok(Self {
-            config,
-            hardware_info,
-            optimal_params,
-        })
-    }
-
-    async fn load_model(&self, model_path: &str) -> LLMResult<Self::Model> {
-        let mut config = self.config.clone();
-        config.model_path = model_path.to_string();
-        self.load_model_with_config(config).await
-    }
-
-    async fn load_model_with_config(&self, mut config: LLMConfig) -> LLMResult<Self::Model> {
-        // Validate model path exists
-        if !Path::new(&config.model_path).exists() {
-            return Err(LLMError::model_not_found(&config.model_path));
-        }
-
-        // Check if model format is supported
-        if !self.is_model_supported(&config.model_path) {
-            return Err(LLMError::InvalidModelFormat {
-                details: format!("Unsupported model format: {}", config.model_path),
-            });
-        }
-
-        // Apply hardware optimization if available
-        if let Some(optimal_params) = &self.optimal_params {
-            // Estimate model size from file if not provided
-            let model_size_estimate = std::fs::metadata(&config.model_path)
-                .map(|metadata| metadata.len())
-                .ok();
-
-            // Apply optimal parameters
-            config = config.apply_optimal_params(optimal_params, model_size_estimate);
-
-            // Log optimization information
-            if let Some(hardware) = &self.hardware_info {
-                info!(
-                    message = "Hardware detected and optimizations applied",
-                    hardware_description = %hardware.description(),
-                    n_threads = optimal_params.n_threads,
-                    n_gpu_layers = optimal_params.n_gpu_layers,
-                    context_size = optimal_params.context_size,
-                    batch_size = optimal_params.batch_size
-                );
-            }
-        }
-
-        // Validate the configuration is safe for this hardware
-        if let Err(warnings) = config.validate_for_hardware() {
-            for warning in &warnings {
-                warn!(
-                    message = "Configuration validation warning",
-                    warning = %warning
-                );
-            }
-            // Continue with warnings but log them
-        }
-
-        // Simulate model loading time based on model size
-        let model_size = std::fs::metadata(&config.model_path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(1024 * 1024 * 1024); // Default 1GB if unknown
-
-        // Simulate loading time: larger models take longer
-        let loading_time_ms = (model_size / (100 * 1024 * 1024)).clamp(100, 2000);
-        async_sleep(Duration::from_millis(loading_time_ms)).await;
-
-        // Extract model information
-        let info = Self::extract_model_info(&config)?;
-
-        // Calculate simulated memory usage based on model parameters
-        let estimated_memory = self.estimate_model_memory_usage(&config, &info);
-
-        // Check if we have enough memory for the model
-        if self.hardware_info.is_some() {
-            if let Some(optimal_params) = &self.optimal_params {
-                if estimated_memory as u64 > optimal_params.max_model_size {
-                    return Err(LLMError::InvalidConfiguration {
-                        field: "model_size".to_string(),
-                        message: format!(
-                            "Model requires approximately {}MB but only {}MB is safely available",
-                            estimated_memory / (1024 * 1024),
-                            optimal_params.max_model_size / (1024 * 1024)
-                        ),
-                    });
-                }
-            }
-        }
-
-        Ok(LlamaCppModel {
-            config,
-            info,
-            ready: true,
-            memory_usage: estimated_memory,
-        })
-    }
-
-    async fn list_available_models(&self) -> LLMResult<Vec<String>> {
-        // This would typically scan a models directory
-        // For now, return empty list as this is provider-specific
-        Ok(Vec::new())
-    }
-
-    fn get_provider_info(&self) -> String {
-        "Mock LlamaCpp Provider v1.0 (Development Only)".to_string()
-    }
-
-    fn is_model_supported(&self, model_path: &str) -> bool {
-        // Check for GGUF format
-        model_path.ends_with(".gguf") || model_path.ends_with(".GGUF")
-    }
-}
-
-impl LlamaCppProvider {
-    /// Create a new provider with hardware optimization
-    ///
-    /// This is a convenience method that automatically detects hardware
-    /// and applies optimal parameters.
-    ///
-    /// # Arguments
-    ///
-    /// * `model_path` - Path to the model file
-    ///
-    /// # Returns
-    ///
-    /// A [`LLMResult`] containing the optimized provider.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use shared::llms::llama_cpp::LlamaCppProvider;
-    ///
-    /// let provider = LlamaCppProvider::new_optimized("/path/to/model.gguf").await?;
-    /// ```
-    pub async fn new_optimized<P: Into<String>>(model_path: P) -> LLMResult<Self> {
-        let config = LLMConfig::optimized_for_hardware(model_path, None).map_err(|e| {
-            LLMError::ModelInitializationFailed {
-                message: format!("Hardware optimization failed: {}", e),
-            }
-        })?;
-
-        Self::new(config).await
-    }
-
-    /// Extract model information from configuration
-    fn extract_model_info(config: &LLMConfig) -> LLMResult<ModelInfo> {
-        let name = Path::new(&config.model_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-
-        let context_length = config.context_size.unwrap_or(2048);
-
-        Ok(ModelInfo {
-            name,
-            version: Some("mock-1.0".to_string()),
-            architecture: Some("llama".to_string()),
-            parameter_count: Some(7_000_000_000), // 7B parameters
-            context_length: Some(context_length),
-            capabilities: ModelCapabilities {
+            let capabilities = ModelCapabilities {
                 text_generation: true,
                 text_embedding: false,
                 chat_format: true,
                 function_calling: false,
                 streaming: true,
-                max_context_length: Some(context_length),
-                supported_languages: vec!["en".to_string(), "es".to_string(), "fr".to_string()],
-            },
-        })
+                max_context_length: config.context_size,
+                supported_languages: vec!["en".to_string()],
+            };
+
+            ModelInfo {
+                name,
+                version: None,
+                architecture: Some("llama.cpp".to_string()),
+                parameter_count: None,
+                context_length: Some(model.train_len() as u32),
+                capabilities,
+            }
+        }
     }
 
-    /// Estimate memory usage for a model based on configuration and info
-    ///
-    /// This method provides a realistic estimate of how much memory the model
-    /// will consume when loaded, including the model weights, KV cache, and overhead.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - The [`LLMConfig`] containing model parameters
-    /// * `info` - The [`ModelInfo`] containing model metadata
-    ///
-    /// # Returns
-    ///
-    /// Estimated memory usage in bytes.
-    fn estimate_model_memory_usage(&self, config: &LLMConfig, info: &ModelInfo) -> usize {
-        // Get model file size as base
-        let model_file_size = std::fs::metadata(&config.model_path)
-            .map(|metadata| metadata.len() as usize)
-            .unwrap_or(4 * 1024 * 1024 * 1024); // Default 4GB if unknown
+    #[async_trait::async_trait]
+    impl LLMProvider for LlamaCppProvider {
+        type Model = LlamaCppModel;
 
-        // Estimate KV cache size based on context length
-        let context_size = config.context_size.unwrap_or(2048) as usize;
-        let parameter_count = info.parameter_count.unwrap_or(7_000_000_000) as usize;
-
-        // Rough calculation for KV cache size
-        // Each token in context requires storing key and value vectors
-        let hidden_size = (parameter_count as f64).sqrt() as usize; // Rough estimate
-        let num_layers = 32; // Typical for 7B models
-        let kv_cache_size = context_size * hidden_size * num_layers * 2 * 2; // 2 for K+V, 2 for bytes per element (fp16)
-
-        // Add overhead for GPU memory (if using GPU layers)
-        let gpu_overhead = if config.n_gpu_layers.unwrap_or(0) > 0 {
-            model_file_size / 10 // 10% overhead for GPU
-        } else {
-            0
-        };
-
-        // Add general overhead (buffers, intermediate calculations, etc.)
-        let general_overhead = model_file_size / 20; // 5% general overhead
-
-        model_file_size + kv_cache_size + gpu_overhead + general_overhead
-    }
-}
-
-#[async_trait]
-impl LLMModel for LlamaCppModel {
-    async fn generate(&self, request: LLMRequest) -> LLMResult<LLMResponse> {
-        if !self.is_ready() {
-            return Err(LLMError::ModelNotLoaded);
+        async fn new(config: LLMConfig) -> LLMResult<Self> {
+            if config.model_path.is_empty() {
+                return Err(LLMError::invalid_config(
+                    "model_path",
+                    "model path cannot be empty",
+                ));
+            }
+            Ok(Self {
+                base_config: config,
+            })
         }
 
-        // Simulate processing time
-        let processing_time = Duration::from_millis(100 + (request.prompt.len() as u64 * 2));
-        async_sleep(processing_time).await;
-
-        // Prepare the prompt
-        let full_prompt = if let Some(system_msg) = &request.system_message {
-            format!("{}\n\n{}", system_msg, request.prompt)
-        } else {
-            request.prompt.clone()
-        };
-
-        // Generate mock response based on prompt
-        let generated_text = self.generate_mock_response(&request.prompt);
-
-        // Simulate token counting
-        let prompt_tokens = self.estimate_tokens(&full_prompt);
-        let completion_tokens = self.estimate_tokens(&generated_text);
-
-        // Determine finish reason
-        let max_tokens = request.max_tokens.or(self.config.max_tokens).unwrap_or(512);
-
-        let finish_reason = if completion_tokens >= max_tokens {
-            FinishReason::MaxTokens
-        } else if request
-            .stop_sequences
-            .iter()
-            .any(|seq| generated_text.contains(seq))
-        {
-            FinishReason::StopSequence
-        } else {
-            FinishReason::EndOfText
-        };
-
-        Ok(LLMResponse {
-            request_id: request.id,
-            text: generated_text,
-            finished: true,
-            finish_reason: Some(finish_reason),
-            usage: TokenUsage::new(prompt_tokens, completion_tokens),
-            timestamp: Utc::now(),
-            model_info: self.info.clone(),
-            metadata: HashMap::new(),
-        })
-    }
-
-    async fn generate_stream(&self, request: LLMRequest) -> LLMResult<StreamingResponseStream> {
-        if !self.is_ready() {
-            return Err(LLMError::ModelNotLoaded);
+        async fn load_model(&self, model_path: &str) -> LLMResult<Self::Model> {
+            let mut config = self.base_config.clone();
+            config.model_path = model_path.to_string();
+            self.load_model_with_config(config).await
         }
 
-        let response_text = self.generate_mock_response(&request.prompt);
-        let words: Vec<&str> = response_text.split_whitespace().collect();
-        let request_id = request.id;
+        async fn load_model_with_config(&self, config: LLMConfig) -> LLMResult<Self::Model> {
+            let path = PathBuf::from(&config.model_path);
+            if !path.exists() {
+                return Err(LLMError::model_not_found(&config.model_path));
+            }
 
-        // Create streaming chunks
-        let chunks: Vec<_> = words
-            .iter()
-            .enumerate()
-            .map(|(i, word)| {
-                let is_final = i == words.len() - 1;
-                let text_delta = if i == 0 {
-                    word.to_string()
+            let params = Self::model_params(&config);
+            let load_started = Instant::now();
+            let model = task::spawn_blocking({
+                let path = path.clone();
+                move || LlamaModel::load_from_file(path, params)
+            })
+            .await
+            .map_err(|err| LLMError::internal(err))?
+            .map_err(map_load_error)?;
+
+            let elapsed = load_started.elapsed().as_secs_f64();
+            info!(
+                model_path = %config.model_path,
+                elapsed_seconds = elapsed,
+                "loaded llama.cpp model"
+            );
+
+            let info = Self::build_model_info(&model, &config);
+
+            Ok(LlamaCppModel {
+                config,
+                model: Arc::new(model),
+                info,
+                ready: Arc::new(AtomicBool::new(true)),
+            })
+        }
+
+        async fn list_available_models(&self) -> LLMResult<Vec<String>> {
+            Ok(vec![self.base_config.model_path.clone()])
+        }
+
+        fn get_provider_info(&self) -> String {
+            "llama_cpp (native)".to_string()
+        }
+
+        fn is_model_supported(&self, model_path: &str) -> bool {
+            Path::new(model_path)
+                .extension()
+                .map(|ext| ext.eq_ignore_ascii_case("gguf"))
+                .unwrap_or(false)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LLMModel for LlamaCppModel {
+        async fn generate(&self, request: LLMRequest) -> LLMResult<LLMResponse> {
+            let mut stream = self.generate_stream(request.clone()).await?;
+            let mut text = String::new();
+            let mut usage = TokenUsage::default();
+            let mut finish_reason = None;
+
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk?;
+                text.push_str(&chunk.text_delta);
+                usage = chunk.usage.clone();
+                if chunk.is_final {
+                    finish_reason = chunk.finish_reason.clone();
+                }
+            }
+
+            Ok(LLMResponse {
+                request_id: request.id,
+                text,
+                finished: true,
+                finish_reason,
+                usage,
+                timestamp: Utc::now(),
+                model_info: self.info.clone(),
+                metadata: HashMap::new(),
+            })
+        }
+
+        async fn generate_stream(&self, request: LLMRequest) -> LLMResult<StreamingResponseStream> {
+            if !self.ready.load(Ordering::SeqCst) {
+                return Err(LLMError::ModelNotLoaded);
+            }
+
+            let model = Arc::clone(&self.model);
+            let config = self.config.clone();
+
+            let stream = try_stream! {
+                let mut session = create_session(model.clone(), &config).await?;
+                let prompt = combine_prompt(&request);
+                session
+                    .advance_context_async(prompt.as_bytes())
+                    .await
+                    .map_err(map_context_error)?;
+
+                let prompt_tokens = session
+                    .context_size()
+                    .try_into()
+                    .unwrap_or(u32::MAX);
+
+                let sampler = build_sampler(&config, &request);
+                let max_tokens_limit = request
+                    .max_tokens
+                    .or(config.max_tokens)
+                    .unwrap_or(512);
+                let max_tokens = if max_tokens_limit == 0 {
+                    None
                 } else {
-                    format!(" {}", word)
+                    Some(max_tokens_limit)
                 };
 
-                // Clone for move into async block
-                let response_text_clone = response_text.clone();
+                let max_predictions = max_tokens
+                    .map(|value| value as usize)
+                    .unwrap_or(u32::MAX as usize);
 
-                // Simulate streaming delay
-                let delay = Duration::from_millis(50);
+                let completion = session
+                    .start_completing_with(
+                        sampler,
+                        max_predictions,
+                    )
+                    .map_err(map_context_error)?;
 
-                Box::pin(async move {
-                    async_sleep(delay).await;
-                    Ok(StreamingResponse {
-                        request_id,
-                        text_delta,
-                        is_final,
-                        current_text: if is_final {
-                            Some(response_text_clone)
+                let mut token_bytes = completion.into_bytes();
+                let mut decoder = Utf8Decoder::new();
+                let mut aggregated = String::new();
+                let mut emitted_tokens: u32 = 0;
+                let mut finish_reason: Option<FinishReason> = None;
+                let stop_sequences = request.stop_sequences.clone();
+
+                while let Some(bytes) = StreamExt::next(&mut token_bytes).await {
+                    emitted_tokens = emitted_tokens.saturating_add(1);
+                    let mut delta = decoder.push_token(&bytes);
+                    if delta.is_empty() {
+                        continue;
+                    }
+                    aggregated.push_str(&delta);
+
+                    if let Some(stop) = detect_stop_sequence(&aggregated, &stop_sequences) {
+                        let stop_len = stop.len();
+                        aggregated.truncate(aggregated.len().saturating_sub(stop_len));
+                        if stop_len <= delta.len() {
+                            delta.truncate(delta.len() - stop_len);
                         } else {
-                            None
-                        },
-                        finish_reason: if is_final {
-                            Some(FinishReason::EndOfText)
-                        } else {
-                            None
-                        },
-                        usage: if is_final {
-                            TokenUsage::new(10, 20)
-                        } else {
-                            TokenUsage::default()
-                        },
+                            delta.clear();
+                        }
+                        if !delta.is_empty() {
+                            let usage = TokenUsage::new(prompt_tokens, emitted_tokens);
+                            yield StreamingResponse {
+                                request_id: request.id,
+                                text_delta: delta.clone(),
+                                is_final: false,
+                                current_text: None,
+                                finish_reason: None,
+                                usage,
+                                timestamp: Utc::now(),
+                            };
+                        }
+                        finish_reason = Some(FinishReason::StopSequence);
+                        break;
+                    }
+
+                    let usage = TokenUsage::new(prompt_tokens, emitted_tokens);
+                    yield StreamingResponse {
+                        request_id: request.id,
+                        text_delta: delta.clone(),
+                        is_final: false,
+                        current_text: None,
+                        finish_reason: None,
+                        usage,
                         timestamp: Utc::now(),
-                    })
-                })
-            })
-            .collect();
+                    };
 
-        // Convert to stream
-        let stream = stream::iter(chunks).then(|chunk| chunk);
-        Ok(Box::pin(stream))
+                    if let Some(limit) = max_tokens {
+                        if emitted_tokens >= limit {
+                            finish_reason = Some(FinishReason::MaxTokens);
+                            break;
+                        }
+                    }
+                }
+
+                let final_delta = decoder.flush().unwrap_or_default();
+                if !final_delta.is_empty() {
+                    aggregated.push_str(&final_delta);
+                }
+
+                let usage = TokenUsage::new(prompt_tokens, emitted_tokens);
+                let final_reason = finish_reason.unwrap_or(FinishReason::EndOfText);
+                yield StreamingResponse {
+                    request_id: request.id,
+                    text_delta: final_delta.clone(),
+                    is_final: true,
+                    current_text: Some(aggregated.clone()),
+                    finish_reason: Some(final_reason),
+                    usage,
+                    timestamp: Utc::now(),
+                };
+            };
+
+            Ok(Box::pin(stream))
+        }
+
+        fn get_model_info(&self) -> ModelInfo {
+            self.info.clone()
+        }
+
+        fn is_ready(&self) -> bool {
+            self.ready.load(Ordering::SeqCst)
+        }
+
+        async fn unload(&mut self) -> LLMResult<()> {
+            self.ready.store(false, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn get_memory_usage(&self) -> Option<usize> {
+            // llama.cpp does not currently expose reliable per-model memory usage.
+            None
+        }
+
+        async fn tokenize(&self, text: &str) -> LLMResult<Vec<u32>> {
+            let model = Arc::clone(&self.model);
+            let input = text.to_owned();
+            let tokens =
+                task::spawn_blocking(move || model.tokenize_bytes(input.as_bytes(), false, true))
+                    .await
+                    .map_err(|err| LLMError::internal(err))?
+                    .map_err(map_tokenization_error)?;
+
+            Ok(tokens.into_iter().map(|token| token.0 as u32).collect())
+        }
     }
 
-    fn get_model_info(&self) -> ModelInfo {
-        self.info.clone()
+    async fn create_session(model: Arc<LlamaModel>, config: &LLMConfig) -> LLMResult<LlamaSession> {
+        let params = session_params(config);
+        task::spawn_blocking(move || model.create_session(params))
+            .await
+            .map_err(|err| LLMError::internal(err))?
+            .map_err(map_context_error)
     }
 
-    fn is_ready(&self) -> bool {
-        self.ready
+    fn session_params(config: &LLMConfig) -> SessionParams {
+        let mut params = SessionParams::default();
+        if let Some(ctx) = config.context_size {
+            params.n_ctx = ctx;
+        }
+        if let Some(batch) = config.batch_size {
+            params.n_batch = batch;
+            params.n_ubatch = batch;
+        }
+        if let Some(threads) = config.n_threads {
+            params.n_threads = threads;
+            params.n_threads_batch = threads;
+        }
+        params
     }
 
-    async fn unload(&mut self) -> LLMResult<()> {
-        self.ready = false;
-        self.memory_usage = 0;
-        Ok(())
-    }
+    fn build_sampler(config: &LLMConfig, request: &LLMRequest) -> StandardSampler {
+        let mut stages = Vec::new();
+        let repetition_penalty = config.repetition_penalty.unwrap_or(1.1);
+        stages.push(SamplerStage::RepetitionPenalty {
+            repetition_penalty,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+            last_n: 64,
+        });
 
-    fn get_memory_usage(&self) -> Option<usize> {
-        Some(self.memory_usage)
-    }
-
-    async fn tokenize(&self, text: &str) -> LLMResult<Vec<u32>> {
-        // Simple mock tokenization - split by whitespace and assign IDs
-        let tokens: Vec<u32> = text
-            .split_whitespace()
-            .enumerate()
-            .map(|(i, _)| (i as u32) + 1000) // Offset to avoid special token ranges
-            .collect();
-
-        Ok(tokens)
-    }
-}
-
-impl LlamaCppModel {
-    /// Generate a mock response based on the input prompt
-    fn generate_mock_response(&self, prompt: &str) -> String {
-        // Simple rule-based mock responses
-        let prompt_lower = prompt.to_lowercase();
-
-        if prompt_lower.contains("hello") || prompt_lower.contains("hi") {
-            "Hello! I'm a mock LLM implementation. How can I help you today?".to_string()
-        } else if prompt_lower.contains("what")
-            && prompt_lower.contains("your")
-            && prompt_lower.contains("name")
+        if let Some(top_k) = config.top_k {
+            stages.push(SamplerStage::TopK(top_k as i32));
+        }
+        if let Some(top_p) = request
+            .metadata
+            .get("top_p")
+            .and_then(|value| value.as_f64())
+            .map(|value| value as f32)
+            .or(config.top_p)
         {
-            "I'm a mock implementation of the RustyGPT LLM system. I'm designed for development and testing purposes.".to_string()
-        } else if prompt_lower.contains("code") || prompt_lower.contains("program") {
-            "I can help you with coding! Here's a simple example:\n\n```rust\nfn main() {\n    println!(\"Hello, RustyGPT!\");\n}\n```".to_string()
-        } else if prompt_lower.contains("explain") {
-            format!(
-                "I'd be happy to explain that! The topic '{}' is quite interesting. This is a mock response that demonstrates the LLM trait system working correctly.",
-                prompt.chars().take(50).collect::<String>()
-            )
+            stages.push(SamplerStage::TopP(top_p));
+        }
+        if let Some(min_p) = request
+            .metadata
+            .get("min_p")
+            .and_then(|value| value.as_f64())
+            .map(|value| value as f32)
+            .or_else(|| {
+                config
+                    .additional_params
+                    .get("min_p")
+                    .and_then(|value| value.as_f64())
+                    .map(|value| value as f32)
+            })
+        {
+            stages.push(SamplerStage::MinP(min_p));
+        }
+
+        let temperature = request.temperature.or(config.temperature).unwrap_or(0.8);
+        stages.push(SamplerStage::Temperature(temperature));
+
+        StandardSampler::new_softmax(stages, 1)
+    }
+
+    fn combine_prompt(request: &LLMRequest) -> String {
+        if let Some(system) = &request.system_message {
+            if system.trim().is_empty() {
+                request.prompt.clone()
+            } else {
+                format!("{}\n\n{}", system.trim(), request.prompt)
+            }
         } else {
-            format!(
-                "Thank you for your input: '{}'. This is a mock response from the LLM trait system. In a real implementation, this would be generated by a language model.",
-                prompt.chars().take(100).collect::<String>()
-            )
+            request.prompt.clone()
         }
     }
 
-    /// Estimate token count for text (simple approximation)
-    fn estimate_tokens(&self, text: &str) -> u32 {
-        // Simple approximation: ~4 characters per token
-        ((text.len() as f32) / 4.0).ceil() as u32
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[tokio::test]
-    async fn test_provider_creation() {
-        let config = LLMConfig {
-            model_path: "test.gguf".to_string(),
-            ..Default::default()
-        };
-        let result = LlamaCppProvider::new(config).await;
-        assert!(result.is_ok());
+    fn detect_stop_sequence<'a>(text: &'a str, stops: &'a [String]) -> Option<&'a str> {
+        stops
+            .iter()
+            .filter_map(|sequence| {
+                if text.ends_with(sequence) {
+                    Some(sequence.as_str())
+                } else {
+                    None
+                }
+            })
+            .max_by_key(|sequence| sequence.len())
     }
 
-    #[tokio::test]
-    async fn test_empty_model_path_error() {
-        let config = LLMConfig {
-            model_path: String::new(),
-            ..Default::default()
-        };
-        let result = LlamaCppProvider::new(config).await;
-        assert!(result.is_err());
-
-        if let Err(LLMError::InvalidConfiguration { field, .. }) = result {
-            assert_eq!(field, "model_path");
-        } else {
-            panic!("Expected InvalidConfiguration error");
+    fn map_load_error(error: LlamaLoadError) -> LLMError {
+        match error {
+            LlamaLoadError::DoesNotExist(path) => {
+                LLMError::model_not_found(path.display().to_string())
+            }
+            LlamaLoadError::LlamaError(inner) => LLMError::model_init_failed(inner.to_string()),
         }
     }
 
-    #[test]
-    fn test_model_support_check() {
-        let provider = LlamaCppProvider {
-            config: LLMConfig::default(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        assert!(provider.is_model_supported("model.gguf"));
-        assert!(provider.is_model_supported("model.GGUF"));
-        assert!(!provider.is_model_supported("model.bin"));
-        assert!(!provider.is_model_supported("model.safetensors"));
-    }
-
-    #[tokio::test]
-    async fn test_model_loading_with_real_file() {
-        let temp_dir = tempdir().unwrap();
-        let model_path = temp_dir.path().join("test_model.gguf");
-
-        // Create a mock model file
-        fs::write(&model_path, "mock model content").unwrap();
-
-        let config = LLMConfig {
-            model_path: model_path.to_string_lossy().to_string(),
-            ..Default::default()
-        };
-
-        // Create provider without hardware validation for testing
-        let provider = LlamaCppProvider {
-            config: config.clone(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        let model = provider.load_model_with_config(config).await.unwrap();
-
-        assert!(model.is_ready());
-        assert_eq!(model.get_model_info().name, "test_model");
-    }
-
-    #[tokio::test]
-    async fn test_model_not_found_error() {
-        let config = LLMConfig {
-            model_path: "nonexistent.gguf".to_string(),
-            ..Default::default()
-        };
-
-        // Create provider without hardware validation for testing
-        let provider = LlamaCppProvider {
-            config: config.clone(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        let result = provider.load_model_with_config(config).await;
-
-        assert!(result.is_err());
-        if let Err(LLMError::ModelNotFound { path }) = result {
-            assert_eq!(path, "nonexistent.gguf");
-        } else {
-            panic!("Expected ModelNotFound error");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_text_generation() {
-        let temp_dir = tempdir().unwrap();
-        let model_path = temp_dir.path().join("test_model.gguf");
-        fs::write(&model_path, "mock model content").unwrap();
-
-        let config = LLMConfig {
-            model_path: model_path.to_string_lossy().to_string(),
-            ..Default::default()
-        };
-
-        // Create provider without hardware validation for testing
-        let provider = LlamaCppProvider {
-            config: config.clone(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        let model = provider.load_model_with_config(config).await.unwrap();
-
-        let request = LLMRequest::new("Hello, world!");
-        let response = model.generate(request).await.unwrap();
-
-        assert!(response.text.contains("Hello"));
-        assert!(response.finished);
-        assert!(response.usage.total_tokens > 0);
-    }
-
-    #[tokio::test]
-    async fn test_streaming_generation() {
-        let temp_dir = tempdir().unwrap();
-        let model_path = temp_dir.path().join("test_model.gguf");
-        fs::write(&model_path, "mock model content").unwrap();
-
-        let config = LLMConfig {
-            model_path: model_path.to_string_lossy().to_string(),
-            ..Default::default()
-        };
-
-        // Create provider without hardware validation for testing
-        let provider = LlamaCppProvider {
-            config: config.clone(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        let model = provider.load_model_with_config(config).await.unwrap();
-
-        let request = LLMRequest::new_streaming("Hello");
-        let mut stream = model.generate_stream(request).await.unwrap();
-
-        let mut chunks = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            chunks.push(chunk.unwrap());
-        }
-
-        assert!(!chunks.is_empty());
-        assert!(chunks.last().unwrap().is_final);
-    }
-
-    #[tokio::test]
-    async fn test_tokenization() {
-        let temp_dir = tempdir().unwrap();
-        let model_path = temp_dir.path().join("test_model.gguf");
-        fs::write(&model_path, "mock model content").unwrap();
-
-        let config = LLMConfig {
-            model_path: model_path.to_string_lossy().to_string(),
-            ..Default::default()
-        };
-
-        // Create provider without hardware validation for testing
-        let provider = LlamaCppProvider {
-            config: config.clone(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        let model = provider.load_model_with_config(config).await.unwrap();
-
-        let tokens = model.tokenize("hello world test").await.unwrap();
-        assert_eq!(tokens.len(), 3);
-
-        let count = model.count_tokens("hello world test").await.unwrap();
-        assert_eq!(count, 3);
-    }
-
-    #[tokio::test]
-    async fn test_model_unload() {
-        let temp_dir = tempdir().unwrap();
-        let model_path = temp_dir.path().join("test_model.gguf");
-        fs::write(&model_path, "mock model content").unwrap();
-
-        let config = LLMConfig {
-            model_path: model_path.to_string_lossy().to_string(),
-            ..Default::default()
-        };
-
-        // Create provider without hardware validation for testing
-        let provider = LlamaCppProvider {
-            config: config.clone(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        let mut model = provider.load_model_with_config(config).await.unwrap();
-
-        assert!(model.is_ready());
-        assert!(model.get_memory_usage().unwrap() > 0);
-
-        model.unload().await.unwrap();
-        assert!(!model.is_ready());
-        assert_eq!(model.get_memory_usage().unwrap(), 0);
-    }
-
-    #[test]
-    fn test_provider_info() {
-        let provider = LlamaCppProvider {
-            config: LLMConfig::default(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        let info = provider.get_provider_info();
-        assert!(info.contains("Mock LlamaCpp Provider"));
-    }
-
-    #[tokio::test]
-    async fn test_list_available_models() {
-        let provider = LlamaCppProvider {
-            config: LLMConfig::default(),
-            hardware_info: None,
-            optimal_params: None,
-        };
-
-        let models = provider.list_available_models().await.unwrap();
-        assert!(models.is_empty()); // Default implementation returns empty list
-    }
-
-    #[test]
-    fn test_mock_response_generation() {
-        let model = LlamaCppModel {
-            config: LLMConfig::default(),
-            info: ModelInfo {
-                name: "test".to_string(),
-                version: None,
-                architecture: None,
-                parameter_count: None,
-                context_length: None,
-                capabilities: ModelCapabilities::default(),
+    fn map_context_error(error: LlamaContextError) -> LLMError {
+        match error {
+            LlamaContextError::TokenizationFailed(err) => LLMError::TokenizationError {
+                details: err.to_string(),
             },
-            ready: true,
-            memory_usage: 0,
-        };
-
-        // Test different prompt types
-        assert!(model.generate_mock_response("Hello").contains("Hello"));
-        assert!(
-            model
-                .generate_mock_response("What is your name?")
-                .contains("mock implementation")
-        );
-        assert!(
-            model
-                .generate_mock_response("Show me some code")
-                .contains("rust")
-        );
-        assert!(
-            model
-                .generate_mock_response("Explain quantum physics")
-                .contains("explain")
-        );
+            LlamaContextError::MaxTokensExceeded {
+                provided_tokens,
+                max_tokens,
+            } => LLMError::generation_failed(format!(
+                "maximum context exceeded: {provided_tokens} > {max_tokens}"
+            )),
+            LlamaContextError::SessionFailed => {
+                LLMError::model_init_failed("failed to create llama session")
+            }
+            LlamaContextError::DecodeFailed(code) => {
+                LLMError::generation_failed(format!("decode failed with error code {code}"))
+            }
+            LlamaContextError::EmbeddingsFailed(reason) => LLMError::generation_failed(reason),
+            LlamaContextError::InvalidRange => {
+                LLMError::generation_failed("invalid KV cache range")
+            }
+            LlamaContextError::NoContext => {
+                LLMError::generation_failed("no prompt context available")
+            }
+        }
     }
 
-    #[tokio::test]
-    async fn test_hardware_optimization() {
-        // Test that hardware optimization doesn't break the provider creation
-        let config = LLMConfig {
-            model_path: "test.gguf".to_string(),
-            ..Default::default()
-        };
-
-        let result = LlamaCppProvider::new(config).await;
-        assert!(result.is_ok());
-
-        let provider = result.unwrap();
-
-        // Check that hardware detection was attempted (may succeed or fail depending on platform)
-        // The provider should still work regardless
-        assert!(!provider.config.model_path.is_empty());
+    fn map_tokenization_error(error: LlamaTokenizationError) -> LLMError {
+        match error {
+            LlamaTokenizationError::InputTooLarge { n_bytes, max_bytes } => {
+                LLMError::TokenizationError {
+                    details: format!(
+                        "input too large: {n_bytes} bytes exceeds maximum {max_bytes} bytes"
+                    ),
+                }
+            }
+            LlamaTokenizationError::LlamaError(inner) => LLMError::TokenizationError {
+                details: inner.to_string(),
+            },
+        }
     }
 
-    #[tokio::test]
-    async fn test_memory_estimation() {
-        let temp_dir = tempdir().unwrap();
-        let model_path = temp_dir.path().join("test_model.gguf");
-        fs::write(&model_path, "mock model content").unwrap();
-
-        let config = LLMConfig {
-            model_path: model_path.to_string_lossy().to_string(),
-            context_size: Some(4096),
-            ..Default::default()
-        };
-
-        let provider = LlamaCppProvider::new(config.clone()).await.unwrap();
-
-        // Extract model info for testing
-        let info = LlamaCppProvider::extract_model_info(&config).unwrap();
-
-        // Test memory estimation
-        let memory_usage = provider.estimate_model_memory_usage(&config, &info);
-        assert!(memory_usage > 0);
-
-        // Memory usage should be reasonable (not ridiculously large)
-        assert!(memory_usage < 100 * 1024 * 1024 * 1024); // Less than 100GB
+    #[derive(Default)]
+    struct Utf8Decoder {
+        buf: Vec<u8>,
     }
 
-    #[test]
-    fn test_config_validation() {
-        let config = LLMConfig {
-            model_path: "test.gguf".to_string(),
-            n_threads: Some(1000),         // Unreasonably high
-            context_size: Some(1_000_000), // Very large context
-            ..Default::default()
-        };
+    impl Utf8Decoder {
+        fn new() -> Self {
+            Self { buf: Vec::new() }
+        }
 
-        // This should generate warnings
-        let result = config.validate_for_hardware();
-        assert!(result.is_err()); // Should have warnings
+        fn push_token(&mut self, token: &[u8]) -> String {
+            let mut token = token;
+            let mut output = String::new();
 
-        if let Err(warnings) = result {
-            assert!(!warnings.is_empty());
+            let owned_storage = if self.buf.is_empty() {
+                None
+            } else {
+                let mut combined = self.buf.clone();
+                combined.extend_from_slice(token);
+                self.buf.clear();
+                Some(combined)
+            };
+
+            if let Some(buffer) = owned_storage.as_ref() {
+                token = buffer.as_slice();
+            }
+
+            loop {
+                match std::str::from_utf8(token) {
+                    Ok(text) => {
+                        output.push_str(text);
+                        self.buf.clear();
+                        break;
+                    }
+                    Err(err) => {
+                        let valid_up_to = err.valid_up_to();
+                        if valid_up_to > 0 {
+                            unsafe {
+                                output
+                                    .push_str(std::str::from_utf8_unchecked(&token[..valid_up_to]));
+                            }
+                        }
+
+                        if let Some(invalid_len) = err.error_len() {
+                            output.push(char::REPLACEMENT_CHARACTER);
+                            let consumed = valid_up_to + invalid_len;
+                            if consumed >= token.len() {
+                                self.buf.clear();
+                                break;
+                            }
+                            token = &token[consumed..];
+                        } else {
+                            self.buf.clear();
+                            self.buf.extend_from_slice(&token[valid_up_to..]);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            output
+        }
+
+        fn flush(&mut self) -> Option<String> {
+            if self.buf.is_empty() {
+                None
+            } else {
+                let text = String::from_utf8_lossy(&self.buf).to_string();
+                self.buf.clear();
+                Some(text)
+            }
         }
     }
 }
+
+#[cfg(target_arch = "wasm32")]
+mod native {
+    use std::collections::HashMap;
+
+    use crate::llms::{
+        errors::{LLMError, LLMResult},
+        traits::{LLMModel, LLMProvider, StreamingResponseStream},
+        types::{
+            FinishReason, LLMConfig, LLMRequest, LLMResponse, ModelCapabilities, ModelInfo,
+            StreamingResponse, TokenUsage,
+        },
+    };
+    use async_stream::try_stream;
+    use chrono::Utc;
+
+    #[derive(Debug, Clone)]
+    pub struct LlamaCppProvider {
+        config: LLMConfig,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct LlamaCppModel {
+        config: LLMConfig,
+        info: ModelInfo,
+    }
+
+    #[async_trait::async_trait]
+    impl LLMProvider for LlamaCppProvider {
+        type Model = LlamaCppModel;
+
+        async fn new(config: LLMConfig) -> LLMResult<Self> {
+            Ok(Self { config })
+        }
+
+        async fn load_model(&self, _: &str) -> LLMResult<Self::Model> {
+            self.load_model_with_config(self.config.clone()).await
+        }
+
+        async fn load_model_with_config(&self, config: LLMConfig) -> LLMResult<Self::Model> {
+            Ok(LlamaCppModel {
+                info: ModelInfo {
+                    name: "mock-llama".to_string(),
+                    version: None,
+                    architecture: Some("mock".to_string()),
+                    parameter_count: None,
+                    context_length: config.context_size,
+                    capabilities: ModelCapabilities {
+                        text_generation: true,
+                        text_embedding: false,
+                        chat_format: true,
+                        function_calling: false,
+                        streaming: true,
+                        max_context_length: config.context_size,
+                        supported_languages: vec!["en".to_string()],
+                    },
+                },
+                config,
+            })
+        }
+
+        async fn list_available_models(&self) -> LLMResult<Vec<String>> {
+            Ok(vec![self.config.model_path.clone()])
+        }
+
+        fn get_provider_info(&self) -> String {
+            "llama_cpp (wasm mock)".to_string()
+        }
+
+        fn is_model_supported(&self, _model_path: &str) -> bool {
+            true
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LLMModel for LlamaCppModel {
+        async fn generate(&self, request: LLMRequest) -> LLMResult<LLMResponse> {
+            let text = mock_response(&request.prompt);
+            Ok(LLMResponse {
+                request_id: request.id,
+                text: text.clone(),
+                finished: true,
+                finish_reason: Some(FinishReason::EndOfText),
+                usage: TokenUsage::new(16, 16),
+                timestamp: Utc::now(),
+                model_info: self.info.clone(),
+                metadata: HashMap::new(),
+            })
+        }
+
+        async fn generate_stream(&self, request: LLMRequest) -> LLMResult<StreamingResponseStream> {
+            let text = mock_response(&request.prompt);
+            let stream = try_stream! {
+                yield StreamingResponse {
+                    request_id: request.id,
+                    text_delta: text.clone(),
+                    is_final: true,
+                    current_text: Some(text.clone()),
+                    finish_reason: Some(FinishReason::EndOfText),
+                    usage: TokenUsage::new(16, 16),
+                    timestamp: Utc::now(),
+                };
+            };
+            Ok(Box::pin(stream))
+        }
+
+        fn get_model_info(&self) -> ModelInfo {
+            self.info.clone()
+        }
+
+        fn is_ready(&self) -> bool {
+            true
+        }
+
+        async fn unload(&mut self) -> LLMResult<()> {
+            Ok(())
+        }
+
+        fn get_memory_usage(&self) -> Option<usize> {
+            None
+        }
+
+        async fn tokenize(&self, text: &str) -> LLMResult<Vec<u32>> {
+            Ok(text
+                .split_whitespace()
+                .enumerate()
+                .map(|(idx, _)| idx as u32)
+                .collect())
+        }
+    }
+
+    fn mock_response(prompt: &str) -> String {
+        if prompt.trim().is_empty() {
+            "This is a mock response from the wasm build.".to_string()
+        } else {
+            format!("Mock response for \"{}\"", prompt.trim())
+        }
+    }
+}
+
+pub use native::*;

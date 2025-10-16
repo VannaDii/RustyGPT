@@ -128,6 +128,9 @@ pub struct GlobalLLMSettings {
     /// Maximum concurrent LLM requests
     pub max_concurrent_requests: u32,
 
+    /// Persist streamed response chunks in the database
+    pub persist_stream_chunks: bool,
+
     /// Enable model caching
     pub enable_model_caching: bool,
 
@@ -212,6 +215,7 @@ impl Default for GlobalLLMSettings {
         Self {
             default_timeout: 30, // 30 seconds
             max_concurrent_requests: 4,
+            persist_stream_chunks: true,
             enable_model_caching: true,
             cache_size_limit_mb: 4096, // 4GB
             enable_request_logging: true,
@@ -266,6 +270,12 @@ impl LLMConfiguration {
             }
         }
 
+        if let Ok(persist_chunks) = env::var("RUSTYGPT_PERSIST_STREAM_CHUNKS") {
+            if let Ok(value) = persist_chunks.parse::<bool>() {
+                config.global_settings.persist_stream_chunks = value;
+            }
+        }
+
         config
     }
 
@@ -309,6 +319,12 @@ impl LLMConfiguration {
         if let Ok(max_requests) = env::var("RUSTYGPT_MAX_CONCURRENT_REQUESTS") {
             if let Ok(max) = max_requests.parse::<u32>() {
                 self.global_settings.max_concurrent_requests = max;
+            }
+        }
+
+        if let Ok(persist_chunks) = env::var("RUSTYGPT_PERSIST_STREAM_CHUNKS") {
+            if let Ok(value) = persist_chunks.parse::<bool>() {
+                self.global_settings.persist_stream_chunks = value;
             }
         }
     }

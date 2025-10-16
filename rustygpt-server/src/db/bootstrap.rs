@@ -45,7 +45,6 @@ fn liveness_override_take() -> Option<Result<(), sqlx::Error>> {
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
 pub(crate) fn set_liveness_override(result: Option<Result<(), sqlx::Error>>) {
     let lock = LIVENESS_OVERRIDE.get_or_init(|| Mutex::new(None));
     *lock.lock().expect("override poisoned") = result;

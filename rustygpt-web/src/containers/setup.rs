@@ -303,7 +303,7 @@ pub fn setup() -> Html {
                     password: password_value,
                 };
 
-                match client.post_setup(setup_request).await {
+                match client.post_setup(&setup_request).await {
                     Ok(_) => {
                         setup_complete.set(true);
                     }
@@ -515,13 +515,14 @@ fn handle_setup_completion(is_complete: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn test_create_api_client() {
-        // Test that we can create an API client with the expected base URL
         let client = create_api_client();
-        // Verify that the client was created successfully by checking it's not null
-        // This ensures the function doesn't panic and returns a valid client
-        let _base_url = client.base_url();
+        let stream_url = client.conversation_stream_url(&Uuid::nil());
+        assert!(
+            stream_url.contains("/api/stream/conversations/00000000-0000-0000-0000-000000000000")
+        );
     }
 }

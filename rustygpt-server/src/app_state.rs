@@ -1,14 +1,34 @@
+use std::sync::Arc;
+
+use crate::services::{assistant_service::AssistantService, sse_persistence::SsePersistence};
+
 // Application state that will be shared across all routes
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AppState {
     /// Optional PostgreSQL connection pool
     pub(crate) pool: Option<sqlx::PgPool>,
+    /// Assistant streaming service for automated replies
+    pub(crate) assistant: Option<Arc<AssistantService>>,
+    /// Optional persistence store for SSE history replay
+    pub(crate) sse_store: Option<Arc<dyn SsePersistence>>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            pool: None,
+            assistant: None,
+            sse_store: None,
+        }
+    }
 }
 
 impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
             .field("has_pool", &self.pool.is_some())
+            .field("has_assistant", &self.assistant.is_some())
+            .field("has_sse_store", &self.sse_store.is_some())
             .finish()
     }
 }
@@ -22,6 +42,8 @@ mod tests {
     fn test_app_state_default() {
         let state = AppState::default();
         assert!(state.pool.is_none());
+        assert!(state.assistant.is_none());
+        assert!(state.sse_store.is_none());
     }
 
     /// Test AppState equivalence between default instances
@@ -31,6 +53,8 @@ mod tests {
         let state2 = AppState::default();
 
         assert_eq!(state1.pool.is_some(), state2.pool.is_some());
+        assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
+        assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
     }
 
     /// Test AppState cloning
@@ -40,6 +64,8 @@ mod tests {
         let state2 = state1.clone();
 
         assert_eq!(state1.pool.is_some(), state2.pool.is_some());
+        assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
+        assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
     }
 
     /// Test AppState with_pool method (can't create real pool in test)
@@ -49,6 +75,8 @@ mod tests {
         // But we can test the logic structure
         let state = AppState::default();
         assert!(state.pool.is_none());
+        assert!(state.assistant.is_none());
+        assert!(state.sse_store.is_none());
 
         // In a real scenario with a pool:
         // let pool = create_test_pool().await;
@@ -65,6 +93,8 @@ mod tests {
         assert!(debug_str.contains("AppState"));
         assert!(debug_str.contains("has_pool"));
         assert!(debug_str.contains("false")); // has_pool should be false
+        assert!(debug_str.contains("has_assistant"));
+        assert!(debug_str.contains("has_sse_store"));
     }
 
     /// Test AppState pool accessor field
@@ -72,6 +102,8 @@ mod tests {
     fn test_app_state_pool_accessor() {
         let state = AppState::default();
         assert!(state.pool.is_none());
+        assert!(state.assistant.is_none());
+        assert!(state.sse_store.is_none());
     }
 
     /// Test AppState pool consistency
@@ -81,6 +113,8 @@ mod tests {
 
         // pool.is_some() should be consistent with having a database
         assert!(state.pool.is_none());
+        assert!(state.assistant.is_none());
+        assert!(state.sse_store.is_none());
     }
 
     /// Test multiple AppState instances independence
@@ -93,6 +127,8 @@ mod tests {
         assert_eq!(state1.pool.is_some(), state2.pool.is_some());
         assert!(state1.pool.is_none());
         assert!(state2.pool.is_none());
+        assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
+        assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
     }
 
     /// Test AppState field visibility
@@ -102,6 +138,8 @@ mod tests {
 
         // We should be able to access pool field within the crate
         assert!(state.pool.is_none());
+        assert!(state.assistant.is_none());
+        assert!(state.sse_store.is_none());
 
         // Direct field access should not be possible from external modules
         // (This is enforced by the pub(crate) visibility)
