@@ -1,7 +1,48 @@
 use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
 use utoipa::ToSchema;
 
 use super::Timestamp;
+
+/// Global role assignments for a user account.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UserRole {
+    Admin,
+    Member,
+    ReadOnly,
+}
+
+impl UserRole {
+    /// Return the canonical string representation expected by persistence layers.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Member => "member",
+            Self::ReadOnly => "read_only",
+        }
+    }
+}
+
+impl fmt::Display for UserRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for UserRole {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "admin" => Ok(Self::Admin),
+            "member" => Ok(Self::Member),
+            "read_only" => Ok(Self::ReadOnly),
+            _ => Err("unknown user role"),
+        }
+    }
+}
 
 /// Represents a user in the system.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -148,5 +189,23 @@ mod tests {
 
         assert_eq!(request_email.username_or_email, "test@example.com");
         assert_eq!(request_email.password, "password123");
+    }
+
+    #[test]
+    fn user_role_roundtrip() {
+        for (text, role) in [
+            ("admin", UserRole::Admin),
+            ("member", UserRole::Member),
+            ("read_only", UserRole::ReadOnly),
+        ] {
+            assert_eq!(role.as_str(), text);
+            assert_eq!(role.to_string(), text);
+            assert_eq!(UserRole::from_str(text).unwrap(), role);
+        }
+    }
+
+    #[test]
+    fn user_role_invalid() {
+        assert!(UserRole::from_str("guest").is_err());
     }
 }

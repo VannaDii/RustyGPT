@@ -33,9 +33,10 @@ use shared::{
     models::{
         ChatDelta, ChatDeltaChoice, ChatDeltaChunk, ConversationStreamEvent, MarkThreadReadRequest,
         MessageChunk, MessageDeleteRequest, MessageDoneEvent, MessageEditRequest, MessageRole,
-        MessageView, PostRootMessageRequest, PresenceHeartbeatRequest, ReplyMessageRequest,
-        ReplyMessageResponse, StreamErrorEvent, ThreadActivityEvent, ThreadNewEvent,
-        ThreadTreeResponse, Timestamp, TypingRequest, UnreadUpdateEvent, UsageBreakdown,
+        MessageView, PostRootMessageRequest, PresenceHeartbeatRequest, PresenceStatus,
+        PresenceUpdate, ReplyMessageRequest, ReplyMessageResponse, StreamErrorEvent,
+        ThreadActivityEvent, ThreadNewEvent, ThreadTreeResponse, Timestamp, TypingRequest,
+        TypingUpdate, UnreadUpdateEvent, UsageBreakdown,
     },
 };
 
@@ -129,6 +130,43 @@ async fn post_root(
         hub.publish(conversation_id, activity).await;
     }
 
+    let now = Timestamp(Utc::now());
+
+    let presence = ConversationStreamEvent::PresenceUpdate {
+        payload: PresenceUpdate {
+            user_id,
+            status: PresenceStatus::Online,
+            last_seen_at: now.clone(),
+        },
+    };
+    hub.publish(conversation_id, presence).await;
+
+    let typing_clear = ConversationStreamEvent::TypingUpdate {
+        payload: TypingUpdate {
+            conversation_id,
+            root_id: response.root_id,
+            user_id,
+            expires_at: now.clone(),
+        },
+    };
+    hub.publish(conversation_id, typing_clear).await;
+
+    let unread = service
+        .unread_summary(user_id, conversation_id)
+        .await?
+        .into_iter()
+        .find(|item| item.root_id == response.root_id)
+        .map(|item| item.unread)
+        .unwrap_or(0);
+
+    let unread_event = ConversationStreamEvent::UnreadUpdate {
+        payload: UnreadUpdateEvent {
+            root_id: response.root_id,
+            unread,
+        },
+    };
+    hub.publish(conversation_id, unread_event).await;
+
     if should_spawn_assistant(role) {
         spawn_assistant_reply(
             pool,
@@ -179,6 +217,48 @@ async fn reply_message(
 
         hub.publish(summary_ref.conversation_id, activity).await;
     }
+
+    let conversation_id = summary
+        .as_ref()
+        .map(|summary| summary.conversation_id)
+        .unwrap_or(response.conversation_id);
+
+    let now = Timestamp(Utc::now());
+
+    let presence = ConversationStreamEvent::PresenceUpdate {
+        payload: PresenceUpdate {
+            user_id,
+            status: PresenceStatus::Online,
+            last_seen_at: now.clone(),
+        },
+    };
+    hub.publish(conversation_id, presence).await;
+
+    let typing_clear = ConversationStreamEvent::TypingUpdate {
+        payload: TypingUpdate {
+            conversation_id,
+            root_id: response.root_id,
+            user_id,
+            expires_at: now.clone(),
+        },
+    };
+    hub.publish(conversation_id, typing_clear).await;
+
+    let unread = service
+        .unread_summary(user_id, conversation_id)
+        .await?
+        .into_iter()
+        .find(|item| item.root_id == response.root_id)
+        .map(|item| item.unread)
+        .unwrap_or(0);
+
+    let unread_event = ConversationStreamEvent::UnreadUpdate {
+        payload: UnreadUpdateEvent {
+            root_id: response.root_id,
+            unread,
+        },
+    };
+    hub.publish(conversation_id, unread_event).await;
 
     if should_spawn_assistant(role) {
         spawn_assistant_reply(
@@ -638,7 +718,7 @@ mod tests {
 
 fn require_user(context: &RequestContext) -> AppResult<Uuid> {
     context
-        .user_id
+        .user_id()
         .ok_or_else(|| ApiError::forbidden("authentication required"))
 }
 

@@ -109,6 +109,7 @@ mod tests {
             pool: Some(test_pool()),
             assistant: None,
             sse_store: None,
+            sessions: None,
         });
 
         let app = create_health_router().with_state(state);
@@ -139,6 +140,7 @@ mod tests {
             pool: Some(test_pool()),
             assistant: None,
             sse_store: None,
+            sessions: None,
         });
 
         let app = create_health_router().with_state(state);

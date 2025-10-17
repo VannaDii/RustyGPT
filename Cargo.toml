@@ -40,6 +40,13 @@ tower-service = "0.3"
 
 # OAuth and authentication
 oauth2 = "5.0"
+argon2 = "0.5"
+password-hash = "0.5"
+rand = "0.9"
+rand_core = "0.9"
+sha2 = "0.10"
+base64 = "0.22"
+time = "0.3"
 
 # Database
 sqlx = { version = "0.8", features = [

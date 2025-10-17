@@ -297,7 +297,7 @@ fn parse_last_sequence(raw: &str) -> Option<u64> {
 
 fn require_user(context: &RequestContext) -> AppResult<Uuid> {
     context
-        .user_id
+        .user_id()
         .ok_or_else(|| ApiError::forbidden("authentication required"))
 }
 

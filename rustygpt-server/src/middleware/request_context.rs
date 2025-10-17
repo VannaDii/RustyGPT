@@ -9,13 +9,22 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::http::error::{ApiError, AppResult};
+use crate::{
+    auth::session::SessionUser,
+    http::error::{ApiError, AppResult},
+};
 use shared::config::server::Config;
 
 #[derive(Clone, Debug, Default)]
 pub struct RequestContext {
     pub request_id: String,
-    pub user_id: Option<Uuid>,
+    pub session: Option<SessionUser>,
+}
+
+impl RequestContext {
+    pub fn user_id(&self) -> Option<Uuid> {
+        self.session.as_ref().map(|session| session.id)
+    }
 }
 
 #[derive(Clone)]
@@ -43,7 +52,7 @@ pub async fn assign_request_id(
 
     request.extensions_mut().insert(RequestContext {
         request_id: request_id.clone(),
-        user_id: None,
+        session: None,
     });
 
     request.headers_mut().insert(

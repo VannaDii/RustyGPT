@@ -1,7 +1,7 @@
 use reqwest::{Client, Error};
 use shared::models::{
     PostRootMessageRequest, PostRootMessageResponse, ReplyMessageRequest, ReplyMessageResponse,
-    ThreadListResponse, ThreadTreeResponse,
+    ThreadListResponse, ThreadTreeResponse, UnreadSummaryResponse,
 };
 use shared::models::{SetupRequest, SetupResponse};
 use uuid::Uuid;
@@ -73,6 +73,15 @@ impl RustyGPTClient {
             request = request.query(&[("limit", &limit)]);
         }
         request.send().await?.json().await
+    }
+
+    /// Fetch unread summary for a conversation.
+    pub async fn unread_summary(
+        &self,
+        conversation_id: &Uuid,
+    ) -> Result<UnreadSummaryResponse, Error> {
+        let url = self.api_url(&format!("conversations/{}/unread", conversation_id));
+        self.client.get(url).send().await?.json().await
     }
 
     /// Post a root message starting a new thread.

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::services::{assistant_service::AssistantService, sse_persistence::SsePersistence};
+use crate::{
+    auth::session::SessionService,
+    services::{assistant_service::AssistantService, sse_persistence::SsePersistence},
+};
 
 // Application state that will be shared across all routes
 #[derive(Clone)]
@@ -11,6 +14,8 @@ pub struct AppState {
     pub(crate) assistant: Option<Arc<AssistantService>>,
     /// Optional persistence store for SSE history replay
     pub(crate) sse_store: Option<Arc<dyn SsePersistence>>,
+    /// Session manager for cookie-backed authentication
+    pub(crate) sessions: Option<Arc<SessionService>>,
 }
 
 impl Default for AppState {
@@ -19,6 +24,7 @@ impl Default for AppState {
             pool: None,
             assistant: None,
             sse_store: None,
+            sessions: None,
         }
     }
 }
@@ -29,6 +35,7 @@ impl std::fmt::Debug for AppState {
             .field("has_pool", &self.pool.is_some())
             .field("has_assistant", &self.assistant.is_some())
             .field("has_sse_store", &self.sse_store.is_some())
+            .field("has_sessions", &self.sessions.is_some())
             .finish()
     }
 }
@@ -44,6 +51,7 @@ mod tests {
         assert!(state.pool.is_none());
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
+        assert!(state.sessions.is_none());
     }
 
     /// Test AppState equivalence between default instances
@@ -55,6 +63,7 @@ mod tests {
         assert_eq!(state1.pool.is_some(), state2.pool.is_some());
         assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
         assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
+        assert_eq!(state1.sessions.is_some(), state2.sessions.is_some());
     }
 
     /// Test AppState cloning
@@ -104,6 +113,7 @@ mod tests {
         assert!(state.pool.is_none());
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
+        assert!(state.sessions.is_none());
     }
 
     /// Test AppState pool consistency
@@ -129,6 +139,7 @@ mod tests {
         assert!(state2.pool.is_none());
         assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
         assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
+        assert_eq!(state1.sessions.is_some(), state2.sessions.is_some());
     }
 
     /// Test AppState field visibility
@@ -140,6 +151,7 @@ mod tests {
         assert!(state.pool.is_none());
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
+        assert!(state.sessions.is_none());
 
         // Direct field access should not be possible from external modules
         // (This is enforced by the pub(crate) visibility)

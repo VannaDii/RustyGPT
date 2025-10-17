@@ -26,7 +26,7 @@ pub use threads::{
     UnreadSummaryResponse, UnreadThreadSummary, UnreadUpdateEvent,
 };
 pub use timestamp::Timestamp;
-pub use user::User;
+pub use user::{User, UserRole};
 
 /// Represents a model available for chat completions.
 #[derive(Debug, Serialize, Deserialize)]

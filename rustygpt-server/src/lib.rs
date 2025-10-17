@@ -1,6 +1,7 @@
 #![allow(clippy::all, clippy::pedantic)]
 
 mod app_state;
+mod auth;
 pub(crate) mod db;
 mod handlers;
 mod http;

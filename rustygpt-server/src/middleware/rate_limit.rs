@@ -7,6 +7,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use metrics::{counter, gauge};
 use tokio::sync::Mutex;
 
 use crate::http::error::{ApiError, AppResult};
@@ -124,8 +125,10 @@ pub async fn enforce_rate_limits(
         return Ok(next.run(request).await);
     }
 
-    let key = determine_key(request.uri().path());
-    let outcome = acquire(&state, &key).await;
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let key = determine_key(&method, &path);
+    let outcome = acquire(&state, &key, &path).await;
 
     match outcome {
         RateLimitOutcome::Allowed {
@@ -133,21 +136,46 @@ pub async fn enforce_rate_limits(
             remaining,
             reset_after,
         } => {
+            counter!(
+                "http_rate_limit_requests_total",
+                "key" => key.clone(),
+                "result" => "allowed"
+            )
+            .increment(1);
+            gauge!(
+                "http_rate_limit_remaining",
+                "key" => key.clone()
+            )
+            .set(remaining as f64);
+            gauge!(
+                "http_rate_limit_reset_seconds",
+                "key" => key.clone()
+            )
+            .set(reset_after as f64);
             let mut response = next.run(request).await;
             attach_rate_limit_headers(&mut response, limit, remaining, reset_after);
             Ok(response)
         }
-        RateLimitOutcome::Denied { retry_after } => Err(ApiError::too_many_requests(
-            "rate limit exceeded",
-        )
-        .with_details(serde_json::json!({
-            "retry_after_seconds": retry_after
-        }))),
+        RateLimitOutcome::Denied { retry_after } => {
+            counter!(
+                "http_rate_limit_requests_total",
+                "key" => key.clone(),
+                "result" => "denied"
+            )
+            .increment(1);
+            gauge!(
+                "http_rate_limit_reset_seconds",
+                "key" => key.clone()
+            )
+            .set(retry_after as f64);
+            Err(ApiError::too_many_requests("rate limit exceeded")
+                .with_details(serde_json::json!({ "retry_after_seconds": retry_after })))
+        }
     }
 }
 
-async fn acquire(state: &RateLimitState, key: &str) -> RateLimitOutcome {
-    let strategy = if key.starts_with("/api/auth") {
+async fn acquire(state: &RateLimitState, key: &str, path: &str) -> RateLimitOutcome {
+    let strategy = if path.starts_with("/api/auth") {
         state.auth_strategy
     } else {
         state.default_strategy
@@ -161,8 +189,8 @@ async fn acquire(state: &RateLimitState, key: &str) -> RateLimitOutcome {
     bucket.take()
 }
 
-fn determine_key(path: &str) -> String {
-    path.to_string()
+fn determine_key(method: &Method, path: &str) -> String {
+    format!("{} {}", method.as_str(), path)
 }
 
 fn attach_rate_limit_headers(

@@ -23,6 +23,8 @@ pub enum ChatServiceError {
     NotFound(String),
     #[error("forbidden: {0}")]
     Forbidden(String),
+    #[error("rate limited: {0}")]
+    RateLimited(String),
 }
 
 impl ChatServiceError {
@@ -40,6 +42,9 @@ impl ChatServiceError {
             }
             if message.contains("RGP.VALIDATION") {
                 return ChatServiceError::Validation(message.to_string());
+            }
+            if message.contains("RGP.429") {
+                return ChatServiceError::RateLimited(message.to_string());
             }
         }
         ChatServiceError::Database(err)
@@ -63,6 +68,12 @@ impl fmt::Debug for ChatService {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ChatService").finish()
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct AcceptInviteResult {
+    pub conversation_id: Uuid,
+    pub role: ConversationRole,
 }
 
 impl ChatService {
@@ -110,20 +121,21 @@ impl ChatService {
         actor: Uuid,
         conversation_id: Uuid,
         request: AddParticipantRequest,
-    ) -> ChatServiceResult<()> {
+    ) -> ChatServiceResult<ConversationRole> {
         let mut tx = self.begin_for(actor).await?;
-        sqlx::query(
-            r#"SELECT rustygpt.sp_add_participant($1, $2, $3::rustygpt.conversation_role)"#,
+        let role: String = sqlx::query_scalar(
+            r#"SELECT rustygpt.sp_add_participant($1, $2, $3::rustygpt.conversation_role)::TEXT"#,
         )
         .bind(conversation_id)
         .bind(request.user_id)
         .bind(request.role.as_str())
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await
         .map_err(ChatServiceError::from_db_error)?;
 
         tx.commit().await.map_err(ChatServiceError::from)?;
-        Ok(())
+        let role = ConversationRole::try_from(role.as_str()).unwrap_or(ConversationRole::Member);
+        Ok(role)
     }
 
     #[instrument(name = "chat.remove_participant", skip(self), err)]
@@ -132,16 +144,18 @@ impl ChatService {
         actor: Uuid,
         conversation_id: Uuid,
         user_id: Uuid,
-    ) -> ChatServiceResult<()> {
+    ) -> ChatServiceResult<ConversationRole> {
         let mut tx = self.begin_for(actor).await?;
-        sqlx::query("SELECT rustygpt.sp_remove_participant($1, $2)")
-            .bind(conversation_id)
-            .bind(user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(ChatServiceError::from_db_error)?;
+        let role: String =
+            sqlx::query_scalar("SELECT rustygpt.sp_remove_participant($1, $2)::TEXT")
+                .bind(conversation_id)
+                .bind(user_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(ChatServiceError::from_db_error)?;
         tx.commit().await.map_err(ChatServiceError::from)?;
-        Ok(())
+        let role = ConversationRole::try_from(role.as_str()).unwrap_or(ConversationRole::Member);
+        Ok(role)
     }
 
     #[instrument(name = "chat.create_invite", skip(self), err)]
@@ -181,16 +195,36 @@ impl ChatService {
     }
 
     #[instrument(name = "chat.accept_invite", skip(self), err)]
-    pub async fn accept_invite(&self, actor: Uuid, token: &str) -> ChatServiceResult<Uuid> {
+    pub async fn accept_invite(
+        &self,
+        actor: Uuid,
+        token: &str,
+    ) -> ChatServiceResult<AcceptInviteResult> {
         let mut tx = self.begin_for(actor).await?;
-        let conversation_id: Uuid = sqlx::query_scalar("SELECT rustygpt.sp_accept_invite($1, $2)")
-            .bind(token)
-            .bind(actor)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(ChatServiceError::from_db_error)?;
+
+        #[derive(sqlx::FromRow)]
+        struct InviteRow {
+            conversation_id: Uuid,
+            role: String,
+        }
+
+        let row = sqlx::query_as::<_, InviteRow>(
+            "SELECT conversation_id, role::TEXT AS role FROM rustygpt.sp_accept_invite($1, $2)",
+        )
+        .bind(token)
+        .bind(actor)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ChatServiceError::from_db_error)?;
+
         tx.commit().await.map_err(ChatServiceError::from)?;
-        Ok(conversation_id)
+
+        let role =
+            ConversationRole::try_from(row.role.as_str()).unwrap_or(ConversationRole::Member);
+        Ok(AcceptInviteResult {
+            conversation_id: row.conversation_id,
+            role,
+        })
     }
 
     #[instrument(name = "chat.revoke_invite", skip(self), err)]

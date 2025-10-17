@@ -75,7 +75,7 @@ CREATE OR REPLACE FUNCTION rustygpt.sp_remove_participant(
     p_conversation UUID,
     p_user UUID
 )
-RETURNS VOID
+RETURNS rustygpt.conversation_role
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = rustygpt, public
@@ -129,6 +129,8 @@ BEGIN
     WHERE conversation_id = p_conversation
       AND user_id = p_user
       AND left_at IS NULL;
+
+    RETURN v_target.role;
 END;
 $$;
 
@@ -215,7 +217,10 @@ CREATE OR REPLACE FUNCTION rustygpt.sp_accept_invite(
     p_token TEXT,
     p_user UUID
 )
-RETURNS UUID
+RETURNS TABLE (
+    conversation_id UUID,
+    role rustygpt.conversation_role
+)
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = rustygpt, public
@@ -244,7 +249,7 @@ BEGIN
     END IF;
 
     IF v_invite.accepted_at IS NOT NULL THEN
-        RETURN v_invite.conversation_id;
+        RETURN QUERY SELECT v_invite.conversation_id, v_invite.role;
     END IF;
 
     IF v_invite.expires_at <= now() THEN
@@ -278,7 +283,7 @@ BEGIN
         accepted_at = now()
     WHERE id = v_invite.id;
 
-    RETURN v_invite.conversation_id;
+    RETURN QUERY SELECT v_invite.conversation_id, v_invite.role;
 END;
 $$;
 

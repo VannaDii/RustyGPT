@@ -1,4 +1,4 @@
-use std::fmt::Write as _;
+use std::{collections::HashMap, fmt::Write as _};
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -6,8 +6,8 @@ use futures_util::StreamExt;
 use reqwest::Client;
 use serde_json::from_str;
 use shared::models::{
-    ConversationStreamEvent, MessageRole, ReplyMessageRequest, ThreadListResponse,
-    ThreadTreeResponse,
+    ConversationStreamEvent, MembershipChangeAction, MessageRole, ReplyMessageRequest,
+    ThreadListResponse, ThreadTreeResponse, UnreadSummaryResponse,
 };
 use uuid::Uuid;
 
@@ -70,7 +70,24 @@ pub async fn handle_chat(args: ChatArgs) -> Result<()> {
         render_thread(&tree);
     } else {
         let threads = fetch_threads(&client, &api_base, args.conversation, args.limit).await?;
-        render_thread_list(&threads);
+        let unread = match fetch_unread_summary(&client, &api_base, args.conversation).await {
+            Ok(summary) => summary,
+            Err(err) => {
+                eprintln!(
+                    "warning: failed to fetch unread summary for {}: {err}",
+                    args.conversation
+                );
+                UnreadSummaryResponse {
+                    threads: Vec::new(),
+                }
+            }
+        };
+        let unread_map: HashMap<Uuid, i64> = unread
+            .threads
+            .into_iter()
+            .map(|entry| (entry.root_id, entry.unread))
+            .collect();
+        render_thread_list(&threads, &unread_map);
     }
 
     Ok(())
@@ -148,7 +165,7 @@ pub async fn handle_follow(args: FollowArgs) -> Result<()> {
             } else if trimmed.is_empty() {
                 if let Some(name) = &event_name {
                     if !data_buffer.is_empty() {
-                        handle_stream_event(name, &data_buffer, args.root).await?;
+                        handle_stream_event(name, &data_buffer, args.root, conversation_id).await?;
                     }
                 }
                 event_name = None;
@@ -160,7 +177,12 @@ pub async fn handle_follow(args: FollowArgs) -> Result<()> {
     Ok(())
 }
 
-async fn handle_stream_event(event_name: &str, data: &str, root_filter: Uuid) -> Result<()> {
+async fn handle_stream_event(
+    event_name: &str,
+    data: &str,
+    root_filter: Uuid,
+    conversation_filter: Uuid,
+) -> Result<()> {
     if let Ok(event) = from_str::<ConversationStreamEvent>(data) {
         match event {
             ConversationStreamEvent::MessageDelta { payload } => {
@@ -192,6 +214,45 @@ async fn handle_stream_event(event_name: &str, data: &str, root_filter: Uuid) ->
                     println!(
                         "[thread activity at {}]",
                         payload.last_activity_at.0.format("%Y-%m-%d %H:%M:%S")
+                    );
+                }
+            }
+            ConversationStreamEvent::TypingUpdate { payload } => {
+                if payload.root_id == root_filter {
+                    println!(
+                        "[typing update user={} expires={}]",
+                        payload.user_id,
+                        payload.expires_at.0.format("%Y-%m-%d %H:%M:%S")
+                    );
+                }
+            }
+            ConversationStreamEvent::PresenceUpdate { payload } => {
+                println!(
+                    "[presence user={} status={:?} last_seen={}]",
+                    payload.user_id,
+                    payload.status,
+                    payload.last_seen_at.0.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            ConversationStreamEvent::UnreadUpdate { payload } => {
+                if payload.root_id == root_filter {
+                    println!("[unread count updated: {}]", payload.unread);
+                }
+            }
+            ConversationStreamEvent::MembershipChanged { payload } => {
+                if payload.conversation_id == conversation_filter {
+                    let action = match payload.action {
+                        MembershipChangeAction::Added => "joined",
+                        MembershipChangeAction::Removed => "left",
+                        MembershipChangeAction::RoleUpdated => "role updated",
+                    };
+                    let role = payload
+                        .role
+                        .map(|role| role.as_str().to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    println!(
+                        "[membership] user {} {} (role {})",
+                        payload.user_id, action, role
                     );
                 }
             }
@@ -251,18 +312,37 @@ async fn fetch_thread_tree(
     Ok(response.json().await?)
 }
 
-fn render_thread_list(list: &ThreadListResponse) {
+async fn fetch_unread_summary(
+    client: &Client,
+    api_base: &str,
+    conversation: Uuid,
+) -> Result<UnreadSummaryResponse> {
+    let url = format!("{}/conversations/{}/unread", api_base, conversation);
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .context("failed to fetch unread summary")?
+        .error_for_status()
+        .context("unread summary rejected")?;
+
+    Ok(response.json().await?)
+}
+
+fn render_thread_list(list: &ThreadListResponse, unread: &HashMap<Uuid, i64>) {
     if list.threads.is_empty() {
         println!("No threads found.");
         return;
     }
 
     for summary in &list.threads {
+        let unread_count = unread.get(&summary.root_id).copied().unwrap_or(0);
         println!(
-            "- root={} messages={} participants={} last={}",
+            "- root={} messages={} participants={} unread={} last={}",
             summary.root_id,
             summary.message_count,
             summary.participant_count,
+            unread_count,
             summary.last_activity_at.0.format("%Y-%m-%d %H:%M:%S"),
         );
         if !summary.root_excerpt.is_empty() {

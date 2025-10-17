@@ -1,6 +1,8 @@
 use shared::models::SetupRequest;
 use sqlx::{Error, PgPool};
 
+use crate::auth::session::hash_password;
+
 /// Checks if the database is already set up.
 pub async fn is_setup(pool: &Option<PgPool>) -> Result<bool, Error> {
     // Check if database pool is available
@@ -23,11 +25,14 @@ pub async fn init_setup(pool: &Option<PgPool>, config: &SetupRequest) -> Result<
     // Check if database pool is available
     let pool_ref = pool.as_ref().ok_or(Error::PoolClosed)?;
 
+    let password_hash =
+        hash_password(&config.password).map_err(|err| Error::Protocol(err.to_string()))?;
+
     // Perform the setup
     let result = sqlx::query_scalar::<_, Option<bool>>("SELECT init_setup($1, $2, $3)")
         .bind(&config.username)
         .bind(&config.email)
-        .bind(&config.password)
+        .bind(&password_hash)
         .fetch_one(pool_ref)
         .await?;
 

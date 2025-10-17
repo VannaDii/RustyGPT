@@ -9,6 +9,7 @@ use std::error::Error;
 use std::path::PathBuf;
 
 mod app_state;
+mod auth;
 mod db;
 mod handlers;
 mod http;

@@ -20,6 +20,7 @@ use tracing_subscriber::fmt;
 
 use crate::{
     app_state,
+    auth::session::SessionService,
     db::bootstrap,
     middleware::{
         auth::auth_middleware,
@@ -135,11 +136,13 @@ pub fn create_app_state(
     pool: Option<sqlx::PgPool>,
     assistant: Option<Arc<AssistantService>>,
     sse_store: Option<Arc<dyn SsePersistence>>,
+    sessions: Option<Arc<SessionService>>,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         pool,
         assistant,
         sse_store,
+        sessions,
     })
 }
 
@@ -352,7 +355,18 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create application state
-    let state = create_app_state(Some(pool.clone()), Some(assistant), sse_store.clone());
+    let session_service = if config.features.auth_v1 {
+        Some(Arc::new(SessionService::new(pool.clone(), config.clone())))
+    } else {
+        None
+    };
+
+    let state = create_app_state(
+        Some(pool.clone()),
+        Some(assistant),
+        sse_store.clone(),
+        session_service.clone(),
+    );
 
     // Create the application router
     let app = create_app_router(state, config.clone());

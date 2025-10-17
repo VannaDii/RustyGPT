@@ -39,6 +39,12 @@ BEGIN
             MESSAGE = 'RGP.403: author not a participant';
     END IF;
 
+    IF NOT rustygpt.sp_user_can_post(v_member, p_conv) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = 'P0001',
+            MESSAGE = 'RGP.429: message rate limit exceeded';
+    END IF;
+
     IF p_content IS NULL OR btrim(p_content) = '' THEN
         RAISE EXCEPTION USING
             ERRCODE = 'P0001',

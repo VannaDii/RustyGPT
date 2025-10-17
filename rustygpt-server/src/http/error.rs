@@ -110,6 +110,7 @@ impl From<ChatServiceError> for ApiError {
             }
             ChatServiceError::NotFound(message) => ApiError::not_found(message),
             ChatServiceError::Forbidden(message) => ApiError::forbidden(message),
+            ChatServiceError::RateLimited(message) => ApiError::too_many_requests(message),
             ChatServiceError::Database(db_err) => ApiError::from(db_err),
         }
     }

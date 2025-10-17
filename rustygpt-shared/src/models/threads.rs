@@ -4,6 +4,10 @@ use uuid::Uuid;
 
 use super::{Timestamp, chat::ConversationRole};
 
+fn default_uuid() -> Uuid {
+    Uuid::nil()
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PresenceStatus {
@@ -67,6 +71,8 @@ pub enum MembershipChangeAction {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct MembershipChangedEvent {
+    #[serde(default = "default_uuid")]
+    pub conversation_id: Uuid,
     pub user_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<ConversationRole>,

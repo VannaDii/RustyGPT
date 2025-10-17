@@ -332,7 +332,7 @@ mod tests {
             .unwrap();
         request.extensions_mut().insert(RequestContext {
             request_id: "req-1".into(),
-            user_id: None,
+            session: None,
         });
 
         let mut make_span = HttpMakeSpan::default();

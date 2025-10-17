@@ -1,4 +1,5 @@
 use shared::models::ThreadSummary;
+use std::collections::HashMap;
 use uuid::Uuid;
 use yew::{Callback, Html, Properties, classes, function_component, html};
 
@@ -8,6 +9,8 @@ pub struct ThreadListProps {
     #[prop_or(None)]
     pub selected: Option<Uuid>,
     pub on_select: Callback<Uuid>,
+    #[prop_or_default]
+    pub unread_counts: HashMap<Uuid, i64>,
 }
 
 #[function_component(ThreadList)]
@@ -26,6 +29,7 @@ pub fn thread_list(props: &ThreadListProps) -> Html {
                 let is_selected = props.selected.map(|id| id == thread.root_id).unwrap_or(false);
                 let summary = thread.clone();
                 let on_select = props.on_select.clone();
+                let unread = props.unread_counts.get(&summary.root_id).copied().unwrap_or(0);
                 let class = if is_selected {
                     classes!("p-3", "bg-base-300", "cursor-pointer")
                 } else {
@@ -42,6 +46,13 @@ pub fn thread_list(props: &ThreadListProps) -> Html {
                         </div>
                         <div class="text-xs text-base-content/50 mt-1">
                             { format!("Messages: {} · Participants: {}", summary.message_count, summary.participant_count) }
+                            {
+                                if unread > 0 {
+                                    html! { <span class="badge badge-primary badge-sm ml-2">{ unread }</span> }
+                                } else {
+                                    Html::default()
+                                }
+                            }
                         </div>
                     </li>
                 }

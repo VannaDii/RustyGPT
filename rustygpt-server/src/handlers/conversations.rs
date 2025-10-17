@@ -15,13 +15,15 @@ use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
+    handlers::streaming::SharedStreamHub,
     http::error::{ApiError, AppResult},
     middleware::request_context::RequestContext,
-    services::chat_service::ChatService,
+    services::chat_service::{AcceptInviteResult, ChatService},
 };
 use shared::models::{
-    AcceptInviteRequest, AddParticipantRequest, ConversationCreateRequest, CreateInviteRequest,
-    CreateInviteResponse, ThreadListResponse, UnreadSummaryResponse,
+    AcceptInviteRequest, AddParticipantRequest, ConversationCreateRequest, ConversationStreamEvent,
+    CreateInviteRequest, CreateInviteResponse, MembershipChangeAction, MembershipChangedEvent,
+    PresenceStatus, PresenceUpdate, ThreadListResponse, Timestamp, UnreadSummaryResponse,
 };
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -75,6 +77,7 @@ async fn create_conversation(
 async fn add_participant(
     Extension(app_state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
+    Extension(hub): Extension<SharedStreamHub>,
     Path(conversation_id): Path<Uuid>,
     Json(payload): Json<AddParticipantRequest>,
 ) -> AppResult<impl IntoResponse> {
@@ -82,9 +85,28 @@ async fn add_participant(
     let pool = require_pool(&app_state)?;
     let service = ChatService::new(pool);
 
-    service
-        .add_participant(user_id, conversation_id, payload)
+    let assigned_role = service
+        .add_participant(user_id, conversation_id, payload.clone())
         .await?;
+
+    let membership = ConversationStreamEvent::MembershipChanged {
+        payload: MembershipChangedEvent {
+            conversation_id,
+            user_id: payload.user_id,
+            role: Some(assigned_role),
+            action: MembershipChangeAction::Added,
+        },
+    };
+    hub.publish(conversation_id, membership).await;
+
+    let presence = ConversationStreamEvent::PresenceUpdate {
+        payload: PresenceUpdate {
+            user_id: payload.user_id,
+            status: PresenceStatus::Online,
+            last_seen_at: Timestamp(Utc::now()),
+        },
+    };
+    hub.publish(conversation_id, presence).await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -93,15 +115,35 @@ async fn add_participant(
 async fn remove_participant(
     Extension(app_state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
+    Extension(hub): Extension<SharedStreamHub>,
     Path((conversation_id, user_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<impl IntoResponse> {
     let actor = require_user(&context)?;
     let pool = require_pool(&app_state)?;
     let service = ChatService::new(pool);
 
-    service
+    let prior_role = service
         .remove_participant(actor, conversation_id, user_id)
         .await?;
+
+    let membership = ConversationStreamEvent::MembershipChanged {
+        payload: MembershipChangedEvent {
+            conversation_id,
+            user_id,
+            role: Some(prior_role),
+            action: MembershipChangeAction::Removed,
+        },
+    };
+    hub.publish(conversation_id, membership).await;
+
+    let presence = ConversationStreamEvent::PresenceUpdate {
+        payload: PresenceUpdate {
+            user_id,
+            status: PresenceStatus::Offline,
+            last_seen_at: Timestamp(Utc::now()),
+        },
+    };
+    hub.publish(conversation_id, presence).await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -135,13 +177,36 @@ async fn create_invite(
 async fn accept_invite(
     Extension(app_state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
+    Extension(hub): Extension<SharedStreamHub>,
     Json(payload): Json<AcceptInviteRequest>,
 ) -> AppResult<impl IntoResponse> {
     let actor = require_user(&context)?;
     let pool = require_pool(&app_state)?;
     let service = ChatService::new(pool);
 
-    let conversation_id = service.accept_invite(actor, &payload.token).await?;
+    let AcceptInviteResult {
+        conversation_id,
+        role,
+    } = service.accept_invite(actor, &payload.token).await?;
+
+    let membership = ConversationStreamEvent::MembershipChanged {
+        payload: MembershipChangedEvent {
+            conversation_id,
+            user_id: actor,
+            role: Some(role),
+            action: MembershipChangeAction::Added,
+        },
+    };
+    hub.publish(conversation_id, membership).await;
+
+    let presence = ConversationStreamEvent::PresenceUpdate {
+        payload: PresenceUpdate {
+            user_id: actor,
+            status: PresenceStatus::Online,
+            last_seen_at: Timestamp(Utc::now()),
+        },
+    };
+    hub.publish(conversation_id, presence).await;
     Ok((
         StatusCode::OK,
         Json(serde_json::json!({"conversation_id": conversation_id})),
@@ -196,7 +261,7 @@ async fn unread_summary(
 
 fn require_user(context: &RequestContext) -> AppResult<Uuid> {
     context
-        .user_id
+        .user_id()
         .ok_or_else(|| ApiError::forbidden("authentication required"))
 }
 
