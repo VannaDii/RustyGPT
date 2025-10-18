@@ -466,7 +466,7 @@ pub fn setup() -> Html {
 /// # Returns
 /// A [`RustyGPTClient`](crate::api::RustyGPTClient) instance configured to connect to the backend.
 pub fn create_api_client() -> RustyGPTClient {
-    RustyGPTClient::new("http://localhost:8080/api")
+    RustyGPTClient::shared()
 }
 
 /// Sets the initial theme for the application.

@@ -78,6 +78,8 @@ enum Commands {
     Login(commands::session::LoginArgs),
     /// Call /api/auth/me using the stored session
     Me(commands::session::MeArgs),
+    /// Logout and remove stored session cookies
+    Logout(commands::session::LogoutArgs),
 }
 
 #[tokio::main]
@@ -118,6 +120,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         Commands::Me(args) => {
             commands::session::me(args).await?;
+        }
+        Commands::Logout(args) => {
+            commands::session::logout(args).await?;
         }
     }
 
@@ -186,6 +191,17 @@ mod tests {
         match cli.unwrap().command {
             Commands::Me(args) => assert_eq!(args.config, Some(PathBuf::from("./conf.toml"))),
             _ => panic!("Expected Me command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_logout_command() {
+        let cli = Cli::try_parse_from(["cli", "logout"]);
+        assert!(cli.is_ok());
+
+        match cli.unwrap().command {
+            Commands::Logout(args) => assert!(args.config.is_none()),
+            _ => panic!("Expected Logout command"),
         }
     }
 

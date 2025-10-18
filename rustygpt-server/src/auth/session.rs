@@ -7,12 +7,13 @@ use argon2::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
-use cookie::Cookie;
+use cookie::{Cookie, SameSite};
+use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Postgres, pool::PoolConnection};
+use sqlx::{PgPool, Postgres, pool::PoolConnection, types::Json};
 use thiserror::Error;
 use time::{Duration as TimeDuration, OffsetDateTime};
-use tracing::{instrument, warn};
+use tracing::{debug, instrument, warn};
 use uuid::Uuid;
 
 use shared::{
@@ -27,6 +28,14 @@ pub enum SessionError {
     PasswordHash(String),
     #[error("password verification failed")]
     InvalidCredentials,
+    #[error("user account disabled")]
+    DisabledUser,
+    #[error("session expired")]
+    SessionExpired,
+    #[error("session absolute lifetime exceeded")]
+    AbsoluteExpired,
+    #[error("session rotation required")]
+    RotationRequired,
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("time conversion error: {0}")]
@@ -38,6 +47,7 @@ pub enum SessionError {
 pub struct SessionMetadata {
     pub user_agent: Option<String>,
     pub ip: Option<String>,
+    pub fingerprint: Option<String>,
 }
 
 impl SessionMetadata {
@@ -59,6 +69,21 @@ impl SessionMetadata {
         self.ip = value.into();
         self
     }
+
+    #[must_use]
+    pub fn with_fingerprint<T: Into<Option<String>>>(mut self, value: T) -> Self {
+        self.fingerprint = value.into();
+        self
+    }
+
+    #[must_use]
+    pub fn as_json(&self) -> serde_json::Value {
+        json!({
+            "user_agent": self.user_agent,
+            "ip": self.ip,
+            "fingerprint": self.fingerprint,
+        })
+    }
 }
 
 /// Authenticated user details attached to the request context.
@@ -68,26 +93,34 @@ pub struct SessionUser {
     pub id: Uuid,
     pub email: String,
     pub username: String,
+    pub display_name: Option<String>,
     pub roles: Vec<UserRole>,
     pub session_id: Uuid,
+    pub issued_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+    pub absolute_expires_at: DateTime<Utc>,
 }
 
 /// Session issuance output containing the raw token and encoded cookie.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct SessionCookie {
+pub struct SessionBundle {
     pub token: String,
-    pub cookie: Cookie<'static>,
+    pub session_cookie: Cookie<'static>,
+    pub csrf_token: String,
+    pub csrf_cookie: Cookie<'static>,
     pub session_id: Uuid,
+    pub issued_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+    pub absolute_expires_at: DateTime<Utc>,
 }
 
 /// Successful validation result used by the auth middleware.
 #[derive(Debug, Clone)]
 pub struct SessionValidation {
     pub user: SessionUser,
-    pub refresh_cookie: Option<Cookie<'static>>,
+    pub bundle: Option<SessionBundle>,
+    pub rotated: bool,
 }
 
 /// Database-backed session manager.
@@ -102,14 +135,9 @@ impl SessionService {
         Self { pool, config }
     }
 
-    fn ttl_duration(&self) -> Duration {
-        let ttl = self.config.session.ttl_seconds.max(1);
-        Duration::seconds(ttl as i64)
-    }
-
     fn rotation_threshold(&self) -> Duration {
-        let ttl = self.config.session.ttl_seconds.max(1);
-        let threshold = (ttl / 2).max(1);
+        let idle = self.config.session.idle_seconds.max(1);
+        let threshold = (idle / 2).max(1);
         Duration::seconds(threshold as i64)
     }
 
@@ -123,11 +151,7 @@ impl SessionService {
                 SessionError::TimeConversion(format!("failed to convert cookie expiry: {err}"))
             })?;
         let max_age = (expires_utc - OffsetDateTime::now_utc()).max(TimeDuration::seconds(0));
-        let same_site = match self.config.security.cookie.same_site {
-            CookieSameSite::Lax => cookie::SameSite::Lax,
-            CookieSameSite::Strict => cookie::SameSite::Strict,
-            CookieSameSite::None => cookie::SameSite::None,
-        };
+        let same_site = self.map_same_site(self.config.security.cookie.same_site);
 
         let mut builder = Cookie::build((
             self.config.session.session_cookie_name.clone(),
@@ -147,12 +171,54 @@ impl SessionService {
         Ok(builder.build())
     }
 
+    fn build_csrf_cookie(
+        &self,
+        token: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<Cookie<'static>, SessionError> {
+        let expires_utc =
+            OffsetDateTime::from_unix_timestamp(expires_at.timestamp()).map_err(|err| {
+                SessionError::TimeConversion(format!("failed to convert CSRF cookie expiry: {err}"))
+            })?;
+        let max_age = (expires_utc - OffsetDateTime::now_utc()).max(TimeDuration::seconds(0));
+        let mut builder = Cookie::build((
+            self.config.session.csrf_cookie_name.clone(),
+            token.to_owned(),
+        ))
+        .path("/")
+        .http_only(false)
+        .secure(self.config.security.cookie.secure)
+        .same_site(SameSite::Strict)
+        .max_age(max_age)
+        .expires(expires_utc);
+
+        if let Some(domain) = &self.config.security.cookie.domain {
+            builder = builder.domain(domain.clone());
+        }
+
+        Ok(builder.build())
+    }
+
+    fn map_same_site(&self, value: CookieSameSite) -> SameSite {
+        match value {
+            CookieSameSite::Lax => SameSite::Lax,
+            CookieSameSite::Strict => SameSite::Strict,
+            CookieSameSite::None => SameSite::None,
+        }
+    }
+
     fn new_token() -> Result<(String, Vec<u8>), SessionError> {
         let mut raw = [0u8; 32];
         OsRng.fill_bytes(&mut raw);
         let token = URL_SAFE_NO_PAD.encode(raw);
         let hash = Sha256::digest(token.as_bytes());
         Ok((token, hash.to_vec()))
+    }
+
+    fn new_csrf_token() -> String {
+        let mut raw = [0u8; 16];
+        OsRng.fill_bytes(&mut raw);
+        URL_SAFE_NO_PAD.encode(raw)
     }
 
     fn hash_for_token(token: &str) -> Vec<u8> {
@@ -163,17 +229,29 @@ impl SessionService {
         self.pool.acquire().await.map_err(SessionError::Database)
     }
 
+    fn max_sessions_per_user(&self) -> Option<i32> {
+        self.config
+            .session
+            .max_sessions_per_user
+            .map(|value| value as i32)
+    }
+
     #[instrument(skip(self, password), fields(identifier = %identifier))]
     pub async fn authenticate(
         &self,
         identifier: &str,
         password: &str,
         metadata: &SessionMetadata,
-    ) -> Result<(SessionUser, SessionCookie), SessionError> {
+    ) -> Result<(SessionUser, SessionBundle), SessionError> {
         let mut conn = self.acquire_connection().await?;
         let record = sqlx::query_as::<_, CredentialRow>(
-            "SELECT id, email::TEXT AS email, username::TEXT AS username, password_hash \
-             FROM rustygpt.users \
+            "SELECT id,
+                    email::TEXT AS email,
+                    username::TEXT AS username,
+                    display_name,
+                    password_hash,
+                    disabled_at
+             FROM rustygpt.users
              WHERE email = $1::citext OR username = $1::citext",
         )
         .bind(identifier)
@@ -185,23 +263,30 @@ impl SessionService {
             None => return Err(SessionError::InvalidCredentials),
         };
 
+        if row.disabled_at.is_some() {
+            return Err(SessionError::DisabledUser);
+        }
+
         verify_password(&row.password_hash, password)?;
 
         let roles = self.load_roles(&mut conn, row.id).await?;
-        let session_cookie = self.issue_session(&mut conn, row.id, metadata).await?;
-
-        drop(conn);
+        let bundle = self
+            .issue_session(&mut conn, row.id, &roles, metadata)
+            .await?;
 
         let user = SessionUser {
             id: row.id,
             email: row.email,
             username: row.username,
+            display_name: row.display_name.clone(),
             roles,
-            session_id: session_cookie.session_id,
-            expires_at: session_cookie.expires_at,
+            session_id: bundle.session_id,
+            issued_at: bundle.issued_at,
+            expires_at: bundle.expires_at,
+            absolute_expires_at: bundle.absolute_expires_at,
         };
 
-        Ok((user, session_cookie))
+        Ok((user, bundle))
     }
 
     #[instrument(skip(self, token, metadata))]
@@ -220,9 +305,15 @@ impl SessionService {
         let session = sqlx::query_as::<_, ActiveSessionRow>(
             "SELECT s.id AS session_id,
                     s.user_id,
+                    s.issued_at,
                     s.expires_at,
+                    s.absolute_expires_at,
+                    s.requires_rotation,
+                    s.roles_snapshot,
                     u.email::TEXT AS email,
-                    u.username::TEXT AS username
+                    u.username::TEXT AS username,
+                    u.display_name,
+                    u.disabled_at
              FROM rustygpt.user_sessions s
              JOIN rustygpt.users u ON u.id = s.user_id
              WHERE s.token_hash = $1
@@ -237,117 +328,268 @@ impl SessionService {
             return Ok(None);
         };
 
-        let now = Utc::now();
-        if row.expires_at <= now {
-            sqlx::query("DELETE FROM rustygpt.user_sessions WHERE id = $1")
-                .bind(row.session_id)
-                .execute(conn.as_mut())
+        if row.disabled_at.is_some() {
+            self.logout_session(&mut conn, row.session_id, Some("disabled"))
                 .await?;
-            return Ok(None);
+            return Err(SessionError::DisabledUser);
         }
 
-        let mut refresh_cookie = None;
-        if row.expires_at - now <= self.rotation_threshold() {
-            let rotated = self
-                .rotate_session(&mut conn, row.session_id, row.user_id, metadata)
+        let now = Utc::now();
+        if row.expires_at <= now {
+            self.logout_session(&mut conn, row.session_id, Some("idle_expired"))
                 .await?;
-            refresh_cookie = Some(rotated.cookie.clone());
-            row.expires_at = rotated.expires_at;
+            return Err(SessionError::SessionExpired);
+        }
+
+        if row.absolute_expires_at <= now {
+            self.logout_session(&mut conn, row.session_id, Some("absolute_expired"))
+                .await?;
+            return Err(SessionError::AbsoluteExpired);
+        }
+
+        let roles = self.load_roles(&mut conn, row.user_id).await?;
+        let snapshot_mismatch = row
+            .roles_snapshot
+            .as_ref()
+            .map(|snapshot| {
+                let current: Vec<String> =
+                    roles.iter().map(|role| role.as_str().to_string()).collect();
+                &current != snapshot
+            })
+            .unwrap_or(false);
+
+        let threshold = self.rotation_threshold();
+        let needs_rotation =
+            row.requires_rotation || snapshot_mismatch || (row.expires_at - now) <= threshold;
+
+        let mut rotated = false;
+        let mut bundle = None;
+
+        if needs_rotation {
+            let rotated_bundle = self
+                .rotate_session(&mut conn, row.session_id, row.user_id, &roles, metadata)
+                .await?;
+
+            row.session_id = rotated_bundle.session_id;
+            row.issued_at = rotated_bundle.issued_at;
+            row.expires_at = rotated_bundle.expires_at;
+            row.absolute_expires_at = rotated_bundle.absolute_expires_at;
+            rotated = true;
+            bundle = Some(rotated_bundle);
         } else {
             self.touch_session(&mut conn, row.session_id, metadata)
                 .await?;
         }
 
-        let roles = self.load_roles(&mut conn, row.user_id).await?;
         drop(conn);
 
         let user = SessionUser {
             id: row.user_id,
             email: row.email,
             username: row.username,
+            display_name: row.display_name.clone(),
             roles,
             session_id: row.session_id,
+            issued_at: row.issued_at,
             expires_at: row.expires_at,
+            absolute_expires_at: row.absolute_expires_at,
         };
 
         Ok(Some(SessionValidation {
             user,
-            refresh_cookie,
+            bundle,
+            rotated,
         }))
     }
 
-    #[instrument(skip(self, metadata))]
+    pub async fn refresh_session(
+        &self,
+        token: &str,
+        metadata: &SessionMetadata,
+    ) -> Result<Option<(SessionUser, SessionBundle)>, SessionError> {
+        let validation = match self.validate_session(token, metadata).await? {
+            Some(value) => value,
+            None => return Ok(None),
+        };
+
+        let SessionValidation {
+            mut user, bundle, ..
+        } = validation;
+        if let Some(bundle) = bundle {
+            user.session_id = bundle.session_id;
+            user.issued_at = bundle.issued_at;
+            user.expires_at = bundle.expires_at;
+            user.absolute_expires_at = bundle.absolute_expires_at;
+            return Ok(Some((user, bundle)));
+        }
+
+        let mut conn = self.acquire_connection().await?;
+        let rotated_bundle = self
+            .rotate_session(&mut conn, user.session_id, user.id, &user.roles, metadata)
+            .await?;
+        drop(conn);
+
+        user.session_id = rotated_bundle.session_id;
+        user.issued_at = rotated_bundle.issued_at;
+        user.expires_at = rotated_bundle.expires_at;
+        user.absolute_expires_at = rotated_bundle.absolute_expires_at;
+
+        Ok(Some((user, rotated_bundle)))
+    }
+
+    pub async fn revoke_session_by_id(
+        &self,
+        session_id: Uuid,
+        reason: Option<&str>,
+    ) -> Result<(), SessionError> {
+        let mut conn = self.acquire_connection().await?;
+        self.logout_session(&mut conn, session_id, reason).await
+    }
+
+    #[instrument(skip(self, reason), fields(user_id = %user_id))]
+    pub async fn mark_user_for_rotation(
+        &self,
+        user_id: Uuid,
+        reason: &str,
+    ) -> Result<i64, SessionError> {
+        let mut conn = self.acquire_connection().await?;
+        let updated = sqlx::query_scalar::<_, i64>("SELECT rustygpt.sp_auth_mark_rotation($1, $2)")
+            .bind(user_id)
+            .bind(reason)
+            .fetch_one(conn.as_mut())
+            .await?;
+
+        Ok(updated)
+    }
+
+    #[instrument(skip(self, roles, metadata))]
     async fn issue_session(
         &self,
         conn: &mut PoolConnection<Postgres>,
         user_id: Uuid,
+        roles: &[UserRole],
         metadata: &SessionMetadata,
-    ) -> Result<SessionCookie, SessionError> {
+    ) -> Result<SessionBundle, SessionError> {
         let (token, hash) = Self::new_token()?;
-        let expires_at = Utc::now() + self.ttl_duration();
+        let csrf_token = Self::new_csrf_token();
+        let roles_text: Vec<String> = roles.iter().map(|role| role.as_str().to_string()).collect();
+        let client_meta = Json(metadata.as_json());
+        let idle_seconds = self.config.session.idle_seconds as i32;
+        let absolute_seconds = self.config.session.absolute_seconds as i32;
 
-        let inserted = sqlx::query_as::<_, SessionInsertRow>(
-            "INSERT INTO rustygpt.user_sessions (user_id, token_hash, expires_at, user_agent, ip) \
-             VALUES ($1, $2, $3, $4, $5) \
-             RETURNING id, expires_at",
+        let record = sqlx::query_as::<_, SessionLoginRow>(
+            "SELECT session_id,
+                    issued_at,
+                    expires_at,
+                    absolute_expires_at
+             FROM rustygpt.sp_auth_login(
+                 $1,
+                 $2,
+                 $3,
+                 $4,
+                 $5,
+                 $6::TEXT[],
+                 $7,
+                 $8,
+                 $9
+             )",
         )
         .bind(user_id)
-        .bind(hash)
-        .bind(expires_at)
+        .bind(&hash)
         .bind(metadata.user_agent.as_deref())
         .bind(metadata.ip.as_deref())
+        .bind(client_meta)
+        .bind(&roles_text)
+        .bind(idle_seconds)
+        .bind(absolute_seconds)
+        .bind(self.max_sessions_per_user())
         .fetch_one(conn.as_mut())
         .await?;
 
-        let cookie = self.build_cookie(&token, expires_at)?;
+        debug!(
+            user_id = %user_id,
+            session_id = %record.session_id,
+            "issued new session"
+        );
 
-        Ok(SessionCookie {
+        let session_cookie = self.build_cookie(&token, record.expires_at)?;
+        let csrf_cookie = self.build_csrf_cookie(&csrf_token, record.expires_at)?;
+
+        Ok(SessionBundle {
             token,
-            cookie,
-            session_id: inserted.id,
-            expires_at: inserted.expires_at,
+            session_cookie,
+            csrf_token,
+            csrf_cookie,
+            session_id: record.session_id,
+            issued_at: record.issued_at,
+            expires_at: record.expires_at,
+            absolute_expires_at: record.absolute_expires_at,
         })
     }
 
-    #[instrument(skip(self, metadata))]
+    #[instrument(skip(self, roles, metadata))]
     async fn rotate_session(
         &self,
         conn: &mut PoolConnection<Postgres>,
         session_id: Uuid,
         user_id: Uuid,
+        roles: &[UserRole],
         metadata: &SessionMetadata,
-    ) -> Result<SessionCookie, SessionError> {
+    ) -> Result<SessionBundle, SessionError> {
         let (token, hash) = Self::new_token()?;
-        let expires_at = Utc::now() + self.ttl_duration();
+        let csrf_token = Self::new_csrf_token();
+        let roles_text: Vec<String> = roles.iter().map(|role| role.as_str().to_string()).collect();
+        let client_meta = Json(metadata.as_json());
+        let idle_seconds = self.config.session.idle_seconds as i32;
 
-        let updated = sqlx::query_as::<_, SessionUpdateRow>(
-            "UPDATE rustygpt.user_sessions
-             SET token_hash = $1,
-                 expires_at = $2,
-                 last_seen_at = now(),
-                 rotated_at = now(),
-                 rotated_by = $3,
-                 user_agent = COALESCE($4, user_agent),
-                 ip = COALESCE($5::inet, ip)
-             WHERE id = $6
-             RETURNING expires_at",
+        let record = sqlx::query_as::<_, SessionRefreshRow>(
+            "SELECT next_session_id,
+                    user_id,
+                    issued_at,
+                    expires_at,
+                    absolute_expires_at
+             FROM rustygpt.sp_auth_refresh(
+                 $1,
+                 $2,
+                 $3,
+                 $4,
+                 $5,
+                 $6::TEXT[],
+                 $7
+             )",
         )
-        .bind(hash)
-        .bind(expires_at)
-        .bind(user_id)
+        .bind(session_id)
+        .bind(&hash)
         .bind(metadata.user_agent.as_deref())
         .bind(metadata.ip.as_deref())
-        .bind(session_id)
+        .bind(client_meta)
+        .bind(&roles_text)
+        .bind(idle_seconds)
         .fetch_one(conn.as_mut())
         .await?;
 
-        let cookie = self.build_cookie(&token, expires_at)?;
+        if record.user_id != user_id {
+            return Err(SessionError::RotationRequired);
+        }
 
-        Ok(SessionCookie {
+        debug!(
+            old_session_id = %session_id,
+            new_session_id = %record.next_session_id,
+            "rotated session"
+        );
+
+        let session_cookie = self.build_cookie(&token, record.expires_at)?;
+        let csrf_cookie = self.build_csrf_cookie(&csrf_token, record.expires_at)?;
+
+        Ok(SessionBundle {
             token,
-            cookie,
-            session_id,
-            expires_at: updated.expires_at,
+            session_cookie,
+            csrf_token,
+            csrf_cookie,
+            session_id: record.next_session_id,
+            issued_at: record.issued_at,
+            expires_at: record.expires_at,
+            absolute_expires_at: record.absolute_expires_at,
         })
     }
 
@@ -357,18 +599,35 @@ impl SessionService {
         session_id: Uuid,
         metadata: &SessionMetadata,
     ) -> Result<(), SessionError> {
+        let client_meta = Json(metadata.as_json());
         sqlx::query(
             "UPDATE rustygpt.user_sessions
              SET last_seen_at = now(),
                  user_agent = COALESCE($2, user_agent),
-                 ip = COALESCE($3::inet, ip)
+                 ip = COALESCE($3::inet, ip),
+                 client_meta = $4
              WHERE id = $1",
         )
         .bind(session_id)
         .bind(metadata.user_agent.as_deref())
         .bind(metadata.ip.as_deref())
+        .bind(client_meta)
         .execute(conn.as_mut())
         .await?;
+        Ok(())
+    }
+
+    async fn logout_session(
+        &self,
+        conn: &mut PoolConnection<Postgres>,
+        session_id: Uuid,
+        reason: Option<&str>,
+    ) -> Result<(), SessionError> {
+        sqlx::query("CALL rustygpt.sp_auth_logout($1, $2)")
+            .bind(session_id)
+            .bind(reason.unwrap_or("logout"))
+            .execute(conn.as_mut())
+            .await?;
         Ok(())
     }
 
@@ -427,26 +686,39 @@ struct CredentialRow {
     id: Uuid,
     email: String,
     username: String,
+    display_name: Option<String>,
     password_hash: String,
-}
-
-#[derive(sqlx::FromRow)]
-#[allow(dead_code)]
-struct SessionInsertRow {
-    id: Uuid,
-    expires_at: DateTime<Utc>,
-}
-
-#[derive(sqlx::FromRow)]
-struct SessionUpdateRow {
-    expires_at: DateTime<Utc>,
+    disabled_at: Option<DateTime<Utc>>,
 }
 
 #[derive(sqlx::FromRow)]
 struct ActiveSessionRow {
     session_id: Uuid,
     user_id: Uuid,
+    issued_at: DateTime<Utc>,
     email: String,
     username: String,
+    display_name: Option<String>,
     expires_at: DateTime<Utc>,
+    absolute_expires_at: DateTime<Utc>,
+    requires_rotation: bool,
+    roles_snapshot: Option<Vec<String>>,
+    disabled_at: Option<DateTime<Utc>>,
+}
+
+#[derive(sqlx::FromRow)]
+struct SessionLoginRow {
+    session_id: Uuid,
+    issued_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    absolute_expires_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+struct SessionRefreshRow {
+    next_session_id: Uuid,
+    user_id: Uuid,
+    issued_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    absolute_expires_at: DateTime<Utc>,
 }

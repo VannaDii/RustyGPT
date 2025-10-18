@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS rustygpt.users (
     username CITEXT NOT NULL UNIQUE,
     display_name TEXT,
     password_hash TEXT NOT NULL,
+    disabled_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -52,15 +53,21 @@ CREATE TABLE IF NOT EXISTS rustygpt.user_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES rustygpt.users(id) ON DELETE CASCADE,
     token_hash BYTEA NOT NULL,
+    issued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL,
+    absolute_expires_at TIMESTAMPTZ NOT NULL,
     rotated_at TIMESTAMPTZ,
     rotated_by UUID,
     revoked_at TIMESTAMPTZ,
     revoked_by UUID,
+    requires_rotation BOOLEAN NOT NULL DEFAULT FALSE,
+    rotation_reason TEXT,
     user_agent TEXT,
-    ip inet
+    ip inet,
+    client_meta JSONB NOT NULL DEFAULT '{}'::JSONB,
+    roles_snapshot TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_user_sessions_token_hash

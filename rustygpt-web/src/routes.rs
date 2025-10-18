@@ -1,8 +1,11 @@
-use crate::{containers::layout::Layout, pages::*};
+use crate::{containers::layout::Layout, models::app_state::AppState, pages::*};
+use shared::models::UserRole;
 use strum::{EnumIter, IntoEnumIterator};
 use wasm_bindgen::prelude::*;
+use yew::Callback;
 use yew::prelude::*;
 use yew_router::prelude::*;
+use yewdux::prelude::use_selector;
 
 #[wasm_bindgen]
 extern "C" {
@@ -15,6 +18,8 @@ extern "C" {
 pub enum MainRoute {
     #[at("/")]
     Home,
+    #[at("/login")]
+    Login,
     #[at("/chat")]
     Chat,
     #[at("/chat/:conversation_id")]
@@ -69,33 +74,108 @@ impl From<MainRoute> for AppRoute {
     }
 }
 
-/// Switch function for the main routes.
-pub fn switch(route: MainRoute) -> Html {
-    log(std::format!("Switching to main route: {:?}", route).as_str());
-    match route {
+#[derive(Properties, PartialEq)]
+pub struct MainRouteViewProps {
+    pub route: MainRoute,
+    pub on_logout: Callback<()>,
+}
+
+#[function_component(MainRouteView)]
+fn main_route_view(props: &MainRouteViewProps) -> Html {
+    let user = use_selector(|state: &AppState| state.user.clone());
+    let user_opt = (*user).clone();
+    let is_authenticated = user_opt.is_some();
+    let is_admin = user_opt
+        .as_ref()
+        .map(|user| {
+            user.roles
+                .iter()
+                .any(|role| matches!(role, UserRole::Admin))
+        })
+        .unwrap_or(false);
+    let on_logout = props.on_logout.clone();
+
+    match props.route.clone() {
+        MainRoute::Login => {
+            if is_authenticated {
+                html! { <Redirect<MainRoute> to={MainRoute::Home} /> }
+            } else {
+                html! { <LoginPage /> }
+            }
+        }
         MainRoute::Home => {
-            html! {<Layout current_route={AppRoute::Main(route)}><DashboardPage /></Layout>}
+            if !is_authenticated {
+                return html! { <Redirect<MainRoute> to={MainRoute::Login} /> };
+            }
+            let logout_cb = on_logout.clone();
+            html! {
+                <Layout current_route={AppRoute::Main(MainRoute::Home)} on_logout={Some(logout_cb)}>
+                    <DashboardPage />
+                </Layout>
+            }
         }
         MainRoute::Chat => {
-            html! {<Layout current_route={AppRoute::Main(route)}><ChatPage /></Layout>}
+            if !is_authenticated {
+                return html! { <Redirect<MainRoute> to={MainRoute::Login} /> };
+            }
+            let logout_cb = on_logout.clone();
+            html! {
+                <Layout current_route={AppRoute::Main(MainRoute::Chat)} on_logout={Some(logout_cb)}>
+                    <ChatPage />
+                </Layout>
+            }
         }
-        MainRoute::ChatConversation {
-            ref conversation_id,
-        } => {
-            let route_clone = route.clone();
-            html! {<Layout current_route={AppRoute::Main(route_clone)}><ChatPage conversation_id={Some(conversation_id.clone())} /></Layout>}
+        MainRoute::ChatConversation { conversation_id } => {
+            if !is_authenticated {
+                return html! { <Redirect<MainRoute> to={MainRoute::Login} /> };
+            }
+            let route_clone = MainRoute::ChatConversation {
+                conversation_id: conversation_id.clone(),
+            };
+            let logout_cb = on_logout.clone();
+            html! {
+                <Layout current_route={AppRoute::Main(route_clone)} on_logout={Some(logout_cb)}>
+                    <ChatPage conversation_id={Some(conversation_id)} />
+                </Layout>
+            }
         }
         MainRoute::AdminRoot | MainRoute::Admin => {
-            html! { <Switch<AdminRoute> render={switch_admin} /> }
+            if !is_authenticated {
+                return html! { <Redirect<MainRoute> to={MainRoute::Login} /> };
+            }
+            if !is_admin {
+                return html! { <Redirect<MainRoute> to={MainRoute::Home} /> };
+            }
+            let logout_cb = on_logout.clone();
+            html! {
+                <Switch<AdminRoute> render={move |route| {
+                    let logout_cb = logout_cb.clone();
+                    switch_admin(route, logout_cb.clone())
+                }} />
+            }
         }
         MainRoute::NotFound => {
-            html! {<Layout current_route={AppRoute::Main(route)}><ErrorPage /></Layout>}
+            if !is_authenticated {
+                return html! { <Redirect<MainRoute> to={MainRoute::Login} /> };
+            }
+            let logout_cb = on_logout.clone();
+            html! {
+                <Layout current_route={AppRoute::Main(MainRoute::NotFound)} on_logout={Some(logout_cb)}>
+                    <ErrorPage />
+                </Layout>
+            }
         }
     }
 }
 
+/// Switch function for the main routes.
+pub fn switch_with_logout(route: MainRoute, on_logout: Callback<()>) -> Html {
+    log(std::format!("Switching to main route: {:?}", route).as_str());
+    html! { <MainRouteView {route} {on_logout} /> }
+}
+
 /// Switch function for the admin routes.
-fn switch_admin(route: AdminRoute) -> Html {
+fn switch_admin(route: AdminRoute, on_logout: Callback<()>) -> Html {
     log(std::format!("Switching to admin route: {:?}", route).as_str());
     let header_routes = AdminRoute::iter()
         .filter(|route| {
@@ -106,19 +186,23 @@ fn switch_admin(route: AdminRoute) -> Html {
         .collect::<Vec<_>>();
     match route {
         AdminRoute::Profile => {
-            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)}>
+            let logout_cb = on_logout.clone();
+            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)} on_logout={Some(logout_cb)}>
             <ProfilePage /></Layout>}
         }
         AdminRoute::System => {
-            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)}>
+            let logout_cb = on_logout.clone();
+            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)} on_logout={Some(logout_cb)}>
             <SettingsPage /></Layout>}
         }
         AdminRoute::Users => {
-            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)}>
+            let logout_cb = on_logout.clone();
+            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)} on_logout={Some(logout_cb)}>
             <UsersPage /></Layout>}
         }
         AdminRoute::UserRoles => {
-            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)}>
+            let logout_cb = on_logout.clone();
+            html! {<Layout {header_routes} current_route={AppRoute::Admin(route)} on_logout={Some(logout_cb)}>
             <RolesPage /></Layout>}
         }
         AdminRoute::NotFound => html! {<Redirect<MainRoute> to={MainRoute::NotFound}/>},

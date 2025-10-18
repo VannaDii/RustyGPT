@@ -47,6 +47,10 @@ pub async fn enforce_csrf(
         return Ok(next.run(request).await);
     }
 
+    if is_auth_endpoint(request.uri().path()) {
+        return Ok(next.run(request).await);
+    }
+
     let header_token = request
         .headers()
         .get(&state.header_name)
@@ -69,6 +73,10 @@ fn is_method_idempotent(method: &Method) -> bool {
 
 fn is_stream_endpoint(path: &str) -> bool {
     path.starts_with("/api/stream")
+}
+
+fn is_auth_endpoint(path: &str) -> bool {
+    path.starts_with("/api/auth/")
 }
 
 fn extract_cookie(request: &Request<Body>, cookie_name: &str) -> Option<String> {

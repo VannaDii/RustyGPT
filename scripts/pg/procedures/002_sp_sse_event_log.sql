@@ -1,88 +1,127 @@
 -- Stored procedures and helper functions for SSE event persistence.
 
 CREATE OR REPLACE PROCEDURE rustygpt.sp_record_sse_event(
-    IN p_user_id UUID,
+    IN p_conversation_id UUID,
     IN p_sequence BIGINT,
     IN p_event_id TEXT,
-    IN p_event_name TEXT,
-    IN p_payload TEXT
+    IN p_event_type TEXT,
+    IN p_payload JSONB,
+    IN p_root_message_id UUID DEFAULT NULL
 )
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    INSERT INTO rustygpt.sse_event_log (user_id, sequence, event_id, event_name, payload)
-    VALUES (p_user_id, p_sequence, p_event_id, p_event_name, p_payload)
-    ON CONFLICT (user_id, sequence) DO UPDATE
+    INSERT INTO rustygpt.sse_event_log (
+        conversation_id,
+        sequence,
+        event_id,
+        event_type,
+        payload,
+        root_message_id
+    )
+    VALUES (
+        p_conversation_id,
+        p_sequence,
+        p_event_id,
+        p_event_type,
+        p_payload,
+        p_root_message_id
+    )
+    ON CONFLICT (conversation_id, sequence) DO UPDATE
     SET event_id = EXCLUDED.event_id,
-        event_name = EXCLUDED.event_name,
+        event_type = EXCLUDED.event_type,
         payload = EXCLUDED.payload,
+        root_message_id = EXCLUDED.root_message_id,
         created_at = NOW();
 END;
 $$;
 
 CREATE OR REPLACE FUNCTION rustygpt.fn_load_recent_sse_events(
-    p_user_id UUID,
+    p_conversation_id UUID,
     p_limit INTEGER
 )
 RETURNS TABLE (
+    id BIGINT,
     sequence BIGINT,
     event_id TEXT,
-    event_name TEXT,
-    payload TEXT
+    event_type TEXT,
+    payload JSONB,
+    root_message_id UUID,
+    created_at TIMESTAMPTZ
 )
 LANGUAGE sql
 STABLE
 AS $$
-    SELECT sequence, event_id, event_name, payload
+    SELECT id, sequence, event_id, event_type, payload, root_message_id, created_at
     FROM rustygpt.sse_event_log
-    WHERE user_id = p_user_id
-    ORDER BY sequence ASC
+    WHERE conversation_id = p_conversation_id
+    ORDER BY created_at ASC, id ASC
     LIMIT p_limit;
 $$;
 
 CREATE OR REPLACE FUNCTION rustygpt.fn_load_sse_events_after(
-    p_user_id UUID,
+    p_conversation_id UUID,
     p_last_sequence BIGINT,
     p_limit INTEGER
 )
 RETURNS TABLE (
+    id BIGINT,
     sequence BIGINT,
     event_id TEXT,
-    event_name TEXT,
-    payload TEXT
+    event_type TEXT,
+    payload JSONB,
+    root_message_id UUID,
+    created_at TIMESTAMPTZ
 )
 LANGUAGE sql
 STABLE
 AS $$
-    SELECT sequence, event_id, event_name, payload
+    SELECT id, sequence, event_id, event_type, payload, root_message_id, created_at
     FROM rustygpt.sse_event_log
-    WHERE user_id = p_user_id
+    WHERE conversation_id = p_conversation_id
       AND sequence > p_last_sequence
-    ORDER BY sequence ASC
+    ORDER BY created_at ASC, id ASC
     LIMIT p_limit;
 $$;
 
 CREATE OR REPLACE PROCEDURE rustygpt.sp_prune_sse_events(
-    IN p_user_id UUID,
-    IN p_max_events INTEGER,
-    IN p_prune_batch INTEGER
+    IN p_conversation_id UUID,
+    IN p_retention_seconds INTEGER,
+    IN p_prune_batch INTEGER,
+    IN p_hard_limit INTEGER DEFAULT NULL
 )
 LANGUAGE plpgsql
 AS $$
+DECLARE
+    v_effective_batch INTEGER := GREATEST(p_prune_batch, 1);
+    v_cutoff TIMESTAMPTZ;
 BEGIN
-    WITH ranked AS (
-        SELECT sequence,
-               ROW_NUMBER() OVER (ORDER BY sequence DESC) AS position
-        FROM rustygpt.sse_event_log
-        WHERE user_id = p_user_id
-    )
-    DELETE FROM rustygpt.sse_event_log
-    WHERE user_id = p_user_id
-      AND sequence IN (
-        SELECT sequence
-        FROM ranked
-        WHERE position > p_max_events
-        LIMIT p_prune_batch
-    );
+    IF COALESCE(p_retention_seconds, 0) > 0 THEN
+        v_cutoff := clock_timestamp() - make_interval(secs => p_retention_seconds);
+
+        WITH candidates AS (
+            SELECT id
+            FROM rustygpt.sse_event_log
+            WHERE conversation_id = p_conversation_id
+              AND created_at < v_cutoff
+            ORDER BY created_at ASC
+            LIMIT v_effective_batch
+        )
+        DELETE FROM rustygpt.sse_event_log
+        WHERE id IN (SELECT id FROM candidates);
+    END IF;
+
+    IF p_hard_limit IS NOT NULL AND p_hard_limit > 0 THEN
+        WITH overflow AS (
+            SELECT id
+            FROM rustygpt.sse_event_log
+            WHERE conversation_id = p_conversation_id
+            ORDER BY created_at DESC, id DESC
+            OFFSET p_hard_limit
+            LIMIT v_effective_batch
+        )
+        DELETE FROM rustygpt.sse_event_log
+        WHERE id IN (SELECT id FROM overflow);
+    END IF;
 END;
 $$;

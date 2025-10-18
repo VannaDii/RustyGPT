@@ -25,6 +25,8 @@ yew-hooks = { workspace = true }
 yew_icons = { workspace = true }
 yew-router = { workspace = true }
 yewdux = { workspace = true }
+once_cell = { workspace = true }
+log = { workspace = true }
 
 [dev-dependencies]
 wasm-bindgen-test = { workspace = true }

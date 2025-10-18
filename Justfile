@@ -43,12 +43,12 @@ dev:
 check:
     cargo fmt -- --check
     cargo check --workspace
-    cargo clippy --workspace --all-features
+    cargo clippy --workspace --all --all-targets --all-features -- -D warnings -D clippy::pedantic
 
 # Auto-fix what can be
 fix:
     cargo fmt --all
-    cargo clippy --workspace --all-features --fix
+    cargo clippy --workspace --all --all-features --fix
 
 # Build everything
 build:

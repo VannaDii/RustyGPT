@@ -1,17 +1,31 @@
-use std::{collections::HashMap, fmt::Write as _};
+use std::{collections::HashMap, fmt::Write as _, sync::Arc};
 
 use anyhow::{Context, Result};
 use clap::Args;
 use futures_util::StreamExt;
-use reqwest::Client;
+use reqwest::{Client, cookie::Jar};
 use serde_json::from_str;
 use shared::models::{
     ConversationStreamEvent, MembershipChangeAction, MessageRole, ReplyMessageRequest,
     ThreadListResponse, ThreadTreeResponse, UnreadSummaryResponse,
 };
+use url::Url;
 use uuid::Uuid;
 
-const API_SUFFIX: &str = "/api";
+use super::session;
+
+fn client_with_session(server: &str) -> Result<(Client, Arc<Jar>, Url)> {
+    let server_url = Url::parse(server).context("invalid server URL")?;
+    let jar_path = session::session_path();
+    let jar = session::load_cookie_jar(&server_url, &jar_path).with_context(|| {
+        format!(
+            "no session cookie jar found at {}; run `rustygpt session login` first",
+            jar_path.display()
+        )
+    })?;
+    let client = session::build_client(jar.clone())?;
+    Ok((client, jar, server_url))
+}
 
 #[derive(Args, Debug)]
 #[command(about = "List conversation threads or view a specific thread")]
@@ -62,8 +76,10 @@ pub struct FollowArgs {
 }
 
 pub async fn handle_chat(args: ChatArgs) -> Result<()> {
-    let client = Client::new();
-    let api_base = api_base(&args.server);
+    let (client, _jar, server_url) = client_with_session(&args.server)?;
+    let api_base = server_url
+        .join("api/")
+        .context("invalid API base for chat operations")?;
 
     if let Some(root) = args.root {
         let tree = fetch_thread_tree(&client, &api_base, root, args.limit).await?;
@@ -94,18 +110,23 @@ pub async fn handle_chat(args: ChatArgs) -> Result<()> {
 }
 
 pub async fn handle_reply(args: ReplyArgs) -> Result<()> {
-    let client = Client::new();
-    let api_base = api_base(&args.server);
+    let (client, jar, server_url) = client_with_session(&args.server)?;
+    let api_base = server_url
+        .join("api/")
+        .context("invalid API base for reply")?;
 
     let payload = ReplyMessageRequest {
         content: args.text.clone(),
         role: Some(MessageRole::User),
     };
 
-    let url = format!("{}/messages/{}/reply", api_base, args.parent);
-    let response = client
-        .post(url)
-        .json(&payload)
+    let mut request = client
+        .post(api_base.join(&format!("messages/{}/reply", args.parent))?)
+        .json(&payload);
+    if let Some(csrf) = session::csrf_token_from_jar(&jar, &server_url) {
+        request = request.header("X-CSRF-Token", csrf);
+    }
+    let response = request
         .send()
         .await
         .context("request failed")?
@@ -121,8 +142,10 @@ pub async fn handle_reply(args: ReplyArgs) -> Result<()> {
 }
 
 pub async fn handle_follow(args: FollowArgs) -> Result<()> {
-    let client = Client::new();
-    let api_base = api_base(&args.server);
+    let (client, _jar, server_url) = client_with_session(&args.server)?;
+    let api_base = server_url
+        .join("api/")
+        .context("invalid API base for stream")?;
 
     // Determine conversation identifier by loading the thread once.
     let tree = fetch_thread_tree(&client, &api_base, args.root, Some(10)).await?;
@@ -137,9 +160,11 @@ pub async fn handle_follow(args: FollowArgs) -> Result<()> {
         args.root, conversation_id
     );
 
-    let url = format!("{}/stream/conversations/{}", api_base, conversation_id);
+    let stream_url = api_base
+        .join(&format!("stream/conversations/{}", conversation_id))
+        .context("invalid stream endpoint")?;
     let response = client
-        .get(url)
+        .get(stream_url)
         .send()
         .await
         .context("failed to connect to stream")?
@@ -270,12 +295,14 @@ async fn handle_stream_event(
 
 async fn fetch_threads(
     client: &Client,
-    api_base: &str,
+    api_base: &Url,
     conversation: Uuid,
     limit: Option<i32>,
 ) -> Result<ThreadListResponse> {
-    let url = format!("{}/conversations/{}/threads", api_base, conversation);
-    let mut request = client.get(url);
+    let endpoint = api_base
+        .join(&format!("conversations/{}/threads", conversation))
+        .context("invalid threads endpoint")?;
+    let mut request = client.get(endpoint);
     if let Some(limit) = limit {
         request = request.query(&[("limit", limit)]);
     }
@@ -292,12 +319,14 @@ async fn fetch_threads(
 
 async fn fetch_thread_tree(
     client: &Client,
-    api_base: &str,
+    api_base: &Url,
     root: Uuid,
     limit: Option<i32>,
 ) -> Result<ThreadTreeResponse> {
-    let url = format!("{}/threads/{}/tree", api_base, root);
-    let mut request = client.get(url);
+    let endpoint = api_base
+        .join(&format!("threads/{}/tree", root))
+        .context("invalid thread endpoint")?;
+    let mut request = client.get(endpoint);
     if let Some(limit) = limit {
         request = request.query(&[("limit", limit)]);
     }
@@ -314,12 +343,14 @@ async fn fetch_thread_tree(
 
 async fn fetch_unread_summary(
     client: &Client,
-    api_base: &str,
+    api_base: &Url,
     conversation: Uuid,
 ) -> Result<UnreadSummaryResponse> {
-    let url = format!("{}/conversations/{}/unread", api_base, conversation);
+    let endpoint = api_base
+        .join(&format!("conversations/{}/unread", conversation))
+        .context("invalid unread endpoint")?;
     let response = client
-        .get(url)
+        .get(endpoint)
         .send()
         .await
         .context("failed to fetch unread summary")?
@@ -377,10 +408,4 @@ fn render_thread(tree: &ThreadTreeResponse) {
     if let Some(cursor) = &tree.next_cursor {
         println!("(More messages after path {})", cursor);
     }
-}
-
-fn api_base(server: &str) -> String {
-    let mut base = server.trim_end_matches('/').to_string();
-    base.push_str(API_SUFFIX);
-    base
 }

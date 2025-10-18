@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     auth::session::SessionService,
+    middleware::rate_limit::RateLimitState,
     services::{assistant_service::AssistantService, sse_persistence::SsePersistence},
 };
 
@@ -16,6 +17,8 @@ pub struct AppState {
     pub(crate) sse_store: Option<Arc<dyn SsePersistence>>,
     /// Session manager for cookie-backed authentication
     pub(crate) sessions: Option<Arc<SessionService>>,
+    /// Dynamic rate limit manager
+    pub(crate) rate_limits: Option<Arc<RateLimitState>>,
 }
 
 impl Default for AppState {
@@ -25,6 +28,7 @@ impl Default for AppState {
             assistant: None,
             sse_store: None,
             sessions: None,
+            rate_limits: None,
         }
     }
 }
@@ -36,6 +40,7 @@ impl std::fmt::Debug for AppState {
             .field("has_assistant", &self.assistant.is_some())
             .field("has_sse_store", &self.sse_store.is_some())
             .field("has_sessions", &self.sessions.is_some())
+            .field("has_rate_limits", &self.rate_limits.is_some())
             .finish()
     }
 }
@@ -52,6 +57,7 @@ mod tests {
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
         assert!(state.sessions.is_none());
+        assert!(state.rate_limits.is_none());
     }
 
     /// Test AppState equivalence between default instances
@@ -64,6 +70,7 @@ mod tests {
         assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
         assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
         assert_eq!(state1.sessions.is_some(), state2.sessions.is_some());
+        assert_eq!(state1.rate_limits.is_some(), state2.rate_limits.is_some());
     }
 
     /// Test AppState cloning
@@ -75,6 +82,8 @@ mod tests {
         assert_eq!(state1.pool.is_some(), state2.pool.is_some());
         assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
         assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
+        assert_eq!(state1.sessions.is_some(), state2.sessions.is_some());
+        assert_eq!(state1.rate_limits.is_some(), state2.rate_limits.is_some());
     }
 
     /// Test AppState with_pool method (can't create real pool in test)
@@ -86,6 +95,8 @@ mod tests {
         assert!(state.pool.is_none());
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
+        assert!(state.sessions.is_none());
+        assert!(state.rate_limits.is_none());
 
         // In a real scenario with a pool:
         // let pool = create_test_pool().await;
@@ -104,6 +115,7 @@ mod tests {
         assert!(debug_str.contains("false")); // has_pool should be false
         assert!(debug_str.contains("has_assistant"));
         assert!(debug_str.contains("has_sse_store"));
+        assert!(debug_str.contains("has_rate_limits"));
     }
 
     /// Test AppState pool accessor field
@@ -114,6 +126,7 @@ mod tests {
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
         assert!(state.sessions.is_none());
+        assert!(state.rate_limits.is_none());
     }
 
     /// Test AppState pool consistency
@@ -125,6 +138,8 @@ mod tests {
         assert!(state.pool.is_none());
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
+        assert!(state.sessions.is_none());
+        assert!(state.rate_limits.is_none());
     }
 
     /// Test multiple AppState instances independence
@@ -140,6 +155,7 @@ mod tests {
         assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
         assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
         assert_eq!(state1.sessions.is_some(), state2.sessions.is_some());
+        assert_eq!(state1.rate_limits.is_some(), state2.rate_limits.is_some());
     }
 
     /// Test AppState field visibility
@@ -152,6 +168,7 @@ mod tests {
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
         assert!(state.sessions.is_none());
+        assert!(state.rate_limits.is_none());
 
         // Direct field access should not be possible from external modules
         // (This is enforced by the pub(crate) visibility)

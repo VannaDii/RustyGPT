@@ -24,8 +24,6 @@ use yew::{
     use_mut_ref, use_state,
 };
 
-const API_BASE: &str = "/api";
-
 #[derive(Clone, PartialEq, Eq)]
 struct StreamingEntry {
     message_id: Uuid,
@@ -119,7 +117,7 @@ fn register_stream_listeners(
                             let messages = messages.clone();
                             let error = error.clone();
                             spawn_local(async move {
-                                let client = RustyGPTClient::new(API_BASE);
+                                let client = RustyGPTClient::shared();
                                 match client
                                     .get_thread_tree(&payload.root_id, None, Some(200))
                                     .await
@@ -407,7 +405,7 @@ fn register_stream_listeners(
                             let error_state = error.clone();
                             let unread_state = unread_counts.clone();
                             spawn_local(async move {
-                                let client = RustyGPTClient::new(API_BASE);
+                                let client = RustyGPTClient::shared();
                                 match client.list_threads(&conversation_id, None, Some(50)).await {
                                     Ok(mut response) => {
                                         response.threads.sort_by(|a, b| {
@@ -545,7 +543,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                         let error = error_handle.clone();
                         let unread_counts = unread_counts_handle.clone();
                         spawn_local(async move {
-                            let client = RustyGPTClient::new(API_BASE);
+                            let client = RustyGPTClient::shared();
                             match client.list_threads(&conv_id, None, Some(50)).await {
                                 Ok(mut response) => {
                                     response.threads.sort_by(|a, b| {
@@ -615,7 +613,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                 let error = error_handle.clone();
                 let current_root = root_id;
                 spawn_local(async move {
-                    let client = RustyGPTClient::new(API_BASE);
+                    let client = RustyGPTClient::shared();
                     match client.get_thread_tree(&current_root, None, Some(200)).await {
                         Ok(tree) => {
                             messages.set(tree.messages);
@@ -654,7 +652,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
 
             if let Some(id) = id_opt {
                 if let Ok(conv_id) = Uuid::parse_str(id) {
-                    let client = RustyGPTClient::new(API_BASE);
+                    let client = RustyGPTClient::shared();
                     if let Ok(event_source) =
                         EventSource::new(&client.conversation_stream_url(&conv_id))
                     {
@@ -782,7 +780,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                     let error = error.clone();
                     let text_to_send = content.clone();
                     spawn_local(async move {
-                        let client = RustyGPTClient::new(API_BASE);
+                        let client = RustyGPTClient::shared();
                         let request = PostRootMessageRequest {
                             content: text_to_send,
                             role: Some(MessageRole::User),
@@ -799,7 +797,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                                 let messages = messages.clone();
                                 let error = error.clone();
                                 spawn_local(async move {
-                                    let client = RustyGPTClient::new(API_BASE);
+                                    let client = RustyGPTClient::shared();
                                     match client
                                         .get_thread_tree(&response.root_id, None, Some(200))
                                         .await
@@ -831,7 +829,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                     let typing = typing.clone();
                     let threads_handle = threads_handle.clone();
                     spawn_local(async move {
-                        let client = RustyGPTClient::new(API_BASE);
+                        let client = RustyGPTClient::shared();
                         let request = ReplyMessageRequest {
                             content: content.clone(),
                             role: Some(MessageRole::User),
@@ -845,7 +843,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                                 let error = error.clone();
                                 let threads_handle = threads_handle.clone();
                                 spawn_local(async move {
-                                    let client = RustyGPTClient::new(API_BASE);
+                                    let client = RustyGPTClient::shared();
                                     match client.get_thread_tree(&root_id, None, Some(200)).await {
                                         Ok(tree) => {
                                             messages.set(tree.messages.clone());

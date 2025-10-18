@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod errors;
+pub mod limits;
 pub mod oauth;
 pub mod setup;
 pub mod streaming;
@@ -15,6 +16,10 @@ pub use chat::{
     ThreadListResponse, ThreadNewEvent, ThreadSummary, ThreadTreeResponse, UsageBreakdown,
 };
 pub use errors::ErrorResponse;
+pub use limits::{
+    AssignRateLimitRequest, CreateRateLimitProfileRequest, RateLimitAssignment, RateLimitProfile,
+    UpdateRateLimitProfileRequest,
+};
 use serde::{Deserialize, Serialize};
 pub use setup::SetupRequest;
 pub use setup::SetupResponse;
@@ -26,7 +31,9 @@ pub use threads::{
     UnreadSummaryResponse, UnreadThreadSummary, UnreadUpdateEvent,
 };
 pub use timestamp::Timestamp;
-pub use user::{User, UserRole};
+pub use user::{
+    AuthenticatedUser, LoginRequest, LoginResponse, MeResponse, SessionSummary, User, UserRole,
+};
 
 /// Represents a model available for chat completions.
 #[derive(Debug, Serialize, Deserialize)]

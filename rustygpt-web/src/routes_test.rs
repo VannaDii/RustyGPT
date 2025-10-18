@@ -12,6 +12,7 @@ mod tests {
     fn test_route_variants() {
         let home = MainRoute::Home;
         let chat = MainRoute::Chat;
+        let login = MainRoute::Login;
         let admin_root = MainRoute::AdminRoot;
         let admin = MainRoute::Admin;
         let not_found = MainRoute::NotFound;
@@ -22,6 +23,7 @@ mod tests {
         // Test Debug trait
         assert!(format!("{:?}", home).contains("Home"));
         assert!(format!("{:?}", chat).contains("Chat"));
+        assert!(format!("{:?}", login).contains("Login"));
         assert!(format!("{:?}", admin_root).contains("AdminRoot"));
         assert!(format!("{:?}", admin).contains("Admin"));
         assert!(format!("{:?}", not_found).contains("NotFound"));
@@ -86,6 +88,7 @@ mod tests {
         let routes = vec![
             MainRoute::Home,
             MainRoute::Chat,
+            MainRoute::Login,
             MainRoute::AdminRoot,
             MainRoute::Admin,
             MainRoute::NotFound,
@@ -103,6 +106,9 @@ mod tests {
                     // Route validation passes by reaching this point
                 }
                 MainRoute::ChatConversation { .. } => {
+                    // Route validation passes by reaching this point
+                }
+                MainRoute::Login => {
                     // Route validation passes by reaching this point
                 }
                 MainRoute::AdminRoot => {

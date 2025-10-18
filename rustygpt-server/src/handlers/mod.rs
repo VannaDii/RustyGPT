@@ -1,4 +1,6 @@
+pub mod admin_limits;
 pub mod apple_auth;
+pub mod auth;
 pub mod conversations;
 pub mod copilot;
 pub mod github_auth;

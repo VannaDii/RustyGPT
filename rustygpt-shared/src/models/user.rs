@@ -73,14 +73,52 @@ pub struct CreateUserRequest {
     pub password: String,
 }
 
-/// Request to authenticate a user with username or email
+/// Request body for password-based login.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
-pub struct AuthenticateRequest {
-    /// The user's username or email address.
-    pub username_or_email: String,
-
-    /// The user's password.
+pub struct LoginRequest {
+    /// Account email address
+    pub email: String,
+    /// Plain-text password (Argon2id in storage)
     pub password: String,
+}
+
+/// Session lifecycle timestamps returned on login/refresh.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct SessionSummary {
+    /// Unique identifier for the session row.
+    pub id: uuid::Uuid,
+    /// When the session cookie was issued.
+    pub issued_at: Timestamp,
+    /// Sliding expiration (idle timeout).
+    pub expires_at: Timestamp,
+    /// Absolute lifetime cap for the session.
+    pub absolute_expires_at: Timestamp,
+}
+
+/// Basic user profile returned from auth endpoints.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct AuthenticatedUser {
+    pub id: uuid::Uuid,
+    pub email: String,
+    pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub roles: Vec<UserRole>,
+}
+
+/// Response payload emitted by /api/auth/login and /api/auth/refresh.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct LoginResponse {
+    pub user: AuthenticatedUser,
+    pub session: SessionSummary,
+    pub csrf_token: String,
+}
+
+/// Response payload for /api/auth/me exposing the current session snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct MeResponse {
+    pub user: AuthenticatedUser,
+    pub session: SessionSummary,
 }
 
 #[cfg(test)]
@@ -172,23 +210,41 @@ mod tests {
     }
 
     #[test]
-    fn test_authenticate_request() {
-        let request = AuthenticateRequest {
-            username_or_email: "testuser".to_string(),
+    fn test_login_request() {
+        let request = LoginRequest {
+            email: "user@example.com".to_string(),
             password: "password123".to_string(),
         };
 
-        assert_eq!(request.username_or_email, "testuser");
+        assert_eq!(request.email, "user@example.com");
         assert_eq!(request.password, "password123");
+    }
 
-        // Test with email
-        let request_email = AuthenticateRequest {
-            username_or_email: "test@example.com".to_string(),
-            password: "password123".to_string(),
+    #[test]
+    fn login_response_round_trip() {
+        let response = LoginResponse {
+            user: AuthenticatedUser {
+                id: Uuid::new_v4(),
+                email: "user@example.com".to_string(),
+                username: "user".to_string(),
+                display_name: Some("User".to_string()),
+                roles: vec![UserRole::Member],
+            },
+            session: SessionSummary {
+                id: Uuid::new_v4(),
+                issued_at: Timestamp(Utc::now()),
+                expires_at: Timestamp(Utc::now()),
+                absolute_expires_at: Timestamp(Utc::now()),
+            },
+            csrf_token: "csrf123".to_string(),
         };
 
-        assert_eq!(request_email.username_or_email, "test@example.com");
-        assert_eq!(request_email.password, "password123");
+        let serialized = serde_json::to_string(&response).unwrap();
+        let deserialized: LoginResponse = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.user.email, "user@example.com");
+        assert_eq!(deserialized.session.id, response.session.id);
+        assert_eq!(deserialized.csrf_token, "csrf123");
     }
 
     #[test]

@@ -1,15 +1,31 @@
 use std::sync::Arc;
 
-use crate::app_state::AppState;
-use crate::handlers::apple_auth::apple_auth_routes;
-use crate::handlers::github_auth::github_auth_routes;
-use axum::Router;
+use crate::{
+    app_state::AppState,
+    handlers::{
+        apple_auth::apple_auth_routes,
+        auth::{login, logout, me, refresh},
+        github_auth::github_auth_routes,
+    },
+    middleware::auth::auth_middleware,
+};
+use axum::{
+    Router, middleware,
+    routing::{get, post},
+};
 use tracing::info;
 
 /// Function to register the auth routes
 pub fn create_router_auth() -> Router<Arc<AppState>> {
     info!("Creating auth router");
     Router::new()
+        .route("/auth/login", post(login))
+        .route("/auth/logout", post(logout))
+        .route("/auth/refresh", post(refresh))
+        .route(
+            "/auth/me",
+            get(me).route_layer(middleware::from_fn(auth_middleware)),
+        )
         .merge(apple_auth_routes())
         .merge(github_auth_routes())
 }

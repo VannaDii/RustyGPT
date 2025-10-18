@@ -321,6 +321,7 @@ pub struct RateLimitConfig {
     pub auth_login_per_ip_per_min: u32,
     pub default_rps: f32,
     pub burst: u32,
+    pub admin_api_enabled: bool,
 }
 
 impl fmt::Debug for RateLimitConfig {
@@ -329,6 +330,7 @@ impl fmt::Debug for RateLimitConfig {
             .field("auth_login_per_ip_per_min", &self.auth_login_per_ip_per_min)
             .field("default_rps", &self.default_rps)
             .field("burst", &self.burst)
+            .field("admin_api_enabled", &self.admin_api_enabled)
             .finish()
     }
 }
@@ -339,6 +341,7 @@ impl Default for RateLimitConfig {
             auth_login_per_ip_per_min: 10,
             default_rps: 50.0,
             burst: 100,
+            admin_api_enabled: false,
         }
     }
 }
@@ -346,17 +349,21 @@ impl Default for RateLimitConfig {
 /// Session management configuration.
 #[derive(Serialize, Clone)]
 pub struct SessionConfig {
-    pub ttl_seconds: u64,
+    pub idle_seconds: u64,
+    pub absolute_seconds: u64,
     pub session_cookie_name: String,
     pub csrf_cookie_name: String,
+    pub max_sessions_per_user: Option<u32>,
 }
 
 impl fmt::Debug for SessionConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SessionConfig")
-            .field("ttl_seconds", &self.ttl_seconds)
+            .field("idle_seconds", &self.idle_seconds)
+            .field("absolute_seconds", &self.absolute_seconds)
             .field("session_cookie_name", &self.session_cookie_name)
             .field("csrf_cookie_name", &self.csrf_cookie_name)
+            .field("max_sessions_per_user", &self.max_sessions_per_user)
             .finish()
     }
 }
@@ -364,9 +371,11 @@ impl fmt::Debug for SessionConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            ttl_seconds: 1_209_600, // 14 days
+            idle_seconds: 28_800,      // 8 hours
+            absolute_seconds: 604_800, // 7 days
             session_cookie_name: "SESSION_ID".into(),
             csrf_cookie_name: "CSRF-TOKEN".into(),
+            max_sessions_per_user: Some(5),
         }
     }
 }
@@ -502,6 +511,7 @@ pub struct SsePersistenceConfig {
     pub enabled: bool,
     pub max_events_per_user: usize,
     pub prune_batch_size: usize,
+    pub retention_hours: u32,
 }
 
 impl fmt::Debug for SsePersistenceConfig {
@@ -510,6 +520,7 @@ impl fmt::Debug for SsePersistenceConfig {
             .field("enabled", &self.enabled)
             .field("max_events_per_user", &self.max_events_per_user)
             .field("prune_batch_size", &self.prune_batch_size)
+            .field("retention_hours", &self.retention_hours)
             .finish()
     }
 }
@@ -520,6 +531,7 @@ impl Default for SsePersistenceConfig {
             enabled: false,
             max_events_per_user: 500,
             prune_batch_size: 100,
+            retention_hours: 48,
         }
     }
 }
@@ -897,17 +909,26 @@ impl Config {
             if let Some(value) = rate_limits.burst {
                 self.rate_limits.burst = value;
             }
+            if let Some(enabled) = rate_limits.admin_api_enabled {
+                self.rate_limits.admin_api_enabled = enabled;
+            }
         }
 
         if let Some(session) = &partial.session {
-            if let Some(ttl) = session.ttl_seconds {
-                self.session.ttl_seconds = ttl;
+            if let Some(idle) = session.idle_seconds {
+                self.session.idle_seconds = idle;
+            }
+            if let Some(absolute) = session.absolute_seconds {
+                self.session.absolute_seconds = absolute;
             }
             if let Some(cookie_name) = &session.session_cookie_name {
                 self.session.session_cookie_name = cookie_name.clone();
             }
             if let Some(csrf_cookie_name) = &session.csrf_cookie_name {
                 self.session.csrf_cookie_name = csrf_cookie_name.clone();
+            }
+            if let Some(max_sessions) = session.max_sessions_per_user {
+                self.session.max_sessions_per_user = Some(max_sessions);
             }
         }
 
@@ -966,6 +987,10 @@ impl Config {
                 }
                 if let Some(batch) = persistence.prune_batch_size {
                     self.sse.persistence.prune_batch_size = batch as usize;
+                }
+                if let Some(retention) = persistence.retention_hours {
+                    self.sse.persistence.retention_hours =
+                        retention.min(u64::from(u32::MAX)) as u32;
                 }
             }
             if let Some(backpressure) = &sse.backpressure {
@@ -1109,15 +1134,24 @@ impl Config {
         if let Some(burst) = env_value_u32(&["rate_limits", "burst"])? {
             self.rate_limits.burst = burst;
         }
+        if let Some(enabled) = env_value_bool(&["rate_limits", "admin_api_enabled"])? {
+            self.rate_limits.admin_api_enabled = enabled;
+        }
 
-        if let Some(ttl) = env_value_u64(&["session", "ttl_seconds"])? {
-            self.session.ttl_seconds = ttl;
+        if let Some(idle) = env_value_u64(&["session", "idle_seconds"])? {
+            self.session.idle_seconds = idle;
+        }
+        if let Some(absolute) = env_value_u64(&["session", "absolute_seconds"])? {
+            self.session.absolute_seconds = absolute;
         }
         if let Some(cookie_name) = env_value(&["session", "session_cookie_name"]) {
             self.session.session_cookie_name = cookie_name;
         }
         if let Some(csrf_cookie_name) = env_value(&["session", "csrf_cookie_name"]) {
             self.session.csrf_cookie_name = csrf_cookie_name;
+        }
+        if let Some(max_sessions) = env_value_u32(&["session", "max_sessions_per_user"])? {
+            self.session.max_sessions_per_user = Some(max_sessions);
         }
 
         if let Some(redirect_base) = env_value(&["oauth", "redirect_base"]) {
@@ -1173,6 +1207,9 @@ impl Config {
         }
         if let Some(batch) = env_value_usize(&["sse", "persistence", "prune_batch_size"])? {
             self.sse.persistence.prune_batch_size = batch;
+        }
+        if let Some(retention) = env_value_u32(&["sse", "persistence", "retention_hours"])? {
+            self.sse.persistence.retention_hours = retention;
         }
         if let Some(strategy) = env_value(&["sse", "backpressure", "drop_strategy"]) {
             self.sse.backpressure.drop_strategy = SseDropStrategy::from_str(&strategy)?;
@@ -1264,8 +1301,24 @@ impl Config {
             errors.push("rate_limits.burst must be greater than zero".into());
         }
 
-        if self.session.ttl_seconds == 0 {
-            errors.push("session.ttl_seconds must be greater than zero".into());
+        if self.session.idle_seconds == 0 {
+            errors.push("session.idle_seconds must be greater than zero".into());
+        }
+        if self.session.absolute_seconds == 0 {
+            errors.push("session.absolute_seconds must be greater than zero".into());
+        }
+        if self.session.absolute_seconds < self.session.idle_seconds {
+            errors.push(
+                "session.absolute_seconds must be greater than or equal to session.idle_seconds"
+                    .into(),
+            );
+        }
+        if let Some(max_sessions) = self.session.max_sessions_per_user {
+            if max_sessions == 0 {
+                errors.push(
+                    "session.max_sessions_per_user must be greater than zero when set".into(),
+                );
+            }
         }
 
         if self.db.url.trim().is_empty() {
@@ -1310,6 +1363,19 @@ impl Config {
                     .into(),
             );
             self.sse.persistence.prune_batch_size = self.sse.persistence.max_events_per_user;
+        }
+        if self.sse.persistence.retention_hours < 24 {
+            warnings.push(
+                "sse.persistence.retention_hours below 24h; clamping to minimum supported window"
+                    .into(),
+            );
+            self.sse.persistence.retention_hours = 24;
+        } else if self.sse.persistence.retention_hours > 72 {
+            warnings.push(
+                "sse.persistence.retention_hours above 72h; clamping to maximum supported window"
+                    .into(),
+            );
+            self.sse.persistence.retention_hours = 72;
         }
         if !(0.0..=1.0).contains(&self.sse.backpressure.warn_queue_ratio) {
             warnings.push(
@@ -1520,14 +1586,17 @@ struct RateLimitPartial {
     pub auth_login_per_ip_per_min: Option<u32>,
     pub default_rps: Option<f32>,
     pub burst: Option<u32>,
+    pub admin_api_enabled: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SessionPartial {
-    pub ttl_seconds: Option<u64>,
+    pub idle_seconds: Option<u64>,
+    pub absolute_seconds: Option<u64>,
     pub session_cookie_name: Option<String>,
     pub csrf_cookie_name: Option<String>,
+    pub max_sessions_per_user: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1572,6 +1641,7 @@ struct SsePersistencePartial {
     pub enabled: Option<bool>,
     pub max_events_per_user: Option<u64>,
     pub prune_batch_size: Option<u64>,
+    pub retention_hours: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]

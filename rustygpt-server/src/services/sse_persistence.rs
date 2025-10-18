@@ -1,38 +1,53 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use serde_json::Value;
 use shared::config::server::SsePersistenceConfig;
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tracing::trace;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, sqlx::FromRow)]
+#[derive(Clone, Debug)]
 pub struct StreamEventRecord {
     pub sequence: i64,
     pub event_id: String,
-    pub event_name: String,
-    pub payload: String,
+    pub event_type: String,
+    pub payload: Value,
+    pub root_message_id: Option<Uuid>,
+}
+
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub struct PersistedStreamEvent {
+    pub sequence: i64,
+    pub event_id: String,
+    pub event_type: String,
+    pub payload: Value,
+    pub root_message_id: Option<Uuid>,
+    #[allow(dead_code)]
+    pub created_at: DateTime<Utc>,
 }
 
 #[async_trait]
 pub trait SsePersistence: Send + Sync {
-    async fn record_event(&self, user_id: Uuid, record: &StreamEventRecord) -> Result<()>;
+    async fn record_event(&self, conversation_id: Uuid, record: &StreamEventRecord) -> Result<()>;
     async fn load_recent_events(
         &self,
-        user_id: Uuid,
+        conversation_id: Uuid,
         limit: usize,
-    ) -> Result<Vec<StreamEventRecord>>;
+    ) -> Result<Vec<PersistedStreamEvent>>;
     async fn load_events_after(
         &self,
-        user_id: Uuid,
+        conversation_id: Uuid,
         last_sequence: i64,
         limit: usize,
-    ) -> Result<Vec<StreamEventRecord>>;
+    ) -> Result<Vec<PersistedStreamEvent>>;
     async fn prune_events(
         &self,
-        user_id: Uuid,
-        max_events: usize,
+        conversation_id: Uuid,
+        retention: Duration,
         prune_batch: usize,
+        hard_limit: Option<usize>,
     ) -> Result<()>;
 }
 
@@ -53,30 +68,31 @@ impl SsePersistenceStore {
 
 #[async_trait]
 impl SsePersistence for SsePersistenceStore {
-    async fn record_event(&self, user_id: Uuid, record: &StreamEventRecord) -> Result<()> {
-        sqlx::query("CALL rustygpt.sp_record_sse_event($1, $2, $3, $4, $5)")
-            .bind(user_id)
+    async fn record_event(&self, conversation_id: Uuid, record: &StreamEventRecord) -> Result<()> {
+        sqlx::query("CALL rustygpt.sp_record_sse_event($1, $2, $3, $4, $5, $6)")
+            .bind(conversation_id)
             .bind(record.sequence)
             .bind(&record.event_id)
-            .bind(&record.event_name)
+            .bind(&record.event_type)
             .bind(&record.payload)
+            .bind(record.root_message_id)
             .execute(&self.pool)
             .await?;
 
-        trace!(user_id = %user_id, sequence = record.sequence, "persisted SSE event");
+        trace!(conversation_id = %conversation_id, sequence = record.sequence, "persisted SSE event");
         Ok(())
     }
 
     async fn load_recent_events(
         &self,
-        user_id: Uuid,
+        conversation_id: Uuid,
         limit: usize,
-    ) -> Result<Vec<StreamEventRecord>> {
-        let rows = sqlx::query_as::<_, StreamEventRecord>(
-            "SELECT sequence, event_id, event_name, payload \
+    ) -> Result<Vec<PersistedStreamEvent>> {
+        let rows = sqlx::query_as::<_, PersistedStreamEvent>(
+            "SELECT sequence, event_id, event_type, payload, root_message_id, created_at \
              FROM rustygpt.fn_load_recent_sse_events($1, $2)",
         )
-        .bind(user_id)
+        .bind(conversation_id)
         .bind(limit as i32)
         .fetch_all(&self.pool)
         .await?;
@@ -86,15 +102,15 @@ impl SsePersistence for SsePersistenceStore {
 
     async fn load_events_after(
         &self,
-        user_id: Uuid,
+        conversation_id: Uuid,
         last_sequence: i64,
         limit: usize,
-    ) -> Result<Vec<StreamEventRecord>> {
-        let rows = sqlx::query_as::<_, StreamEventRecord>(
-            "SELECT sequence, event_id, event_name, payload \
+    ) -> Result<Vec<PersistedStreamEvent>> {
+        let rows = sqlx::query_as::<_, PersistedStreamEvent>(
+            "SELECT sequence, event_id, event_type, payload, root_message_id, created_at \
              FROM rustygpt.fn_load_sse_events_after($1, $2, $3)",
         )
-        .bind(user_id)
+        .bind(conversation_id)
         .bind(last_sequence)
         .bind(limit as i32)
         .fetch_all(&self.pool)
@@ -105,18 +121,30 @@ impl SsePersistence for SsePersistenceStore {
 
     async fn prune_events(
         &self,
-        user_id: Uuid,
-        max_events: usize,
+        conversation_id: Uuid,
+        retention: Duration,
         prune_batch: usize,
+        hard_limit: Option<usize>,
     ) -> Result<()> {
-        if max_events == 0 {
+        if retention.is_zero() && hard_limit.is_none() {
             return Ok(());
         }
 
-        sqlx::query("CALL rustygpt.sp_prune_sse_events($1, $2, $3)")
-            .bind(user_id)
-            .bind(max_events as i32)
-            .bind(prune_batch as i32)
+        let retention_seconds = retention
+            .as_secs()
+            .min(i32::MAX as u64)
+            .try_into()
+            .unwrap_or(i32::MAX);
+        let batch = prune_batch.max(1).min(i32::MAX as usize) as i32;
+        let hard_limit = hard_limit
+            .filter(|value| *value > 0)
+            .map(|value| value.min(i32::MAX as usize) as i32);
+
+        sqlx::query("CALL rustygpt.sp_prune_sse_events($1, $2, $3, $4)")
+            .bind(conversation_id)
+            .bind(retention_seconds)
+            .bind(batch)
+            .bind(hard_limit)
             .execute(&self.pool)
             .await?;
 

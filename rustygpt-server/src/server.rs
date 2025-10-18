@@ -2,19 +2,22 @@ use crate::handlers::streaming::{SharedStreamHub, StreamHub};
 use app_state::AppState;
 use axum::{Extension, Router, middleware, response::IntoResponse, routing::get, serve};
 use routes::openapi::openapi_routes;
-use shared::config::server::{Config, DatabaseConfig, LogFormat};
+use shared::config::server::{Config, DatabaseConfig, LogFormat, SsePersistenceConfig};
 use sqlx::postgres::PgPoolOptions;
 use std::{
     net::SocketAddr,
     sync::{Arc, OnceLock},
     time::Duration,
 };
-use tokio::net::TcpListener;
+use tokio::{
+    net::TcpListener,
+    time::{self, MissedTickBehavior},
+};
 use tower_http::{
     cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer},
     services::ServeDir,
 };
-use tracing::{info, level_filters::LevelFilter};
+use tracing::{info, level_filters::LevelFilter, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt;
 
@@ -37,9 +40,13 @@ use crate::{
     tracer,
 };
 use axum::http::{HeaderValue, StatusCode, header};
+use chrono::{Duration as ChronoDuration, Utc};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
+const SSE_RETENTION_SCAN_LIMIT: i64 = 128;
+const SSE_RETENTION_INTERVAL_SECS: u64 = 300;
+const RATE_LIMIT_REFRESH_INTERVAL_SECS: u64 = 60;
 
 pub(crate) fn metrics_handle() -> PrometheusHandle {
     PROMETHEUS_HANDLE
@@ -61,6 +68,69 @@ async fn metrics_endpoint() -> impl IntoResponse {
         )],
         handle.render(),
     )
+}
+
+async fn prune_sse_once(
+    pool: &sqlx::PgPool,
+    retention_seconds: i32,
+    prune_batch: i32,
+    hard_limit: Option<i32>,
+) -> Result<(), sqlx::Error> {
+    if retention_seconds <= 0 {
+        return Ok(());
+    }
+
+    let cutoff = Utc::now() - ChronoDuration::seconds(retention_seconds as i64);
+    let conversations = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT DISTINCT conversation_id
+         FROM rustygpt.sse_event_log
+         WHERE created_at < $1
+         LIMIT $2",
+    )
+    .bind(cutoff)
+    .bind(SSE_RETENTION_SCAN_LIMIT)
+    .fetch_all(pool)
+    .await?;
+
+    for conversation_id in conversations {
+        sqlx::query("CALL rustygpt.sp_prune_sse_events($1, $2, $3, $4)")
+            .bind(conversation_id)
+            .bind(retention_seconds)
+            .bind(prune_batch)
+            .bind(hard_limit)
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(())
+}
+
+fn spawn_sse_retention_task(
+    pool: sqlx::PgPool,
+    config: SsePersistenceConfig,
+) -> tokio::task::JoinHandle<()> {
+    let retention_seconds =
+        (u64::from(config.retention_hours).saturating_mul(3600)).min(i32::MAX as u64) as i32;
+    let prune_batch = config.prune_batch_size.max(1).min(i32::MAX as usize) as i32;
+    let hard_limit = if config.max_events_per_user > 0 {
+        Some(config.max_events_per_user.min(i32::MAX as usize) as i32)
+    } else {
+        None
+    };
+
+    tokio::spawn(async move {
+        let mut ticker = time::interval(Duration::from_secs(SSE_RETENTION_INTERVAL_SECS));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            ticker.tick().await;
+            if let Err(err) =
+                prune_sse_once(&pool, retention_seconds, prune_batch, hard_limit).await
+            {
+                warn!(error = %err, "SSE retention sweep failed");
+            }
+        }
+    })
 }
 
 /// Initializes the tracing subscriber for logging using the provided configuration.
@@ -137,12 +207,14 @@ pub fn create_app_state(
     assistant: Option<Arc<AssistantService>>,
     sse_store: Option<Arc<dyn SsePersistence>>,
     sessions: Option<Arc<SessionService>>,
+    rate_limits: Option<Arc<RateLimitState>>,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         pool,
         assistant,
         sse_store,
         sessions,
+        rate_limits,
     })
 }
 
@@ -200,6 +272,9 @@ pub fn create_api_router(config: Arc<Config>) -> Router<Arc<AppState>> {
             routes::protected::create_router_protected()
                 .route_layer(middleware::from_fn(auth_middleware)),
         );
+        if config.rate_limits.admin_api_enabled {
+            router = router.merge(routes::admin::create_router_admin());
+        }
     }
 
     router = router.merge(routes::copilot::create_router_copilot());
@@ -268,7 +343,11 @@ pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
 
     let cors = create_cors_layer(&config);
     let request_id_state = RequestIdState::from_config(&config);
-    let rate_limit_state = RateLimitState::from_config(&config);
+    let rate_limit_state_arc = state
+        .rate_limits
+        .clone()
+        .unwrap_or_else(|| Arc::new(RateLimitState::new(&config, None)));
+    let rate_limit_layer_state = rate_limit_state_arc.as_ref().clone();
     let csrf_state = CsrfState::from_config(&config);
     let security_state = SecurityHeadersState::from_config(&config);
 
@@ -284,7 +363,7 @@ pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
             csrf::enforce_csrf,
         ))
         .layer(axum::middleware::from_fn_with_state(
-            rate_limit_state,
+            rate_limit_layer_state,
             rate_limit::enforce_rate_limits,
         ))
         .layer(tracer::create_trace_layer())
@@ -346,9 +425,11 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     let assistant = Arc::new(AssistantService::new(config.clone()));
     let sse_store: Option<Arc<dyn SsePersistence>> = if config.sse.persistence.enabled {
+        let persistence_config = config.sse.persistence.clone();
+        let _ = spawn_sse_retention_task(pool.clone(), persistence_config.clone());
         Some(Arc::new(SsePersistenceStore::new(
             pool.clone(),
-            config.sse.persistence.clone(),
+            persistence_config,
         )))
     } else {
         None
@@ -361,11 +442,20 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    let rate_limit_state = Arc::new(RateLimitState::new(config.as_ref(), Some(pool.clone())));
+    if let Err(err) = rate_limit_state.reload_from_db().await {
+        warn!(error = %err, "failed to load rate limit configuration");
+    }
+    let _ = rate_limit_state
+        .clone()
+        .spawn_auto_refresh(Duration::from_secs(RATE_LIMIT_REFRESH_INTERVAL_SECS));
+
     let state = create_app_state(
         Some(pool.clone()),
         Some(assistant),
         sse_store.clone(),
         session_service.clone(),
+        Some(rate_limit_state.clone()),
     );
 
     // Create the application router

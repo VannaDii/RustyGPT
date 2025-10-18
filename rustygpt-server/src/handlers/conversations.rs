@@ -10,11 +10,12 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sqlx::PgPool;
-use tracing::instrument;
+use tracing::{instrument, warn};
 use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
+    auth::session::SessionService,
     handlers::streaming::SharedStreamHub,
     http::error::{ApiError, AppResult},
     middleware::request_context::RequestContext,
@@ -89,6 +90,8 @@ async fn add_participant(
         .add_participant(user_id, conversation_id, payload.clone())
         .await?;
 
+    mark_membership_rotation(&app_state, payload.user_id, "membership_change").await?;
+
     let membership = ConversationStreamEvent::MembershipChanged {
         payload: MembershipChangedEvent {
             conversation_id,
@@ -125,6 +128,8 @@ async fn remove_participant(
     let prior_role = service
         .remove_participant(actor, conversation_id, user_id)
         .await?;
+
+    mark_membership_rotation(&app_state, user_id, "membership_change").await?;
 
     let membership = ConversationStreamEvent::MembershipChanged {
         payload: MembershipChangedEvent {
@@ -188,6 +193,8 @@ async fn accept_invite(
         conversation_id,
         role,
     } = service.accept_invite(actor, &payload.token).await?;
+
+    mark_membership_rotation(&app_state, actor, "membership_change").await?;
 
     let membership = ConversationStreamEvent::MembershipChanged {
         payload: MembershipChangedEvent {
@@ -273,4 +280,31 @@ fn require_pool(state: &AppState) -> AppResult<PgPool> {
             "database pool not configured",
         )
     })
+}
+
+fn require_sessions(state: &AppState) -> AppResult<Arc<SessionService>> {
+    state.sessions.clone().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "auth_unavailable",
+            "session service not configured",
+        )
+    })
+}
+
+async fn mark_membership_rotation(state: &AppState, user_id: Uuid, reason: &str) -> AppResult<()> {
+    let sessions = require_sessions(state)?;
+    sessions
+        .mark_user_for_rotation(user_id, reason)
+        .await
+        .map(|_| ())
+        .map_err(|err| {
+            warn!(
+                error = %err,
+                user_id = %user_id,
+                reason,
+                "failed to mark session rotation after membership change"
+            );
+            ApiError::internal_server_error("failed to flag session rotation for user")
+        })
 }

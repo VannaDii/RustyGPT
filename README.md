@@ -151,7 +151,7 @@ With this enabled, each log line includes request identifiers, matched routes, s
 The SSE coordinator supports optional on-disk persistence and queue instrumentation:
 
 - Enable durable cursors by setting `sse.persistence.enabled = true`; the coordinator stores events in PostgreSQL via stored procedures.
-- Configure retention with `sse.persistence.max_events_per_user` and `sse.persistence.prune_batch_size`.
+- Configure SSE retention with `sse.persistence.retention_hours` (clamped to 24–72h) and tune replay bounds with `sse.persistence.max_events_per_user` / `sse.persistence.prune_batch_size`.
 - Control congestion handling with `sse.backpressure.drop_strategy` (`drop_tokens` or `drop_tokens_and_system`) and monitor queue pressure through `sse_queue_depth`/`sse_queue_occupancy_ratio`.
 
 These knobs allow operators to tune RustyGPT for multi-tenant workloads while maintaining delivery guarantees for critical events.

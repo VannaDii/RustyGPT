@@ -3,7 +3,9 @@ use crate::containers::page_content::PageContent;
 use crate::routes::AppRoute;
 use wasm_bindgen::prelude::*;
 use web_sys::window;
-use yew::{Children, Html, Properties, classes, function_component, html, use_effect_with};
+use yew::{
+    Callback, Children, Html, Properties, classes, function_component, html, use_effect_with,
+};
 
 #[wasm_bindgen]
 extern "C" {
@@ -18,6 +20,8 @@ pub struct LayoutProps {
     pub current_route: Option<AppRoute>,
     #[prop_or_default]
     pub header_routes: Option<Vec<AppRoute>>,
+    #[prop_or_default]
+    pub on_logout: Option<Callback<()>>,
 }
 
 #[function_component(Layout)]
@@ -39,7 +43,11 @@ pub fn layout(props: &LayoutProps) -> Html {
 
     html! {
     <>
-        <Header {header_routes} current_route={props.current_route.clone()} />
+        <Header
+            {header_routes}
+            current_route={props.current_route.clone()}
+            on_logout={props.on_logout.clone()}
+        />
         <div class="min-h-screen bg-base-100 drawer lg:drawer-open">
             <div class="drawer-content flex flex-col">
                 <main class={classes!(

@@ -105,9 +105,10 @@ web-sys = { version = "0.3", features = [
   "CssStyleDeclaration",
   "EventSource",
   "Headers",
-  "HtmlInputElement",
-  "HtmlSelectElement",
-  "HtmlStyleElement",
+ "HtmlInputElement",
+ "HtmlSelectElement",
+ "HtmlStyleElement",
+  "HtmlDocument",
   "MediaQueryList",
   "MessageEvent",
   "Navigator",
@@ -130,6 +131,7 @@ uuid = { version = "1", features = ["serde", "v4", "v5", "js"] }
 regex = { version = "1", features = ["unicode"] }
 dotenv = "0.15"
 colored = "3.0"
+once_cell = "1.19"
 strum = { version = "0.27", features = ["derive"] }
 strum_macros = "0.27"
 walkdir = "2.5"
