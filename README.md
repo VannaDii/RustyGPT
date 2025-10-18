@@ -156,6 +156,22 @@ The SSE coordinator supports optional on-disk persistence and queue instrumentat
 
 These knobs allow operators to tune RustyGPT for multi-tenant workloads while maintaining delivery guarantees for critical events.
 
+## Observability
+
+- Export Prometheus metrics via `/metrics`; new counters for auth, rate limits, and SSE replay are documented in `docs/operations/auth.md` and `docs/operations/rate_limits.md`.
+- Import the dashboards in `deploy/grafana/*.json` using Grafana's **Import Dashboard** workflow and point them at the RustyGPT Prometheus data source. The JSON files are kept as single-source-of-truth for CI and can be versioned alongside infrastructure changes.
+- Cross-check metric availability with `promtool` or by querying Prometheus (e.g., `sum by (result) (rustygpt_auth_logins_total)`); the dashboards expect the metric names emitted by the latest server build.
+
+## CLI Authentication Workflow
+
+The CLI stores session cookies locally to reuse browser-compatible auth flows:
+
+1. Run `rustygpt session login` and enter email/password when prompted. Cookies are persisted to the path displayed after login.
+2. Inspect the active session with `rustygpt session me`, which calls `/api/auth/me` and prints the stored profile and expiry timestamps.
+3. Revoke local credentials with `rustygpt session logout`; the command clears the cookie jar and notifies the backend.
+
+Most interactive subcommands (e.g., `chat`, `reply`) now reuse the shared cookie jar and automatically attach CSRF headers when posting data.
+
 ## Authentication Flow
 
 The application supports OAuth authentication with both GitHub and Apple:

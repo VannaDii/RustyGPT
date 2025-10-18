@@ -100,6 +100,94 @@ async fn reload_limits(state: &Arc<AppState>) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http::StatusCode;
+    use serde_json::json;
+    use shared::models::CreateRateLimitProfileRequest;
+    use uuid::Uuid;
+
+    fn make_context_with_roles(roles: Vec<UserRole>) -> RequestContext {
+        let now = chrono::Utc::now();
+        RequestContext {
+            request_id: "test".into(),
+            session: Some(SessionUser {
+                id: Uuid::new_v4(),
+                email: "user@example.com".into(),
+                username: "user".into(),
+                display_name: None,
+                roles,
+                session_id: Uuid::new_v4(),
+                issued_at: now,
+                expires_at: now,
+                absolute_expires_at: now,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn list_profiles_requires_admin_role() {
+        let state = Arc::new(AppState::default());
+        let context = make_context_with_roles(vec![UserRole::Member]);
+
+        let status = match list_profiles(Extension(state), Extension(context)).await {
+            Ok(_) => panic!("expected forbidden"),
+            Err(err) => err.into_response().status(),
+        };
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn list_profiles_requires_session() {
+        let state = Arc::new(AppState::default());
+        let context = RequestContext {
+            request_id: "test".into(),
+            session: None,
+        };
+
+        let status = match list_profiles(Extension(state), Extension(context)).await {
+            Ok(_) => panic!("expected unauthorized"),
+            Err(err) => err.into_response().status(),
+        };
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn create_profile_without_pool_returns_service_unavailable() {
+        let state = Arc::new(AppState::default());
+        let context = make_context_with_roles(vec![UserRole::Admin]);
+        let payload = CreateRateLimitProfileRequest {
+            name: "burst".into(),
+            algorithm: "gcra".into(),
+            params: json!({ "requests_per_second": 5 }),
+            description: None,
+        };
+
+        let status = match create_profile(Extension(state), Extension(context), Json(payload)).await
+        {
+            Ok(_) => panic!("expected service unavailable"),
+            Err(err) => err.into_response().status(),
+        };
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn normalize_method_uppercases_input() {
+        assert_eq!(normalize_method("get"), "GET");
+        assert_eq!(normalize_method("PoSt"), "POST");
+    }
+
+    #[test]
+    fn normalize_path_adds_leading_slash() {
+        assert_eq!(normalize_path(""), "/");
+        assert_eq!(normalize_path("admin/limits"), "/admin/limits");
+        assert_eq!(normalize_path("/already"), "/already");
+    }
+}
 #[derive(sqlx::FromRow)]
 struct DbProfileRow {
     profile_id: Uuid,

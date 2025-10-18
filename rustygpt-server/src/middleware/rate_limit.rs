@@ -425,3 +425,61 @@ struct DbAssignment {
     method: String,
     path_pattern: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::config::server::Profile;
+
+    fn test_config() -> Config {
+        Config::default_for_profile(Profile::Test)
+    }
+
+    #[tokio::test]
+    async fn select_strategy_uses_default_when_unassigned() {
+        let config = test_config();
+        let state = RateLimitState::new(&config, None);
+        let applied = state
+            .select_strategy(&Method::GET, "/api/conversations")
+            .await;
+
+        assert_eq!(applied.profile, "default");
+        assert_eq!(applied.bucket_key, "/api/conversations");
+        assert!(applied.strategy.capacity >= 1.0);
+    }
+
+    #[tokio::test]
+    async fn select_strategy_honours_auth_login_override() {
+        let config = test_config();
+        let state = RateLimitState::new(&config, None);
+        let applied = state
+            .select_strategy(&Method::POST, "/api/auth/login")
+            .await;
+
+        assert_eq!(applied.profile, "auth_login");
+        assert_eq!(applied.bucket_key, "auth_login");
+    }
+
+    #[tokio::test]
+    async fn select_strategy_matches_configured_assignment() {
+        let config = test_config();
+        let state = RateLimitState::new(&config, None);
+        let mut guard = state.assignments.write().await;
+        guard.push(RouteStrategy {
+            method: Method::POST,
+            pattern: "/api/admin/limits".into(),
+            bucket_key: "admin_limits".into(),
+            strategy: Strategy::new(5.0, 1.0),
+            profile: "custom".into(),
+        });
+        drop(guard);
+
+        let applied = state
+            .select_strategy(&Method::POST, "/api/admin/limits")
+            .await;
+
+        assert_eq!(applied.profile, "custom");
+        assert_eq!(applied.bucket_key, "admin_limits");
+        assert!(applied.strategy.capacity >= 5.0);
+    }
+}

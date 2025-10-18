@@ -237,3 +237,28 @@ fn print_session_summary(user: &AuthenticatedUser, session: &SessionSummary, jar
     );
     println!("cookies stored at {}", jar_path.display());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_csrf_token_from_cookie_jar() {
+        let origin = Url::parse("http://localhost:8080/").unwrap();
+        let jar = Arc::new(Jar::default());
+        jar.add_cookie_str("SESSION_ID=session; Path=/", &origin);
+        jar.add_cookie_str("CSRF-TOKEN=csrf123; Path=/", &origin);
+
+        let token = csrf_token_from_jar(&jar, &origin);
+        assert_eq!(token.as_deref(), Some("csrf123"));
+    }
+
+    #[test]
+    fn missing_csrf_token_returns_none() {
+        let origin = Url::parse("http://localhost:8080/").unwrap();
+        let jar = Arc::new(Jar::default());
+        jar.add_cookie_str("SESSION_ID=session; Path=/", &origin);
+
+        assert!(csrf_token_from_jar(&jar, &origin).is_none());
+    }
+}

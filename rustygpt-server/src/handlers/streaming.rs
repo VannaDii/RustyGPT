@@ -469,6 +469,52 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn replay_merges_persisted_and_memory_in_order() {
+        let persistence = Arc::new(InMemoryPersistence::default());
+        let config = Some(persistence_config());
+        let hub = StreamHub::new(32, Some(persistence.clone()), config);
+        let conversation = Uuid::new_v4();
+        let root_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+
+        hub.publish(
+            conversation,
+            sample_delta(message_id, root_id, conversation),
+        )
+        .await;
+        hub.publish(conversation, sample_done(message_id, root_id, conversation))
+            .await;
+
+        let activity = ConversationStreamEvent::ThreadActivity {
+            payload: ThreadActivityEvent {
+                root_id,
+                last_activity_at: Timestamp(Utc::now()),
+            },
+        };
+        let record = StreamEventRecord {
+            sequence: 2,
+            event_id: "activity:2".into(),
+            event_type: "thread.activity".into(),
+            payload: serde_json::to_value(&activity).unwrap(),
+            root_message_id: Some(root_id),
+        };
+        persistence
+            .record_event(conversation, &record)
+            .await
+            .expect("persist activity");
+
+        let (_, replay) = hub.subscribe(conversation, None).await;
+        let sequences: Vec<u64> = replay.iter().map(|(seq, _)| *seq).collect();
+
+        assert_eq!(sequences, vec![0, 1, 2]);
+        if let Some((_, ConversationStreamEvent::ThreadActivity { .. })) = replay.last() {
+            // expected activity from persistence
+        } else {
+            panic!("expected persisted thread activity event at the end");
+        }
+    }
+
     fn sample_delta(
         message_id: Uuid,
         root_id: Uuid,
