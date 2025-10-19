@@ -54,13 +54,20 @@ jobs:
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
+      - name: Cache Cargo tools
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CARGO_HOME }}/bin
+          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('Justfile') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-tools-
+
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
             ${{ env.CARGO_HOME }}/registry
             ${{ env.CARGO_HOME }}/.crates2.json
@@ -75,12 +82,22 @@ jobs:
 
       - name: Install frontend dependencies
         run: |
-          cargo install trunk wasm-pack
+          if ! command -v trunk &> /dev/null; then
+            cargo install trunk
+          fi
+          if ! command -v wasm-pack &> /dev/null; then
+            cargo install wasm-pack
+          fi
           rustup target add wasm32-unknown-unknown
 
       - name: Install additional tools
         run: |
-          just install
+          if ! command -v sqlx &> /dev/null; then
+            cargo install --locked sqlx-cli
+          fi
+          if ! command -v cargo-llvm-cov &> /dev/null; then
+            cargo install --locked cargo-llvm-cov
+          fi
 
       - name: Create .env file
         run: |
