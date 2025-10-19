@@ -4,6 +4,7 @@ default: check
 # Tool lists - SINGLE SOURCE OF TRUTH
 _core_tools := "sqlx-cli trunk cargo-llvm-cov"
 _dev_tools := "cargo-audit wasm-opt wasm-bindgen-cli mdbook-mermaid"
+_docs_tools := "mdbook mdbook-mermaid"
 _all_tools := _core_tools + " " + _dev_tools
 
 fetch:
@@ -15,10 +16,10 @@ _install_tools mode="locked" tools=_all_tools:
     #!/usr/bin/env bash
     set -euo pipefail
     export CARGO_NET_JOBS="$(nproc)"
-    
+
     # Parse tools into array
     tools_array=({{tools}})
-    
+
     # Install each tool
     for tool in "${tools_array[@]}"; do
         if [[ "{{mode}}" == "conditional" ]]; then
@@ -34,7 +35,7 @@ _install_tools mode="locked" tools=_all_tools:
                     cmd_check="$tool"
                     ;;
             esac
-            
+
             if ! command -v "$cmd_check" >/dev/null 2>&1; then
                 echo "Installing $tool..."
                 cargo install --locked "$tool"
@@ -59,14 +60,14 @@ _post_install mode="full":
     fi
     # Add WASM target
     rustup target add wasm32-unknown-unknown
-    
+
     # Setup mdbook-mermaid if it was installed (full and offline mode only)
     @if [[ "{{mode}}" != "ci" ]] && command -v mdbook-mermaid >/dev/null 2>&1; then \
         echo "Setting up mdbook-mermaid..."; \
         mdbook-mermaid install .; \
         mv -f mermaid*.js scripts/ 2>/dev/null || true; \
     fi
-    
+
     # Install git hooks (full and offline mode only)
     @if [[ "{{mode}}" != "ci" && -f "scripts/install-hooks.sh" ]]; then \
         echo "Installing Git hooks..."; \
@@ -79,7 +80,7 @@ install:
     just _install_tools locked "{{_all_tools}}"
     just _post_install full
 
-# Recipe to install only essential tools for CI/CD environments  
+# Recipe to install only essential tools for CI/CD environments
 install-ci:
     @echo "🔧 Installing CI-specific tools..."
     just _install_tools conditional "{{_core_tools}}"
@@ -90,6 +91,17 @@ install-offline:
     @echo "🔧 Installing all tools (offline mode)..."
     just _install_tools frozen "{{_all_tools}}"
     just _post_install offline
+
+# Recipe to install only documentation tools for docs workflow
+install-docs:
+    @echo "🔧 Installing documentation tools..."
+    just _install_tools locked "{{_docs_tools}}"
+    # Setup mdbook-mermaid for docs
+    @if command -v mdbook-mermaid >/dev/null 2>&1; then \
+        echo "Setting up mdbook-mermaid..."; \
+        mdbook-mermaid install .; \
+        mv -f mermaid*.js scripts/ 2>/dev/null || true; \
+    fi
 
 # Recipe to start both frontend and backend watchers concurrently
 dev:
