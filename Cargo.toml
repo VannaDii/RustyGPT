@@ -7,6 +7,7 @@ members = [
   "rustygpt-tools/confuse",
   "rustygpt-tools/i18n-agent",
   "rustygpt-web",
+  "rustygpt-doc-indexer",
 ]
 
 [workspace.lints.rust]
@@ -146,6 +147,7 @@ walkdir = "2.5"
 shlex = "1.3"
 url = { version = "2.5", features = ["serde"] }
 directories = "6.0"
+jsonschema = "0.17"
 
 # Logging and tracing
 tracing = { version = "0.1", features = ["std"] }

@@ -1,87 +1,75 @@
-name: Docs
+name: docs
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-# Allow only one concurrent deployment
-concurrency:
-  group: 'pages'
-  cancel-in-progress: true
-
-env:
-  CARGO_TERM_COLOR: always
-  SQLX_OFFLINE: true
-  LC_ALL: en_US.UTF-8
-  LANG: en_US.UTF-8
-  LANGUAGE: en_US
-  CARGO_HOME: ${{ github.workspace }}/.cargo
+concurrency: docs-${{ github.ref }}
 
 jobs:
-  build:
-    name: Build Documentation
+  build-deploy:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Just
-        uses: extractions/setup-just@v2
+      - name: Install documentation tooling
+        run: |
+          cargo install --locked mdbook mdbook-mermaid mdbook-versions just
 
-      - name: Add Cargo bin to PATH
-        run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
+      - name: Build docs
+        run: just docs-build
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ${{ env.CARGO_HOME }}/bin
-            ${{ env.CARGO_HOME }}/git
-            ${{ env.CARGO_HOME }}/registry
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      - name: Generate LLM manifests
+        run: just docs-index
 
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
+      - name: Guardrails
+        run: |
+          ! grep -R --include='*.md' -E '(AKIA[0-9A-Z]{16}|SECRET_KEY|token=|password=|x-api-key)' docs || (echo "Secret-like pattern found" && exit 1)
+          ! git ls-files docs | grep -E '\.(py|ipynb|html)$' && echo "OK" || (echo "Forbidden file type present" && exit 1)
 
-      - name: Generate Documentation
-        run: just docs
+      - name: Link check (optional)
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          cargo install --locked lychee
+          lychee --verbose --no-progress docs || true
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          enablement: true
+      - name: Package gh-pages assets
+        run: |
+          out_dir=$(mktemp -d)
+          rsync -a book/ "$out_dir"/
+          mkdir -p "$out_dir"/llm
+          rsync -a docs/llm/ "$out_dir"/llm/
+          touch "$out_dir"/.nojekyll
+          echo "OUT_DIR=$out_dir" >> $GITHUB_ENV
 
-      - name: Upload Artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './docs'
-
-  deploy:
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Deploy Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish to gh-pages
+        env:
+          OUT_DIR: ${{ env.OUT_DIR }}
+        run: |
+          set -e
+          git config user.name "ci"
+          git config user.email "ci@users.noreply.github.com"
+          git fetch origin gh-pages || true
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git checkout gh-pages
+            git reset --hard origin/gh-pages
+          else
+            git checkout -b gh-pages
+          fi
+          git ls-files -z | xargs -0 --no-run-if-empty git rm -f
+          git clean -fdx
+          cp -r "${OUT_DIR}/." .
+          git add .
+          git commit -m "docs: deploy ${GITHUB_SHA}" || echo "No changes to commit"
+          git push origin gh-pages
+          rm -rf "${OUT_DIR}"

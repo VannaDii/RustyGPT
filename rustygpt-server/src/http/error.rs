@@ -115,3 +115,83 @@ impl From<ChatServiceError> for ApiError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use http::header::CONTENT_TYPE;
+    use serde_json::Value;
+
+    #[test]
+    fn new_sets_fields_and_allows_details() {
+        let error = ApiError::forbidden("nope").with_details(json!({ "reason": "policy" }));
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(error.code, "forbidden");
+        assert!(
+            error
+                .details
+                .as_ref()
+                .is_some_and(|details| details["reason"] == Value::from("policy"))
+        );
+    }
+
+    #[tokio::test]
+    async fn into_response_serializes_problem_details() {
+        let response = ApiError::not_found("missing resource")
+            .with_details(json!({ "resource": "thing" }))
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE).unwrap(),
+            "application/problem+json"
+        );
+
+        let bytes = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .expect("body to bytes");
+        let json: Value =
+            serde_json::from_slice(&bytes).expect("problem details deserializes to json");
+        assert_eq!(json["code"], "not_found");
+        assert_eq!(json["message"], "missing resource");
+        assert_eq!(json["details"]["resource"], "thing");
+    }
+
+    #[test]
+    fn io_errors_map_to_expected_status_codes() {
+        let not_found =
+            ApiError::from(std::io::Error::new(std::io::ErrorKind::NotFound, "missing"));
+        assert_eq!(not_found.status, StatusCode::NOT_FOUND);
+
+        let forbidden = ApiError::from(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "denied",
+        ));
+        assert_eq!(forbidden.status, StatusCode::FORBIDDEN);
+
+        let other = ApiError::from(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "something else",
+        ));
+        assert_eq!(other.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn chat_service_errors_map_to_matching_status_codes() {
+        let validation = ApiError::from(ChatServiceError::Validation("bad".into()));
+        assert_eq!(validation.status, StatusCode::BAD_REQUEST);
+
+        let not_found = ApiError::from(ChatServiceError::NotFound("missing".into()));
+        assert_eq!(not_found.status, StatusCode::NOT_FOUND);
+
+        let forbidden = ApiError::from(ChatServiceError::Forbidden("nope".into()));
+        assert_eq!(forbidden.status, StatusCode::FORBIDDEN);
+
+        let limited = ApiError::from(ChatServiceError::RateLimited("slow down".into()));
+        assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
+
+        let db = ApiError::from(ChatServiceError::Database(sqlx::Error::PoolTimedOut));
+        assert_eq!(db.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+}

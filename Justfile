@@ -3,13 +3,7 @@ default: check
 
 fetch:
     @echo "🔄 Fetching all dependencies…"
-    cargo fetch --manifest-path ./Cargo.toml
-    cargo fetch --manifest-path ./rustygpt-cli/Cargo.toml
-    cargo fetch --manifest-path ./rustygpt-server/Cargo.toml
-    cargo fetch --manifest-path ./rustygpt-shared/Cargo.toml
-    cargo fetch --manifest-path ./rustygpt-tools/confuse/Cargo.toml
-    cargo fetch --manifest-path ./rustygpt-tools/i18n-agent/Cargo.toml
-    cargo fetch --manifest-path ./rustygpt-web/Cargo.toml
+    cargo fetch --workspace
 
 # Recipe to install all the necessary tools and dependencies
 install:
@@ -20,7 +14,10 @@ install:
         cargo-audit \
         wasm-opt \
         wasm-bindgen-cli \
-        cargo-llvm-cov
+        cargo-llvm-cov \
+        mdbook-mermaid
+    mdbook-mermaid install .
+    mv mermaid*.js scripts/
     scripts/install-hooks.sh
 
 # Recipe to install all the necessary tools and dependencies OFFLINE
@@ -32,7 +29,8 @@ install-offline:
         cargo-audit \
         wasm-opt \
         wasm-bindgen-cli \
-        cargo-llvm-cov
+        cargo-llvm-cov \
+        mdbook-mermaid
     scripts/install-hooks.sh
 
 # Recipe to start both frontend and backend watchers concurrently
@@ -69,16 +67,43 @@ coverage:
     cargo llvm-cov --workspace --lib --html --output-dir .coverage
     @echo "📊 Coverage report generated at file://$PWD/.coverage/html/index.html"
 
+# Docs local server
+docs-serve:
+    mdbook serve --open
+
+# Strict build
+docs-build:
+    mdbook build
+
+# Generate machine-readable manifests
+docs-index:
+    cargo run -p rustygpt-doc-indexer --release
+
+# Optional external link check (nightly/manual)
+docs-links:
+    cargo install --locked lychee
+    lychee --verbose --no-progress docs
+
+# Deploy to gh-pages
+docs-deploy:
+    just docs-build
+    just docs-index
+    git add book/ docs/llm/
+    git commit -m "docs: publish" || true
+    git push origin gh-pages
+
+# Default docs target
 docs:
+    just docs-build
+    just docs-index
+
+api-docs:
     # Generate documentation for all crates
     cargo doc --no-deps --workspace
 
     # Copy the generated docs to the docs directory
     mkdir -p docs/api
     cp -r target/doc/* docs/api/
-
-    # Ensure the index.html file exists
-    touch docs/index.html
 
 # Run the backend server
 run-server:

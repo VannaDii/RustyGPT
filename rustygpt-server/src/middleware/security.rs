@@ -1,4 +1,5 @@
 use crate::http::error::AppResult;
+
 use axum::{
     body::Body,
     extract::State,
@@ -69,4 +70,94 @@ pub async fn apply_security_headers(
         .or_insert_with(|| state.content_security_policy.clone());
 
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use axum::{Router, routing::get};
+    use shared::config::server::Profile;
+    use tower::ServiceExt;
+
+    #[test]
+    fn from_config_builds_expected_hsts_directive() {
+        let mut config = Config::default_for_profile(Profile::Prod);
+        config.security.hsts.enabled = true;
+        config.security.hsts.max_age_seconds = 123;
+        config.security.hsts.include_subdomains = true;
+        config.security.hsts.preload = true;
+
+        let state = SecurityHeadersState::from_config(&config);
+        assert!(state.include_hsts);
+        assert_eq!(
+            state.header_value.to_str().unwrap(),
+            "max-age=123; includeSubDomains; preload"
+        );
+    }
+
+    #[tokio::test]
+    async fn middleware_adds_security_headers_when_enabled() {
+        let config = Config::default_for_profile(Profile::Prod);
+        let state = SecurityHeadersState::from_config(&config);
+        let app = Router::new()
+            .route("/", get(|| async { StatusCode::OK }))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                apply_security_headers,
+            ))
+            .with_state(state.clone());
+
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response
+                .headers()
+                .get(header::STRICT_TRANSPORT_SECURITY)
+                .and_then(|value| value.to_str().ok()),
+            Some(state.header_value.to_str().unwrap())
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::X_CONTENT_TYPE_OPTIONS)
+                .and_then(|value| value.to_str().ok()),
+            Some("nosniff")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_SECURITY_POLICY)
+                .and_then(|value| value.to_str().ok()),
+            Some(state.content_security_policy.to_str().unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn hsts_header_omitted_when_disabled() {
+        let mut config = Config::default_for_profile(Profile::Prod);
+        config.security.hsts.enabled = false;
+        let state = SecurityHeadersState::from_config(&config);
+        let app = Router::new()
+            .route("/", get(|| async { StatusCode::OK }))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                apply_security_headers,
+            ))
+            .with_state(state.clone());
+
+        let response = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert!(
+            !response
+                .headers()
+                .contains_key(header::STRICT_TRANSPORT_SECURITY)
+        );
+    }
 }
