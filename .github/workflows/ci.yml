@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: write
@@ -18,17 +18,43 @@ env:
   LANG: en_US.UTF-8
   LANGUAGE: en_US
   CARGO_HOME: ${{ github.workspace }}/.cargo
+  RUST_BACKTRACE: 1
 
 jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rustygpt_test
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
       - name: Install Just
         uses: extractions/setup-just@v2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
 
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
@@ -37,33 +63,57 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/cargo
-            /usr/local/rustup
+            ~/.cargo/registry
+            ~/.cargo/git
             ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
             ${{ env.CARGO_HOME }}/registry
             ${{ env.CARGO_HOME }}/.crates2.json
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
+      - name: Install frontend dependencies
+        run: |
+          cargo install trunk wasm-pack
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install additional tools
+        run: |
+          cargo install cargo-llvm-cov
+          cargo install sqlx-cli --no-default-features --features rustls,postgres
+
       - name: Create .env file
-        run: cp .env.template .env
+        run: |
+          cp .env.template .env
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/rustygpt_test" >> .env
 
-      - name: Setup
-        run: just install
+      - name: Check formatting
+        run: just check
 
-      - name: Build
+      - name: Build all crates
         run: just build
 
-      - name: Test
+      - name: Run tests
         run: just test
+
+      - name: Generate coverage report
+        run: just coverage
+
+      - name: Upload coverage to codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: .coverage/lcov.info
+          fail_ci_if_error: false
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: dist
           path: rustygpt-web/dist/

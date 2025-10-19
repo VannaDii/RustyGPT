@@ -19,49 +19,22 @@ env:
   CARGO_HOME: ${{ github.workspace }}/.cargo
 
 jobs:
-  build:
-    name: Build Release
-    container:
-      image: rust:latest
+  create-release:
+    name: Create Release
     runs-on: ubuntu-latest
-
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install Just
-        uses: extractions/setup-just@v2
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Add Cargo bin to PATH
-        run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/cargo
-            /usr/local/rustup
-            ${{ env.CARGO_HOME }}/bin
-            ${{ env.CARGO_HOME }}/git
-            ${{ env.CARGO_HOME }}/registry
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Create .env file
-        run: cp .env.template .env
-
-      - name: Install Cargo Tools
-        run: just install
-
-      - name: Build
-        run: just build-release
-
-      - name: Changelog
+      - name: Generate changelog
         id: changelog
         run: |
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
@@ -74,11 +47,11 @@ jobs:
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Release
+      - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
-          name: Release ${{ github.ref_name }}
+          name: Release ${{ steps.version.outputs.VERSION }}
           body: |
             ## Changes in this Release
 
@@ -86,28 +59,91 @@ jobs:
 
             ## Installation
 
-            Download the appropriate binary for your platform and follow the installation instructions in the [README](README.md).
+            Download the appropriate binary for your platform from the assets below.
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          files: |
-            target/release/backend
-            frontend/dist/**/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update CHANGELOG.md
+  build-binaries:
+    name: Build Release Binaries
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v2
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Create .env file
+        shell: bash
+        run: cp .env.template .env
+
+      - name: Build release binaries
+        run: cargo build --release --workspace --bin rustygpt-cli --bin rustygpt-server
+
+      - name: Create release directory
+        shell: bash
+        run: mkdir -p release
+
+      - name: Copy binaries (Unix)
+        if: matrix.os != 'windows-latest'
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          DATE=$(date +%Y-%m-%d)
+          cp target/release/rustygpt-cli release/
+          cp target/release/rustygpt-server release/
 
-          # Create new changelog entry
-          echo -e "# Changelog\n\n## $VERSION - $DATE\n\n${{ steps.changelog.outputs.changelog }}\n\n$(cat CHANGELOG.md 2>/dev/null || echo '')" > CHANGELOG.md
+      - name: Copy binaries (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cp target/release/rustygpt-cli.exe release/
+          cp target/release/rustygpt-server.exe release/
 
-          # Commit and push the updated CHANGELOG.md
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add CHANGELOG.md
-          git commit -m "Update CHANGELOG.md for $VERSION [skip ci]"
-          git push --force-with-lease --no-verify
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package binaries (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          tar -czf rustygpt-$VERSION-${{ matrix.target }}.tar.gz -C release .
+
+      - name: Package binaries (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $VERSION = $env:GITHUB_REF -replace 'refs/tags/v', ''
+          Compress-Archive -Path release/* -DestinationPath "rustygpt-$VERSION-${{ matrix.target }}.zip"
+
+      - name: Upload Release Asset (Unix)
+        if: matrix.os != 'windows-latest'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: rustygpt-*.tar.gz
+
+      - name: Upload Release Asset (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: rustygpt-*.zip

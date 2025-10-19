@@ -2,9 +2,9 @@ name: Lint
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   checks: write
@@ -23,12 +23,15 @@ env:
 jobs:
   clippy:
     name: Lint
-    container:
-      image: rust:latest
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Install Just
         uses: extractions/setup-just@v2
@@ -40,12 +43,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/cargo
-            /usr/local/rustup
+            ~/.cargo/registry
+            ~/.cargo/git
             ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
             ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
@@ -55,20 +60,23 @@ jobs:
       - name: Create .env file
         run: cp .env.template .env
 
-      - name: Install
-        run: just install
+      - name: Install required tools
+        run: |
+          cargo install trunk wasm-pack
+          rustup target add wasm32-unknown-unknown
 
-      - name: Check
+      - name: Check formatting and linting
         run: just check
 
   audit:
     name: Security audit
-    container:
-      image: rust:latest
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
@@ -77,12 +85,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            /usr/local/cargo
-            /usr/local/rustup
+            ~/.cargo/registry
+            ~/.cargo/git
             ${{ env.CARGO_HOME }}/bin
             ${{ env.CARGO_HOME }}/git
             ${{ env.CARGO_HOME }}/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -95,8 +105,12 @@ jobs:
       - name: Get security ignore list
         id: secignore
         run: |
-          ignore_values=$(grep -v '^\s*#' .secignore | tr '\n' ',' | sed 's/,$//')
-          echo "ignore=$ignore_values" >> $GITHUB_OUTPUT
+          if [ -f .secignore ]; then
+            ignore_values=$(grep -v '^\s*#' .secignore | tr '\n' ',' | sed 's/,$//')
+            echo "ignore=$ignore_values" >> $GITHUB_OUTPUT
+          else
+            echo "ignore=" >> $GITHUB_OUTPUT
+          fi
 
       - name: Audit check
         uses: rustsec/audit-check@v2.0.0
