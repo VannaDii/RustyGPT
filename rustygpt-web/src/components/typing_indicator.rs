@@ -1,6 +1,6 @@
 use yew::{Html, Properties, function_component, html};
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties, PartialEq, Eq)]
 pub struct TypingIndicatorProps {
     #[prop_or(false)]
     pub active: bool,

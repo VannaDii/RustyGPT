@@ -3,7 +3,7 @@ use app_state::AppState;
 use axum::{Extension, Router, middleware, response::IntoResponse, routing::get, serve};
 use routes::openapi::openapi_routes;
 use shared::config::server::{Config, DatabaseConfig, LogFormat, SsePersistenceConfig};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::{
     net::SocketAddr,
     sync::{Arc, OnceLock},
@@ -48,7 +48,7 @@ const SSE_RETENTION_SCAN_LIMIT: i64 = 128;
 const SSE_RETENTION_INTERVAL_SECS: u64 = 300;
 const RATE_LIMIT_REFRESH_INTERVAL_SECS: u64 = 60;
 
-pub(crate) fn metrics_handle() -> PrometheusHandle {
+pub fn metrics_handle() -> PrometheusHandle {
     PROMETHEUS_HANDLE
         .get_or_init(|| {
             PrometheusBuilder::new()
@@ -331,13 +331,14 @@ pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
     } else {
         None
     };
-    let stream_hub: SharedStreamHub = Arc::new(StreamHub::new(
-        config.sse.channel_capacity,
-        state.sse_store.clone(),
-        persistence_config,
-    ));
-
-    let api_router = create_api_router(config.clone()).layer(Extension(stream_hub.clone()));
+    let api_router = {
+        let stream_hub: SharedStreamHub = Arc::new(StreamHub::new(
+            config.sse.channel_capacity,
+            state.sse_store.clone(),
+            persistence_config,
+        ));
+        create_api_router(config.clone()).layer(Extension(stream_hub))
+    };
     let static_files_service =
         create_static_service(config.web.static_dir.clone(), config.web.spa_index.clone());
 
@@ -352,7 +353,7 @@ pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
     let security_state = SecurityHeadersState::from_config(&config);
 
     Router::new()
-        .layer(Extension(config.clone()))
+        .layer(Extension(config))
         .layer(cors)
         .layer(axum::middleware::from_fn_with_state(
             security_state,
@@ -398,57 +399,21 @@ pub async fn create_shutdown_signal() {
 ///
 /// # Errors
 /// Returns an error if the server fails to start.
-pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+type AnyError = Box<dyn std::error::Error>;
+
+pub async fn run(config: Config) -> Result<(), AnyError> {
     initialize_tracing(&config);
     info!("Starting server...");
 
     let _ = metrics_handle();
     let config = Arc::new(config);
 
-    // Set up database connection pool
-    let pool = create_database_pool(&config.db)
-        .await
-        .map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
-
-    // Run database bootstrap and health checks
-    bootstrap::ensure_liveness(&pool)
-        .await
-        .map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
-
-    bootstrap::run(&pool, &config.db)
-        .await
-        .map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
-
-    bootstrap::ensure_readiness(&pool)
-        .await
-        .map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
+    let pool = setup_database(&config).await?;
 
     let assistant = Arc::new(AssistantService::new(config.clone()));
-    let sse_store: Option<Arc<dyn SsePersistence>> = if config.sse.persistence.enabled {
-        let persistence_config = config.sse.persistence.clone();
-        let _ = spawn_sse_retention_task(pool.clone(), persistence_config.clone());
-        Some(Arc::new(SsePersistenceStore::new(
-            pool.clone(),
-            persistence_config,
-        )))
-    } else {
-        None
-    };
-
-    // Create application state
-    let session_service = if config.features.auth_v1 {
-        Some(Arc::new(SessionService::new(pool.clone(), config.clone())))
-    } else {
-        None
-    };
-
-    let rate_limit_state = Arc::new(RateLimitState::new(config.as_ref(), Some(pool.clone())));
-    if let Err(err) = rate_limit_state.reload_from_db().await {
-        warn!(error = %err, "failed to load rate limit configuration");
-    }
-    let _ = rate_limit_state
-        .clone()
-        .spawn_auto_refresh(Duration::from_secs(RATE_LIMIT_REFRESH_INTERVAL_SECS));
+    let sse_store = build_sse_store(&config, &pool);
+    let session_service = build_session_service(&config, &pool);
+    let rate_limit_state = initialize_rate_limiting(&config, &pool).await;
 
     let state = create_app_state(
         Some(pool.clone()),
@@ -473,6 +438,57 @@ pub async fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+async fn setup_database(config: &Arc<Config>) -> Result<PgPool, AnyError> {
+    let pool = create_database_pool(&config.db)
+        .await
+        .map_err(|err| -> AnyError { Box::new(err) })?;
+
+    bootstrap::ensure_liveness(&pool)
+        .await
+        .map_err(|err| -> AnyError { Box::new(err) })?;
+
+    bootstrap::run(&pool, &config.db)
+        .await
+        .map_err(|err| -> AnyError { Box::new(err) })?;
+
+    bootstrap::ensure_readiness(&pool)
+        .await
+        .map_err(|err| -> AnyError { Box::new(err) })?;
+
+    Ok(pool)
+}
+
+fn build_sse_store(config: &Arc<Config>, pool: &PgPool) -> Option<Arc<dyn SsePersistence>> {
+    if config.sse.persistence.enabled {
+        let persistence_config = config.sse.persistence.clone();
+        let _ = spawn_sse_retention_task(pool.clone(), persistence_config.clone());
+        Some(Arc::new(SsePersistenceStore::new(
+            pool.clone(),
+            persistence_config,
+        )))
+    } else {
+        None
+    }
+}
+
+fn build_session_service(config: &Arc<Config>, pool: &PgPool) -> Option<Arc<SessionService>> {
+    config
+        .features
+        .auth_v1
+        .then(|| Arc::new(SessionService::new(pool.clone(), config.clone())))
+}
+
+async fn initialize_rate_limiting(config: &Arc<Config>, pool: &PgPool) -> Arc<RateLimitState> {
+    let rate_limit_state = Arc::new(RateLimitState::new(config.as_ref(), Some(pool.clone())));
+    if let Err(err) = rate_limit_state.reload_from_db().await {
+        warn!(error = %err, "failed to load rate limit configuration");
+    }
+    let _ = rate_limit_state
+        .clone()
+        .spawn_auto_refresh(Duration::from_secs(RATE_LIMIT_REFRESH_INTERVAL_SECS));
+    rate_limit_state
 }
 
 #[cfg(test)]

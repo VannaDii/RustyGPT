@@ -2,6 +2,12 @@
 name = "confuse"
 version = "0.1.0"
 edition = "2024"
+description = "Internal developer tooling for RustyGPT configuration and troubleshooting."
+license = "Apache-2.0"
+repository = "https://github.com/vanna/rusty_gpt"
+readme = "../../README.md"
+keywords = ["rustygpt", "tools", "dev", "cli", "config"]
+categories = ["development-tools::build-utils"]
 
 [dependencies]
 clap = { workspace = true }

@@ -44,15 +44,16 @@ impl ThreadContextBuilder {
 
     /// Returns the full thread in depth-first order, truncated optionally by depth.
     pub fn full_thread(&self, max_depth: Option<i32>) -> Vec<MessageView> {
-        match max_depth {
-            Some(limit) => self
-                .messages
-                .iter()
-                .filter(|msg| msg.depth <= limit)
-                .cloned()
-                .collect(),
-            None => self.messages.clone(),
-        }
+        max_depth.map_or_else(
+            || self.messages.clone(),
+            |limit| {
+                self.messages
+                    .iter()
+                    .filter(|msg| msg.depth <= limit)
+                    .cloned()
+                    .collect()
+            },
+        )
     }
 
     /// Returns the immediate children of a given parent ordered by path.
@@ -76,11 +77,10 @@ fn path_prefix_set(path: &str) -> HashSet<String> {
     for (idx, segment) in segments.iter().enumerate() {
         if idx == 0 {
             current.clear();
-            current.push_str(segment);
         } else {
             current.push('.');
-            current.push_str(segment);
         }
+        current.push_str(segment);
         prefixes.insert(current.clone());
     }
     prefixes
@@ -114,7 +114,7 @@ mod tests {
         let root = sample_message(root_id, None, "mroot", 1);
         let child = sample_message(child_id, Some(root_id), "mroot.mchild", 2);
 
-        let builder = ThreadContextBuilder::new(vec![child.clone(), root.clone()]);
+        let builder = ThreadContextBuilder::new(vec![child, root]);
         let ancestors = builder.ancestor_chain(child_id);
 
         assert_eq!(ancestors.len(), 2);
@@ -132,7 +132,7 @@ mod tests {
         let child1 = sample_message(child_one, Some(root_id), "mroot.m1", 2);
         let child2 = sample_message(child_two, Some(root_id), "mroot.m2", 2);
 
-        let builder = ThreadContextBuilder::new(vec![child1.clone(), child2.clone(), root.clone()]);
+        let builder = ThreadContextBuilder::new(vec![child1, child2, root]);
         let children = builder.children(root_id);
 
         assert_eq!(children.len(), 2);

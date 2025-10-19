@@ -48,38 +48,38 @@ impl Profile {
 
     fn default_host(self) -> String {
         match self {
-            Profile::Dev | Profile::Test => "127.0.0.1".into(),
-            Profile::Prod => "0.0.0.0".into(),
+            Self::Dev | Self::Test => "127.0.0.1".into(),
+            Self::Prod => "0.0.0.0".into(),
         }
     }
 
     const fn default_port(self) -> u16 {
         match self {
-            Profile::Dev => 8080,
-            Profile::Test => 18080,
-            Profile::Prod => 443,
+            Self::Dev => 8080,
+            Self::Test => 18080,
+            Self::Prod => 443,
         }
     }
 
     fn default_static_dir(self) -> PathBuf {
         match self {
-            Profile::Dev => PathBuf::from("../rustygpt-web/dist"),
-            Profile::Test => PathBuf::from("../rustygpt-web/dist"),
-            Profile::Prod => PathBuf::from("./public"),
+            Self::Dev => PathBuf::from("../rustygpt-web/dist"),
+            Self::Test => PathBuf::from("../rustygpt-web/dist"),
+            Self::Prod => PathBuf::from("./public"),
         }
     }
 
     fn default_spa_index(self) -> PathBuf {
         match self {
-            Profile::Dev | Profile::Test => PathBuf::from("../rustygpt-web/dist/index.html"),
-            Profile::Prod => PathBuf::from("./public/index.html"),
+            Self::Dev | Self::Test => PathBuf::from("../rustygpt-web/dist/index.html"),
+            Self::Prod => PathBuf::from("./public/index.html"),
         }
     }
 
-    fn default_base_scheme(self) -> &'static str {
+    const fn default_base_scheme(self) -> &'static str {
         match self {
-            Profile::Prod => "https",
-            Profile::Dev | Profile::Test => "http",
+            Self::Prod => "https",
+            Self::Dev | Self::Test => "http",
         }
     }
 }
@@ -89,9 +89,9 @@ impl FromStr for Profile {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().as_str() {
-            "dev" | "development" => Ok(Profile::Dev),
-            "test" | "testing" => Ok(Profile::Test),
-            "prod" | "production" => Ok(Profile::Prod),
+            "dev" | "development" => Ok(Self::Dev),
+            "test" | "testing" => Ok(Self::Test),
+            "prod" | "production" => Ok(Self::Prod),
             other => Err(ConfigError::InvalidProfile(other.to_string())),
         }
     }
@@ -100,9 +100,9 @@ impl FromStr for Profile {
 impl fmt::Display for Profile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Profile::Dev => f.write_str("dev"),
-            Profile::Test => f.write_str("test"),
-            Profile::Prod => f.write_str("prod"),
+            Self::Dev => f.write_str("dev"),
+            Self::Test => f.write_str("test"),
+            Self::Prod => f.write_str("prod"),
         }
     }
 }
@@ -133,7 +133,7 @@ pub enum LogFormat {
 
 impl Default for LogFormat {
     fn default() -> Self {
-        LogFormat::Text
+        Self::Text
     }
 }
 
@@ -419,7 +419,7 @@ pub struct OAuthProvider {
 }
 
 impl OAuthProvider {
-    fn empty() -> Self {
+    const fn empty() -> Self {
         Self {
             client_id: SecretString::new(String::new()),
             client_secret: SecretString::new(String::new()),
@@ -571,7 +571,7 @@ pub enum SseDropStrategy {
 
 impl Default for SseDropStrategy {
     fn default() -> Self {
-        SseDropStrategy::DropTokens
+        Self::DropTokens
     }
 }
 
@@ -580,9 +580,9 @@ impl FromStr for SseDropStrategy {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().as_str() {
-            "drop_tokens" | "tokens_only" => Ok(SseDropStrategy::DropTokens),
+            "drop_tokens" | "tokens_only" => Ok(Self::DropTokens),
             "drop_tokens_and_system" | "tokens_and_system" | "tokens_and_system_events" => {
-                Ok(SseDropStrategy::DropTokensAndSystem)
+                Ok(Self::DropTokensAndSystem)
             }
             other => Err(ConfigError::InvalidValue {
                 field: "sse.backpressure.drop_strategy".into(),
@@ -599,7 +599,7 @@ pub struct WellKnownConfig {
 }
 
 impl WellKnownConfig {
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 }
@@ -751,7 +751,7 @@ impl Config {
             .or(file_data.partial.profile)
             .unwrap_or(Profile::Dev);
 
-        let mut config = Config::defaults(profile);
+        let mut config = Self::defaults(profile);
         let file_flags = config.apply_file_partial(&file_data.partial)?;
         let env_flags = config.apply_env_overrides()?;
 
@@ -760,7 +760,7 @@ impl Config {
         }
 
         if !(file_flags.public_base_url_set || env_flags.public_base_url_set) {
-            config.server.public_base_url = Config::derive_public_base_url(
+            config.server.public_base_url = Self::derive_public_base_url(
                 config.profile,
                 &config.server.host,
                 config.server.port,
@@ -784,8 +784,8 @@ impl Config {
     fn defaults(profile: Profile) -> Self {
         let host = profile.default_host();
         let port = profile.default_port();
-        let public_base_url = Config::derive_public_base_url(profile, &host, port)
-            .expect("default URL must be valid");
+        let public_base_url =
+            Self::derive_public_base_url(profile, &host, port).expect("default URL must be valid");
 
         Self {
             profile,
@@ -825,241 +825,350 @@ impl Config {
         let mut flags = ApplyFlags::default();
 
         if let Some(logging) = &partial.logging {
-            if let Some(level) = &logging.level {
-                self.logging.level = level.clone();
-            }
-            if let Some(format) = logging.format {
-                self.logging.format = format;
-            }
+            self.apply_logging_partial(logging);
         }
 
         if let Some(server) = &partial.server {
-            if let Some(host) = &server.host {
-                self.server.host = host.clone();
-            }
-            if let Some(port) = server.port {
-                self.server.port = port;
-            }
-            if let Some(public_base_url) = &server.public_base_url {
-                self.server.public_base_url = parse_url("server.public_base_url", public_base_url)?;
-                flags.public_base_url_set = true;
-            }
-            if let Some(cors) = &server.cors {
-                if let Some(origins) = &cors.allowed_origins {
-                    self.server.cors.allowed_origins = origins.clone();
-                }
-                if let Some(allow_credentials) = cors.allow_credentials {
-                    self.server.cors.allow_credentials = allow_credentials;
-                }
-                if let Some(max_age) = cors.max_age_seconds {
-                    self.server.cors.max_age_seconds = max_age;
-                }
-            }
-            if let Some(header) = &server.request_id_header {
-                self.server.request_id_header = header.clone();
-            }
+            self.apply_server_partial(server, &mut flags)?;
         }
 
         if let Some(security) = &partial.security {
-            if let Some(hsts) = &security.hsts {
-                if let Some(enabled) = hsts.enabled {
-                    self.security.hsts.enabled = enabled;
-                }
-                if let Some(max_age) = hsts.max_age_seconds {
-                    self.security.hsts.max_age_seconds = max_age;
-                }
-                if let Some(include) = hsts.include_subdomains {
-                    self.security.hsts.include_subdomains = include;
-                }
-                if let Some(preload) = hsts.preload {
-                    self.security.hsts.preload = preload;
-                }
-            }
-            if let Some(cookie) = &security.cookie {
-                if let Some(domain) = &cookie.domain {
-                    self.security.cookie.domain = Some(domain.clone());
-                }
-                if let Some(secure) = cookie.secure {
-                    self.security.cookie.secure = secure;
-                }
-                if let Some(same_site) = cookie.same_site {
-                    self.security.cookie.same_site = same_site;
-                }
-            }
-            if let Some(csrf) = &security.csrf {
-                if let Some(cookie_name) = &csrf.cookie_name {
-                    self.security.csrf.cookie_name = cookie_name.clone();
-                }
-                if let Some(header_name) = &csrf.header_name {
-                    self.security.csrf.header_name = header_name.clone();
-                }
-                if let Some(enabled) = csrf.enabled {
-                    self.security.csrf.enabled = enabled;
-                }
-            }
+            self.apply_security_partial(security);
         }
 
         if let Some(rate_limits) = &partial.rate_limits {
-            if let Some(value) = rate_limits.auth_login_per_ip_per_min {
-                self.rate_limits.auth_login_per_ip_per_min = value;
-            }
-            if let Some(value) = rate_limits.default_rps {
-                self.rate_limits.default_rps = value;
-            }
-            if let Some(value) = rate_limits.burst {
-                self.rate_limits.burst = value;
-            }
-            if let Some(enabled) = rate_limits.admin_api_enabled {
-                self.rate_limits.admin_api_enabled = enabled;
-            }
+            self.apply_rate_limit_partial(rate_limits);
         }
 
         if let Some(session) = &partial.session {
-            if let Some(idle) = session.idle_seconds {
-                self.session.idle_seconds = idle;
-            }
-            if let Some(absolute) = session.absolute_seconds {
-                self.session.absolute_seconds = absolute;
-            }
-            if let Some(cookie_name) = &session.session_cookie_name {
-                self.session.session_cookie_name = cookie_name.clone();
-            }
-            if let Some(csrf_cookie_name) = &session.csrf_cookie_name {
-                self.session.csrf_cookie_name = csrf_cookie_name.clone();
-            }
-            if let Some(max_sessions) = session.max_sessions_per_user {
-                self.session.max_sessions_per_user = Some(max_sessions);
-            }
+            self.apply_session_partial(session);
         }
 
         if let Some(oauth) = &partial.oauth {
-            if let Some(redirect_base) = &oauth.redirect_base {
-                self.oauth.redirect_base = Some(parse_url("oauth.redirect_base", redirect_base)?);
-                flags.redirect_base_set = true;
-            }
-            if let Some(github) = &oauth.github {
-                let mut provider = self
-                    .oauth
-                    .github
-                    .clone()
-                    .unwrap_or_else(OAuthProvider::empty);
-                if let Some(client_id) = &github.client_id {
-                    provider.client_id = SecretString::new(client_id.clone());
-                }
-                if let Some(client_secret) = &github.client_secret {
-                    provider.client_secret = SecretString::new(client_secret.clone());
-                }
-                self.oauth.github = Some(provider);
-            }
+            self.apply_oauth_partial(oauth, &mut flags)?;
         }
 
         if let Some(database) = &partial.db {
-            if let Some(url) = &database.url {
-                self.db.url = url.clone();
-            }
-            if let Some(timeout) = database.statement_timeout_ms {
-                self.db.statement_timeout_ms = timeout;
-            }
-            if let Some(max_connections) = database.max_connections {
-                self.db.max_connections = max_connections;
-            }
-            if let Some(path) = &database.bootstrap_path {
-                self.db.bootstrap_path = path.clone();
-            }
+            self.apply_database_partial(database);
         }
 
         if let Some(sse) = &partial.sse {
-            if let Some(heartbeat) = sse.heartbeat_seconds {
-                self.sse.heartbeat_seconds = heartbeat;
-            }
-            if let Some(capacity) = sse.channel_capacity {
-                self.sse.channel_capacity = capacity as usize;
-            }
-            if let Some(prefix) = &sse.id_prefix {
-                self.sse.id_prefix = prefix.clone();
-            }
-            if let Some(persistence) = &sse.persistence {
-                if let Some(enabled) = persistence.enabled {
-                    self.sse.persistence.enabled = enabled;
-                }
-                if let Some(max_events) = persistence.max_events_per_user {
-                    self.sse.persistence.max_events_per_user = max_events as usize;
-                }
-                if let Some(batch) = persistence.prune_batch_size {
-                    self.sse.persistence.prune_batch_size = batch as usize;
-                }
-                if let Some(retention) = persistence.retention_hours {
-                    self.sse.persistence.retention_hours =
-                        retention.min(u64::from(u32::MAX)) as u32;
-                }
-            }
-            if let Some(backpressure) = &sse.backpressure {
-                if let Some(strategy) = backpressure.drop_strategy {
-                    self.sse.backpressure.drop_strategy = strategy;
-                }
-                if let Some(ratio) = backpressure.warn_queue_ratio {
-                    self.sse.backpressure.warn_queue_ratio = ratio;
-                }
-            }
+            self.apply_sse_partial(sse);
         }
 
         if let Some(well_known) = &partial.well_known {
-            if let Some(entries) = &well_known.entries {
-                self.well_known.entries = entries
-                    .iter()
-                    .map(|entry| WellKnownEntry {
-                        path: entry.path.clone(),
-                        content_type: entry.content_type.clone(),
-                        body: entry.body.clone(),
-                    })
-                    .collect();
-            }
+            self.apply_well_known_partial(well_known);
         }
 
         if let Some(features) = &partial.features {
-            if let Some(value) = features.auth_v1 {
-                self.features.auth_v1 = value;
-            }
-            if let Some(value) = features.well_known {
-                self.features.well_known = value;
-            }
-            if let Some(value) = features.sse_v1 {
-                self.features.sse_v1 = value;
-            }
+            self.apply_feature_flags_partial(features);
         }
 
         if let Some(cli) = &partial.cli {
-            if let Some(path) = &cli.session_store {
-                self.cli.session_store = path.clone();
-            }
+            self.apply_cli_partial(cli);
         }
 
         if let Some(web) = &partial.web {
-            if let Some(static_dir) = &web.static_dir {
-                self.web.static_dir = static_dir.clone();
-            }
-            if let Some(spa_index) = &web.spa_index {
-                self.web.spa_index = spa_index.clone();
-            }
+            self.apply_web_partial(web);
         }
 
         if let Some(llm) = &partial.llm {
-            self.llm = llm.clone();
+            self.apply_llm_partial(llm);
         }
 
         Ok(flags)
     }
 
+    fn apply_logging_partial(&mut self, logging: &LoggingPartial) {
+        if let Some(level) = &logging.level {
+            self.logging.level = level.clone();
+        }
+        if let Some(format) = logging.format {
+            self.logging.format = format;
+        }
+    }
+
+    fn apply_server_partial(
+        &mut self,
+        server: &ServerPartial,
+        flags: &mut ApplyFlags,
+    ) -> Result<(), ConfigError> {
+        if let Some(host) = &server.host {
+            self.server.host = host.clone();
+        }
+        if let Some(port) = server.port {
+            self.server.port = port;
+        }
+        if let Some(public_base_url) = &server.public_base_url {
+            self.server.public_base_url = parse_url("server.public_base_url", public_base_url)?;
+            flags.public_base_url_set = true;
+        }
+        if let Some(cors) = &server.cors {
+            self.apply_cors_partial(cors);
+        }
+        if let Some(header) = &server.request_id_header {
+            self.server.request_id_header = header.clone();
+        }
+
+        Ok(())
+    }
+
+    fn apply_cors_partial(&mut self, cors: &CorsPartial) {
+        if let Some(origins) = &cors.allowed_origins {
+            self.server.cors.allowed_origins = origins.clone();
+        }
+        if let Some(allow_credentials) = cors.allow_credentials {
+            self.server.cors.allow_credentials = allow_credentials;
+        }
+        if let Some(max_age) = cors.max_age_seconds {
+            self.server.cors.max_age_seconds = max_age;
+        }
+    }
+
+    fn apply_security_partial(&mut self, security: &SecurityPartial) {
+        if let Some(hsts) = &security.hsts {
+            self.apply_hsts_partial(hsts);
+        }
+        if let Some(cookie) = &security.cookie {
+            self.apply_cookie_partial(cookie);
+        }
+        if let Some(csrf) = &security.csrf {
+            self.apply_csrf_partial(csrf);
+        }
+    }
+
+    const fn apply_hsts_partial(&mut self, hsts: &HstsPartial) {
+        if let Some(enabled) = hsts.enabled {
+            self.security.hsts.enabled = enabled;
+        }
+        if let Some(max_age) = hsts.max_age_seconds {
+            self.security.hsts.max_age_seconds = max_age;
+        }
+        if let Some(include) = hsts.include_subdomains {
+            self.security.hsts.include_subdomains = include;
+        }
+        if let Some(preload) = hsts.preload {
+            self.security.hsts.preload = preload;
+        }
+    }
+
+    fn apply_cookie_partial(&mut self, cookie: &CookiePartial) {
+        if let Some(domain) = &cookie.domain {
+            self.security.cookie.domain = Some(domain.clone());
+        }
+        if let Some(secure) = cookie.secure {
+            self.security.cookie.secure = secure;
+        }
+        if let Some(same_site) = cookie.same_site {
+            self.security.cookie.same_site = same_site;
+        }
+    }
+
+    fn apply_csrf_partial(&mut self, csrf: &CsrfPartial) {
+        if let Some(cookie_name) = &csrf.cookie_name {
+            self.security.csrf.cookie_name = cookie_name.clone();
+        }
+        if let Some(header_name) = &csrf.header_name {
+            self.security.csrf.header_name = header_name.clone();
+        }
+        if let Some(enabled) = csrf.enabled {
+            self.security.csrf.enabled = enabled;
+        }
+    }
+
+    const fn apply_rate_limit_partial(&mut self, rate_limits: &RateLimitPartial) {
+        if let Some(value) = rate_limits.auth_login_per_ip_per_min {
+            self.rate_limits.auth_login_per_ip_per_min = value;
+        }
+        if let Some(value) = rate_limits.default_rps {
+            self.rate_limits.default_rps = value;
+        }
+        if let Some(value) = rate_limits.burst {
+            self.rate_limits.burst = value;
+        }
+        if let Some(enabled) = rate_limits.admin_api_enabled {
+            self.rate_limits.admin_api_enabled = enabled;
+        }
+    }
+
+    fn apply_session_partial(&mut self, session: &SessionPartial) {
+        if let Some(idle) = session.idle_seconds {
+            self.session.idle_seconds = idle;
+        }
+        if let Some(absolute) = session.absolute_seconds {
+            self.session.absolute_seconds = absolute;
+        }
+        if let Some(cookie_name) = &session.session_cookie_name {
+            self.session.session_cookie_name = cookie_name.clone();
+        }
+        if let Some(csrf_cookie_name) = &session.csrf_cookie_name {
+            self.session.csrf_cookie_name = csrf_cookie_name.clone();
+        }
+        if let Some(max_sessions) = session.max_sessions_per_user {
+            self.session.max_sessions_per_user = Some(max_sessions);
+        }
+    }
+
+    fn apply_oauth_partial(
+        &mut self,
+        oauth: &OAuthPartial,
+        flags: &mut ApplyFlags,
+    ) -> Result<(), ConfigError> {
+        if let Some(redirect_base) = &oauth.redirect_base {
+            self.oauth.redirect_base = Some(parse_url("oauth.redirect_base", redirect_base)?);
+            flags.redirect_base_set = true;
+        }
+        if let Some(github) = &oauth.github {
+            let mut provider = self
+                .oauth
+                .github
+                .clone()
+                .unwrap_or_else(OAuthProvider::empty);
+            if let Some(client_id) = &github.client_id {
+                provider.client_id = SecretString::new(client_id.clone());
+            }
+            if let Some(client_secret) = &github.client_secret {
+                provider.client_secret = SecretString::new(client_secret.clone());
+            }
+            self.oauth.github = Some(provider);
+        }
+
+        Ok(())
+    }
+
+    fn apply_database_partial(&mut self, database: &DatabasePartial) {
+        if let Some(url) = &database.url {
+            self.db.url = url.clone();
+        }
+        if let Some(timeout) = database.statement_timeout_ms {
+            self.db.statement_timeout_ms = timeout;
+        }
+        if let Some(max_connections) = database.max_connections {
+            self.db.max_connections = max_connections;
+        }
+        if let Some(path) = &database.bootstrap_path {
+            self.db.bootstrap_path = path.clone();
+        }
+    }
+
+    fn apply_sse_partial(&mut self, sse: &SsePartial) {
+        if let Some(heartbeat) = sse.heartbeat_seconds {
+            self.sse.heartbeat_seconds = heartbeat;
+        }
+        if let Some(capacity) = sse.channel_capacity {
+            self.sse.channel_capacity = capacity as usize;
+        }
+        if let Some(prefix) = &sse.id_prefix {
+            self.sse.id_prefix = prefix.clone();
+        }
+        if let Some(persistence) = &sse.persistence {
+            self.apply_sse_persistence_partial(persistence);
+        }
+        if let Some(backpressure) = &sse.backpressure {
+            self.apply_sse_backpressure_partial(backpressure);
+        }
+    }
+
+    fn apply_sse_persistence_partial(&mut self, persistence: &SsePersistencePartial) {
+        if let Some(enabled) = persistence.enabled {
+            self.sse.persistence.enabled = enabled;
+        }
+        if let Some(max_events) = persistence.max_events_per_user {
+            self.sse.persistence.max_events_per_user = max_events as usize;
+        }
+        if let Some(batch) = persistence.prune_batch_size {
+            self.sse.persistence.prune_batch_size = batch as usize;
+        }
+        if let Some(retention) = persistence.retention_hours {
+            self.sse.persistence.retention_hours = retention.min(u64::from(u32::MAX)) as u32;
+        }
+    }
+
+    const fn apply_sse_backpressure_partial(&mut self, backpressure: &SseBackpressurePartial) {
+        if let Some(strategy) = backpressure.drop_strategy {
+            self.sse.backpressure.drop_strategy = strategy;
+        }
+        if let Some(ratio) = backpressure.warn_queue_ratio {
+            self.sse.backpressure.warn_queue_ratio = ratio;
+        }
+    }
+
+    fn apply_well_known_partial(&mut self, well_known: &WellKnownPartial) {
+        if let Some(entries) = &well_known.entries {
+            self.well_known.entries = entries
+                .iter()
+                .map(|entry| WellKnownEntry {
+                    path: entry.path.clone(),
+                    content_type: entry.content_type.clone(),
+                    body: entry.body.clone(),
+                })
+                .collect();
+        }
+    }
+
+    const fn apply_feature_flags_partial(&mut self, features: &FeatureFlagsPartial) {
+        if let Some(value) = features.auth_v1 {
+            self.features.auth_v1 = value;
+        }
+        if let Some(value) = features.well_known {
+            self.features.well_known = value;
+        }
+        if let Some(value) = features.sse_v1 {
+            self.features.sse_v1 = value;
+        }
+    }
+
+    fn apply_cli_partial(&mut self, cli: &CliPartial) {
+        if let Some(path) = &cli.session_store {
+            self.cli.session_store = path.clone();
+        }
+    }
+
+    fn apply_web_partial(&mut self, web: &WebPartial) {
+        if let Some(static_dir) = &web.static_dir {
+            self.web.static_dir = static_dir.clone();
+        }
+        if let Some(spa_index) = &web.spa_index {
+            self.web.spa_index = spa_index.clone();
+        }
+    }
+
+    fn apply_llm_partial(&mut self, llm: &LLMConfiguration) {
+        self.llm = llm.clone();
+    }
+
     fn apply_env_overrides(&mut self) -> Result<EnvOverrideFlags, ConfigError> {
         let mut flags = EnvOverrideFlags::default();
 
+        self.apply_env_logging_overrides()?;
+        self.apply_env_server_overrides(&mut flags)?;
+        self.apply_env_security_overrides()?;
+        self.apply_env_rate_limit_overrides()?;
+        self.apply_env_session_overrides()?;
+        self.apply_env_oauth_overrides(&mut flags)?;
+        self.apply_env_database_overrides()?;
+        self.apply_env_sse_overrides()?;
+        self.apply_env_feature_overrides()?;
+        self.apply_env_cli_overrides()?;
+        self.apply_env_web_overrides()?;
+
+        Ok(flags)
+    }
+
+    fn apply_env_logging_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(level) = env_value(&["logging", "level"]) {
             self.logging.level = level;
         }
         if let Some(format) = env_value(&["logging", "format"]) {
             self.logging.format = LogFormat::from_str(&format)?;
         }
+        Ok(())
+    }
 
+    fn apply_env_server_overrides(
+        &mut self,
+        flags: &mut EnvOverrideFlags,
+    ) -> Result<(), ConfigError> {
         if let Some(host) = env_value(&["server", "host"]) {
             self.server.host = host;
         }
@@ -1087,7 +1196,10 @@ impl Config {
         if let Some(header) = env_value(&["server", "request_id_header"]) {
             self.server.request_id_header = header;
         }
+        Ok(())
+    }
 
+    fn apply_env_security_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(enabled) = env_value_bool(&["security", "hsts", "enabled"])? {
             self.security.hsts.enabled = enabled;
         }
@@ -1124,7 +1236,10 @@ impl Config {
         if let Some(enabled) = env_value_bool(&["security", "csrf", "enabled"])? {
             self.security.csrf.enabled = enabled;
         }
+        Ok(())
+    }
 
+    fn apply_env_rate_limit_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(auth_limit) = env_value_u32(&["rate_limits", "auth_login_per_ip_per_min"])? {
             self.rate_limits.auth_login_per_ip_per_min = auth_limit;
         }
@@ -1137,7 +1252,10 @@ impl Config {
         if let Some(enabled) = env_value_bool(&["rate_limits", "admin_api_enabled"])? {
             self.rate_limits.admin_api_enabled = enabled;
         }
+        Ok(())
+    }
 
+    fn apply_env_session_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(idle) = env_value_u64(&["session", "idle_seconds"])? {
             self.session.idle_seconds = idle;
         }
@@ -1153,7 +1271,13 @@ impl Config {
         if let Some(max_sessions) = env_value_u32(&["session", "max_sessions_per_user"])? {
             self.session.max_sessions_per_user = Some(max_sessions);
         }
+        Ok(())
+    }
 
+    fn apply_env_oauth_overrides(
+        &mut self,
+        flags: &mut EnvOverrideFlags,
+    ) -> Result<(), ConfigError> {
         if let Some(redirect_base) = env_value(&["oauth", "redirect_base"]) {
             self.oauth.redirect_base = Some(parse_url("oauth.redirect_base", &redirect_base)?);
             flags.redirect_base_set = true;
@@ -1176,7 +1300,10 @@ impl Config {
             provider.client_secret = SecretString::new(client_secret);
             self.oauth.github = Some(provider);
         }
+        Ok(())
+    }
 
+    fn apply_env_database_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(url) = env_value(&["db", "url"]) {
             self.db.url = url;
         }
@@ -1189,7 +1316,10 @@ impl Config {
         if let Some(path) = env_value(&["db", "bootstrap_path"]) {
             self.db.bootstrap_path = PathBuf::from(path);
         }
+        Ok(())
+    }
 
+    fn apply_env_sse_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(heartbeat) = env_value_u64(&["sse", "heartbeat_seconds"])? {
             self.sse.heartbeat_seconds = heartbeat;
         }
@@ -1217,7 +1347,10 @@ impl Config {
         if let Some(ratio) = env_value_f32(&["sse", "backpressure", "warn_queue_ratio"])? {
             self.sse.backpressure.warn_queue_ratio = ratio as f64;
         }
+        Ok(())
+    }
 
+    fn apply_env_feature_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(enabled) = env_value_bool(&["features", "auth_v1"])? {
             self.features.auth_v1 = enabled;
         }
@@ -1227,25 +1360,53 @@ impl Config {
         if let Some(enabled) = env_value_bool(&["features", "sse_v1"])? {
             self.features.sse_v1 = enabled;
         }
+        Ok(())
+    }
 
+    fn apply_env_cli_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(session_store) = env_value(&["cli", "session_store"]) {
             self.cli.session_store = PathBuf::from(session_store);
         }
+        Ok(())
+    }
 
+    fn apply_env_web_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(static_dir) = env_value(&["web", "static_dir"]) {
             self.web.static_dir = PathBuf::from(static_dir);
         }
         if let Some(spa_index) = env_value(&["web", "spa_index"]) {
             self.web.spa_index = PathBuf::from(spa_index);
         }
-
-        Ok(flags)
+        Ok(())
     }
 
     fn validate(&mut self) -> Result<Vec<String>, ConfigError> {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 
+        self.validate_server(&mut errors, &mut warnings);
+        self.validate_security(&mut errors, &mut warnings);
+        self.validate_rate_limits(&mut errors);
+        self.validate_session(&mut errors);
+        self.validate_database(&mut errors, &mut warnings);
+        self.validate_logging(&mut errors);
+        self.validate_sse(&mut errors, &mut warnings);
+        self.validate_assets(&mut errors, &mut warnings);
+        self.validate_features(&mut warnings);
+
+        if errors.is_empty() {
+            Ok(warnings)
+        } else {
+            let summary = errors
+                .iter()
+                .map(|msg| format!("- {msg}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Err(ConfigError::Validation { errors, summary })
+        }
+    }
+
+    fn validate_server(&self, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
         if self.server.host.trim().is_empty() {
             errors.push("server.host must not be empty".into());
         }
@@ -1264,19 +1425,6 @@ impl Config {
             )),
         }
 
-        if self.security.cookie.secure == false && self.profile.is_prod() {
-            errors.push("security.cookie.secure must be true in production".into());
-        }
-        if self.security.cookie.secure == false && !self.profile.is_prod() {
-            warnings.push(
-                "security.cookie.secure is disabled; cookies may be exposed over HTTP".into(),
-            );
-        }
-
-        if self.security.csrf.enabled && !self.features.auth_v1 {
-            warnings.push("CSRF protection is enabled while auth feature is disabled; ensure configuration matches expectations".into());
-        }
-
         if self.server.cors.allow_credentials
             && self
                 .server
@@ -1291,6 +1439,23 @@ impl Config {
             );
         }
 
+        if self.security.csrf.enabled && !self.features.auth_v1 {
+            warnings.push("CSRF protection is enabled while auth feature is disabled; ensure configuration matches expectations".into());
+        }
+    }
+
+    fn validate_security(&self, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
+        if !self.security.cookie.secure && self.profile.is_prod() {
+            errors.push("security.cookie.secure must be true in production".into());
+        }
+        if !self.security.cookie.secure && !self.profile.is_prod() {
+            warnings.push(
+                "security.cookie.secure is disabled; cookies may be exposed over HTTP".into(),
+            );
+        }
+    }
+
+    fn validate_rate_limits(&self, errors: &mut Vec<String>) {
         if self.rate_limits.auth_login_per_ip_per_min == 0 {
             errors.push("rate_limits.auth_login_per_ip_per_min must be greater than zero".into());
         }
@@ -1300,7 +1465,9 @@ impl Config {
         if self.rate_limits.burst == 0 {
             errors.push("rate_limits.burst must be greater than zero".into());
         }
+    }
 
+    fn validate_session(&self, errors: &mut Vec<String>) {
         if self.session.idle_seconds == 0 {
             errors.push("session.idle_seconds must be greater than zero".into());
         }
@@ -1320,7 +1487,9 @@ impl Config {
                 );
             }
         }
+    }
 
+    fn validate_database(&self, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
         if self.db.url.trim().is_empty() {
             errors.push("db.url must not be empty".into());
         } else if !self.db.url.starts_with("postgres://")
@@ -1333,6 +1502,15 @@ impl Config {
             errors.push("db.statement_timeout_ms must be greater than zero".into());
         }
 
+        if !self.db.bootstrap_path.exists() {
+            warnings.push(format!(
+                "db.bootstrap_path '{}' does not exist; database bootstrap may fail",
+                self.db.bootstrap_path.display()
+            ));
+        }
+    }
+
+    fn validate_logging(&self, errors: &mut Vec<String>) {
         if self.logging.level.trim().is_empty() {
             errors.push("logging.level must not be empty".into());
         } else if !is_valid_level(&self.logging.level) {
@@ -1341,7 +1519,9 @@ impl Config {
                 self.logging.level
             ));
         }
+    }
 
+    fn validate_sse(&mut self, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
         if self.sse.channel_capacity == 0 {
             warnings.push(
                 "SSE channel capacity is zero; increasing to at least 1 to avoid drop-all behaviour"
@@ -1391,7 +1571,9 @@ impl Config {
                     .into(),
             );
         }
+    }
 
+    fn validate_assets(&self, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
         if self.web.static_dir.to_string_lossy().is_empty() {
             errors.push("web.static_dir must not be empty".into());
         } else if !self.web.static_dir.exists() {
@@ -1410,14 +1592,9 @@ impl Config {
                 "cli.session_store path is empty; CLI login cookie jar cannot be persisted".into(),
             );
         }
+    }
 
-        if !self.db.bootstrap_path.exists() {
-            warnings.push(format!(
-                "db.bootstrap_path '{}' does not exist; database bootstrap may fail",
-                self.db.bootstrap_path.display()
-            ));
-        }
-
+    fn validate_features(&mut self, warnings: &mut Vec<String>) {
         if self.features.auth_v1 {
             let mut missing = Vec::new();
             match &self.oauth.github {
@@ -1449,17 +1626,6 @@ impl Config {
         if self.features.well_known && self.well_known.is_empty() {
             warnings.push("features.well_known disabled: no well-known entries configured".into());
             self.features.well_known = false;
-        }
-
-        if errors.is_empty() {
-            Ok(warnings)
-        } else {
-            let summary = errors
-                .iter()
-                .map(|msg| format!("- {msg}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            Err(ConfigError::Validation { errors, summary })
         }
     }
 
@@ -1727,7 +1893,7 @@ pub enum ConfigError {
 
 impl ConfigError {
     fn from_env_parse<T: fmt::Display>(key: &str, source: T) -> Self {
-        ConfigError::InvalidEnv {
+        Self::InvalidEnv {
             key: key.to_string(),
             message: source.to_string(),
         }
@@ -1802,7 +1968,7 @@ impl FileConfigData {
 pub struct SecretString(String);
 
 impl SecretString {
-    pub fn new(value: String) -> Self {
+    pub const fn new(value: String) -> Self {
         Self(value)
     }
 
@@ -1835,8 +2001,8 @@ impl FromStr for LogFormat {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().as_str() {
-            "text" | "pretty" | "plain" => Ok(LogFormat::Text),
-            "json" => Ok(LogFormat::Json),
+            "text" | "pretty" | "plain" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
             other => Err(ConfigError::InvalidValue {
                 field: "logging.format".into(),
                 message: format!("unknown log format '{other}'"),
@@ -1850,9 +2016,9 @@ impl FromStr for CookieSameSite {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().as_str() {
-            "lax" => Ok(CookieSameSite::Lax),
-            "strict" => Ok(CookieSameSite::Strict),
-            "none" => Ok(CookieSameSite::None),
+            "lax" => Ok(Self::Lax),
+            "strict" => Ok(Self::Strict),
+            "none" => Ok(Self::None),
             other => Err(ConfigError::InvalidValue {
                 field: "security.cookie.same_site".into(),
                 message: format!("unknown SameSite value '{other}'"),
@@ -1887,76 +2053,64 @@ fn env_value(path: &[&str]) -> Option<String> {
 }
 
 fn env_value_bool(path: &[&str]) -> Result<Option<bool>, ConfigError> {
-    if let Some(value) = env_value(path) {
+    env_value(path).map_or(Ok(None), |value| {
         let key = format!("RUSTYGPT_{}", path.join("_").to_ascii_uppercase());
         match value.to_ascii_lowercase().as_str() {
             "true" | "1" | "yes" | "on" => Ok(Some(true)),
             "false" | "0" | "no" | "off" => Ok(Some(false)),
             _ => Err(ConfigError::from_env_parse(&key, "expected boolean")),
         }
-    } else {
-        Ok(None)
-    }
+    })
 }
 
 fn env_value_u16(path: &[&str]) -> Result<Option<u16>, ConfigError> {
-    if let Some(value) = env_value(path) {
+    env_value(path).map_or(Ok(None), |value| {
         let key = format!("RUSTYGPT_{}", path.join("_").to_ascii_uppercase());
         value
             .parse::<u16>()
             .map(Some)
             .map_err(|err| ConfigError::from_env_parse(&key, err))
-    } else {
-        Ok(None)
-    }
+    })
 }
 
 fn env_value_u32(path: &[&str]) -> Result<Option<u32>, ConfigError> {
-    if let Some(value) = env_value(path) {
+    env_value(path).map_or(Ok(None), |value| {
         let key = format!("RUSTYGPT_{}", path.join("_").to_ascii_uppercase());
         value
             .parse::<u32>()
             .map(Some)
             .map_err(|err| ConfigError::from_env_parse(&key, err))
-    } else {
-        Ok(None)
-    }
+    })
 }
 
 fn env_value_u64(path: &[&str]) -> Result<Option<u64>, ConfigError> {
-    if let Some(value) = env_value(path) {
+    env_value(path).map_or(Ok(None), |value| {
         let key = format!("RUSTYGPT_{}", path.join("_").to_ascii_uppercase());
         value
             .parse::<u64>()
             .map(Some)
             .map_err(|err| ConfigError::from_env_parse(&key, err))
-    } else {
-        Ok(None)
-    }
+    })
 }
 
 fn env_value_usize(path: &[&str]) -> Result<Option<usize>, ConfigError> {
-    if let Some(value) = env_value(path) {
+    env_value(path).map_or(Ok(None), |value| {
         let key = format!("RUSTYGPT_{}", path.join("_").to_ascii_uppercase());
         value
             .parse::<usize>()
             .map(Some)
             .map_err(|err| ConfigError::from_env_parse(&key, err))
-    } else {
-        Ok(None)
-    }
+    })
 }
 
 fn env_value_f32(path: &[&str]) -> Result<Option<f32>, ConfigError> {
-    if let Some(value) = env_value(path) {
+    env_value(path).map_or(Ok(None), |value| {
         let key = format!("RUSTYGPT_{}", path.join("_").to_ascii_uppercase());
         value
             .parse::<f32>()
             .map(Some)
             .map_err(|err| ConfigError::from_env_parse(&key, err))
-    } else {
-        Ok(None)
-    }
+    })
 }
 
 fn is_valid_level(level: &str) -> bool {
@@ -1967,23 +2121,23 @@ fn is_valid_level(level: &str) -> bool {
 }
 
 fn default_session_store_path() -> PathBuf {
-    if let Some(base_dirs) = BaseDirs::new() {
-        let mut path = base_dirs.config_dir().to_path_buf();
-        path.push("rustygpt");
-        path.push("session.json");
-        path
-    } else {
-        PathBuf::from("./session.json")
-    }
+    BaseDirs::new().map_or_else(
+        || PathBuf::from("./session.json"),
+        |base_dirs| {
+            let mut path = base_dirs.config_dir().to_path_buf();
+            path.push("rustygpt");
+            path.push("session.json");
+            path
+        },
+    )
 }
 
 fn redact_url_credentials(url: &str) -> String {
-    if let Ok(parsed) = Url::parse(url) {
-        if parsed.password().is_some() || parsed.username() != "" {
-            let mut redacted = parsed.clone();
-            redacted.set_username("****").ok();
-            redacted.set_password(Some("****")).ok();
-            return redacted.to_string();
+    if let Ok(mut parsed) = Url::parse(url) {
+        if parsed.password().is_some() || !parsed.username().is_empty() {
+            parsed.set_username("****").ok();
+            parsed.set_password(Some("****")).ok();
+            return parsed.to_string();
         }
     }
     url.to_string()

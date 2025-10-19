@@ -40,7 +40,8 @@ impl ProblemDetails {
 
 impl IntoResponse for ProblemDetails {
     fn into_response(self) -> Response {
-        let mut response = axum::Json(self).into_response();
+        let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let mut response = (status, axum::Json(self)).into_response();
         response.headers_mut().insert(
             CONTENT_TYPE,
             HeaderValue::from_static("application/problem+json"),

@@ -322,13 +322,13 @@ impl LLMRequest {
     }
 
     /// Set the maximum tokens
-    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+    pub const fn with_max_tokens(mut self, max_tokens: u32) -> Self {
         self.max_tokens = Some(max_tokens);
         self
     }
 
     /// Set the temperature
-    pub fn with_temperature(mut self, temperature: f32) -> Self {
+    pub const fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = Some(temperature);
         self
     }
@@ -433,7 +433,7 @@ pub struct TokenUsage {
 
 impl TokenUsage {
     /// Create new token usage
-    pub fn new(prompt_tokens: u32, completion_tokens: u32) -> Self {
+    pub const fn new(prompt_tokens: u32, completion_tokens: u32) -> Self {
         Self {
             prompt_tokens,
             completion_tokens,
@@ -442,7 +442,7 @@ impl TokenUsage {
     }
 
     /// Update with new completion tokens
-    pub fn add_completion_tokens(&mut self, tokens: u32) {
+    pub const fn add_completion_tokens(&mut self, tokens: u32) {
         self.completion_tokens += tokens;
         self.total_tokens = self.prompt_tokens + self.completion_tokens;
     }

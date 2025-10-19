@@ -106,12 +106,12 @@ impl From<ChatServiceError> for ApiError {
     fn from(err: ChatServiceError) -> Self {
         match err {
             ChatServiceError::Validation(message) => {
-                ApiError::new(StatusCode::BAD_REQUEST, "validation_failed", message)
+                Self::new(StatusCode::BAD_REQUEST, "validation_failed", message)
             }
-            ChatServiceError::NotFound(message) => ApiError::not_found(message),
-            ChatServiceError::Forbidden(message) => ApiError::forbidden(message),
-            ChatServiceError::RateLimited(message) => ApiError::too_many_requests(message),
-            ChatServiceError::Database(db_err) => ApiError::from(db_err),
+            ChatServiceError::NotFound(message) => Self::not_found(message),
+            ChatServiceError::Forbidden(message) => Self::forbidden(message),
+            ChatServiceError::RateLimited(message) => Self::too_many_requests(message),
+            ChatServiceError::Database(db_err) => Self::from(db_err),
         }
     }
 }

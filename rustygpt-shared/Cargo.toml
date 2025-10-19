@@ -2,6 +2,12 @@
 name = "shared"
 version = "0.1.0"
 edition = "2024"
+description = "Shared models, configuration, and utilities for the RustyGPT platform."
+license = "Apache-2.0"
+repository = "https://github.com/vanna/rusty_gpt"
+readme = "../README.md"
+keywords = ["rustygpt", "models", "config", "sse", "auth"]
+categories = ["data-structures"]
 
 [lib]
 name = "shared"

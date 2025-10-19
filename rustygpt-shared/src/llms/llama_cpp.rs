@@ -418,15 +418,16 @@ mod native {
     }
 
     fn combine_prompt(request: &LLMRequest) -> String {
-        if let Some(system) = &request.system_message {
-            if system.trim().is_empty() {
-                request.prompt.clone()
-            } else {
-                format!("{}\n\n{}", system.trim(), request.prompt)
-            }
-        } else {
-            request.prompt.clone()
-        }
+        request.system_message.as_ref().map_or_else(
+            || request.prompt.clone(),
+            |system| {
+                if system.trim().is_empty() {
+                    request.prompt.clone()
+                } else {
+                    format!("{}\n\n{}", system.trim(), request.prompt)
+                }
+            },
+        )
     }
 
     fn detect_stop_sequence<'a>(text: &'a str, stops: &'a [String]) -> Option<&'a str> {
@@ -499,7 +500,7 @@ mod native {
     }
 
     impl Utf8Decoder {
-        fn new() -> Self {
+        const fn new() -> Self {
             Self { buf: Vec::new() }
         }
 

@@ -22,17 +22,15 @@ pub async fn github_oauth_callback_with_service<T: OAuthService>(
     State(state): State<Arc<AppState>>,
     oauth_service: T,
 ) -> Response {
-    match oauth_service
+    oauth_service
         .handle_github_oauth(&state.pool, params.code)
         .await
-    {
-        Ok(user_id) => {
-            // In a real app, you would set a cookie or return a JWT token
-            // For now, redirect to a success page with the user ID
-            Redirect::to(&format!("/auth-success.html?user_id={}", user_id)).into_response()
-        }
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
-    }
+        .map_or_else(
+            |_| (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
+            |user_id| {
+                Redirect::to(&format!("/auth-success.html?user_id={}", user_id)).into_response()
+            },
+        )
 }
 
 /// Testable GitHub OAuth manual handler
@@ -49,17 +47,19 @@ pub async fn github_oauth_manual_with_service<T: OAuthService>(
     Json(payload): Json<OAuthRequest>,
     oauth_service: T,
 ) -> Response {
-    match oauth_service
+    oauth_service
         .handle_github_oauth(&state.pool, payload.auth_code)
         .await
-    {
-        Ok(user_id) => (
-            StatusCode::OK,
-            format!("GitHub OAuth successful, user_id: {}", user_id),
+        .map_or_else(
+            |_| (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
+            |user_id| {
+                (
+                    StatusCode::OK,
+                    format!("GitHub OAuth successful, user_id: {}", user_id),
+                )
+                    .into_response()
+            },
         )
-            .into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
-    }
 }
 
 /// Testable Apple OAuth callback handler
@@ -76,17 +76,15 @@ pub async fn apple_oauth_callback_with_service<T: OAuthService>(
     State(state): State<Arc<AppState>>,
     oauth_service: T,
 ) -> Response {
-    match oauth_service
+    oauth_service
         .handle_apple_oauth(&state.pool, params.code)
         .await
-    {
-        Ok(user_id) => {
-            // In a real app, you would set a cookie or return a JWT token
-            // For now, redirect to a success page with the user ID
-            Redirect::to(&format!("/auth-success.html?user_id={}", user_id)).into_response()
-        }
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
-    }
+        .map_or_else(
+            |_| (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
+            |user_id| {
+                Redirect::to(&format!("/auth-success.html?user_id={}", user_id)).into_response()
+            },
+        )
 }
 
 /// Testable Apple OAuth manual handler
@@ -103,15 +101,17 @@ pub async fn apple_oauth_manual_with_service<T: OAuthService>(
     Json(payload): Json<OAuthRequest>,
     oauth_service: T,
 ) -> Response {
-    match oauth_service
+    oauth_service
         .handle_apple_oauth(&state.pool, payload.auth_code)
         .await
-    {
-        Ok(user_id) => (
-            StatusCode::OK,
-            format!("Apple OAuth successful, user_id: {}", user_id),
+        .map_or_else(
+            |_| (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
+            |user_id| {
+                (
+                    StatusCode::OK,
+                    format!("Apple OAuth successful, user_id: {}", user_id),
+                )
+                    .into_response()
+            },
         )
-            .into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
-    }
 }

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::{Timestamp, chat::ConversationRole};
 
-fn default_uuid() -> Uuid {
+const fn default_uuid() -> Uuid {
     Uuid::nil()
 }
 

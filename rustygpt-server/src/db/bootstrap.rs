@@ -32,7 +32,7 @@ fn readiness_override_take() -> Option<Result<(), sqlx::Error>> {
 }
 
 #[cfg(test)]
-pub(crate) fn set_readiness_override(result: Option<Result<(), sqlx::Error>>) {
+pub fn set_readiness_override(result: Option<Result<(), sqlx::Error>>) {
     let lock = READINESS_OVERRIDE.get_or_init(|| Mutex::new(None));
     *lock.lock().expect("override poisoned") = result;
 }
@@ -45,7 +45,7 @@ fn liveness_override_take() -> Option<Result<(), sqlx::Error>> {
 }
 
 #[cfg(test)]
-pub(crate) fn set_liveness_override(result: Option<Result<(), sqlx::Error>>) {
+pub fn set_liveness_override(result: Option<Result<(), sqlx::Error>>) {
     let lock = LIVENESS_OVERRIDE.get_or_init(|| Mutex::new(None));
     *lock.lock().expect("override poisoned") = result;
 }
@@ -59,12 +59,12 @@ enum ScriptStage {
 }
 
 impl ScriptStage {
-    fn label(self) -> &'static str {
+    const fn label(self) -> &'static str {
         match self {
-            ScriptStage::Schema => "schema",
-            ScriptStage::Procedures => "procedures",
-            ScriptStage::Indexes => "indexes",
-            ScriptStage::Seed => "seed",
+            Self::Schema => "schema",
+            Self::Procedures => "procedures",
+            Self::Indexes => "indexes",
+            Self::Seed => "seed",
         }
     }
 }
@@ -111,68 +111,71 @@ pub async fn run(pool: &PgPool, config: &DatabaseConfig) -> Result<(), Bootstrap
     info!(path = %root.display(), "running database bootstrap");
 
     for (folder, stage) in STAGES {
-        let stage_path = root.join(folder);
-        if !stage_path.exists() {
-            return Err(BootstrapError::MissingStage {
-                stage: stage.label(),
-                path: stage_path,
-            });
-        }
-
-        let files = collect_sql_files(&stage_path)?;
-        if files.is_empty() {
-            debug!(stage = %stage, "no bootstrap scripts found for stage");
-            continue;
-        }
-
-        info!(stage = %stage, count = files.len(), "applying bootstrap scripts");
-        metrics::counter!(
-            "db_bootstrap_batches_total",
-            "stage" => stage.label(),
-            "status" => "started"
-        )
-        .increment(1);
-        for path in files {
-            let timer = Instant::now();
-            match apply_script(pool, &path).await {
-                Ok(_) => {
-                    metrics::counter!(
-                        "db_bootstrap_scripts_total",
-                        "stage" => stage.label(),
-                        "status" => "ok"
-                    )
-                    .increment(1);
-                    metrics::histogram!(
-                        "db_bootstrap_script_duration_seconds",
-                        "stage" => stage.label()
-                    )
-                    .record(timer.elapsed().as_secs_f64());
-                }
-                Err(err) => {
-                    metrics::counter!(
-                        "db_bootstrap_scripts_total",
-                        "stage" => stage.label(),
-                        "status" => "error"
-                    )
-                    .increment(1);
-                    metrics::histogram!(
-                        "db_bootstrap_script_duration_seconds",
-                        "stage" => stage.label()
-                    )
-                    .record(timer.elapsed().as_secs_f64());
-                    return Err(err);
-                }
-            }
-        }
-        metrics::counter!(
-            "db_bootstrap_batches_total",
-            "stage" => stage.label(),
-            "status" => "completed"
-        )
-        .increment(1);
+        apply_stage(pool, root, folder, *stage).await?;
     }
 
     Ok(())
+}
+
+async fn apply_stage(
+    pool: &PgPool,
+    root: &Path,
+    folder: &str,
+    stage: ScriptStage,
+) -> Result<(), BootstrapError> {
+    let stage_path = root.join(folder);
+    if !stage_path.exists() {
+        return Err(BootstrapError::MissingStage {
+            stage: stage.label(),
+            path: stage_path,
+        });
+    }
+
+    let files = collect_sql_files(&stage_path)?;
+    if files.is_empty() {
+        debug!(stage = %stage, "no bootstrap scripts found for stage");
+        return Ok(());
+    }
+
+    info!(stage = %stage, count = files.len(), "applying bootstrap scripts");
+    record_stage_counter(stage, "started");
+
+    for path in files {
+        let timer = Instant::now();
+        match apply_script(pool, &path).await {
+            Ok(_) => record_script_metrics(stage, "ok", timer.elapsed().as_secs_f64()),
+            Err(err) => {
+                record_script_metrics(stage, "error", timer.elapsed().as_secs_f64());
+                return Err(err);
+            }
+        }
+    }
+
+    record_stage_counter(stage, "completed");
+    Ok(())
+}
+
+fn record_stage_counter(stage: ScriptStage, status: &'static str) {
+    metrics::counter!(
+        "db_bootstrap_batches_total",
+        "stage" => stage.label(),
+        "status" => status
+    )
+    .increment(1);
+}
+
+fn record_script_metrics(stage: ScriptStage, status: &'static str, duration: f64) {
+    metrics::counter!(
+        "db_bootstrap_scripts_total",
+        "stage" => stage.label(),
+        "status" => status
+    )
+    .increment(1);
+    metrics::histogram!(
+        "db_bootstrap_script_duration_seconds",
+        "stage" => stage.label()
+    )
+    .record(duration);
 }
 
 /// Simple liveness check used during startup.

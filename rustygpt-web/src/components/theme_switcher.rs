@@ -12,7 +12,7 @@ extern "C" {
     fn log(s: &str);
 }
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties, PartialEq, Eq)]
 pub struct ThemeSwitcherProps {
     #[prop_or_default]
     pub class: Classes,

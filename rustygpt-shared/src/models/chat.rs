@@ -18,12 +18,12 @@ pub enum ConversationRole {
 
 impl ConversationRole {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            ConversationRole::Owner => "owner",
-            ConversationRole::Admin => "admin",
-            ConversationRole::Member => "member",
-            ConversationRole::Viewer => "viewer",
+            Self::Owner => "owner",
+            Self::Admin => "admin",
+            Self::Member => "member",
+            Self::Viewer => "viewer",
         }
     }
 }
@@ -53,12 +53,12 @@ pub enum MessageRole {
 
 impl MessageRole {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::System => "system",
-            MessageRole::Tool => "tool",
+            Self::User => "user",
+            Self::Assistant => "assistant",
+            Self::System => "system",
+            Self::Tool => "tool",
         }
     }
 }

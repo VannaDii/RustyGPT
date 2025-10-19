@@ -77,3 +77,9 @@ Denials return `429` with:
 The middleware also emits standard headers: `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, and the custom `X-RateLimit-Profile`.
 
 See `deploy/grafana/limits.json` for an example dashboard that tracks throttled requests and profile counts in Prometheus.
+
+## Dashboard & Alerting Checklist
+
+1. Import `deploy/grafana/limits.json` into Grafana and point it at your Prometheus data source.
+2. Validate metric availability with quick queries such as `rustygpt_limits_profiles` and `sum(rate(rustygpt_rate_limit_denials_total[5m]))`.
+3. Wire alerts when denial rates exceed acceptable thresholds or when the assignment/profile gauges diverge from expected counts (a sign that reloads are failing).

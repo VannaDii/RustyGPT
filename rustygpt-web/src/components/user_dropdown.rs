@@ -26,10 +26,10 @@ pub fn user_dropdown(props: &UserDropdownProps) -> Html {
     };
 
     let settings_button = {
-        let navigator = navigator.clone();
+        let settings_navigator = navigator.clone();
         let onclick = Callback::from(move |event: yew::MouseEvent| {
             event.prevent_default();
-            navigator.push(&AdminRoute::Profile)
+            settings_navigator.push(&AdminRoute::Profile)
         });
         html! {
             <li><a {onclick}>{i18n.t("sidebar.settings")}</a></li>
@@ -37,7 +37,7 @@ pub fn user_dropdown(props: &UserDropdownProps) -> Html {
     };
 
     let logout_button = {
-        let navigator = navigator.clone();
+        let navigator = navigator;
         let on_logout = props.on_logout.clone();
         let onclick = Callback::from(move |event: yew::MouseEvent| {
             event.prevent_default();

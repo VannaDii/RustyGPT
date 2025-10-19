@@ -1,5 +1,5 @@
-pub(crate) mod chat;
-pub(crate) mod completion;
-pub(crate) mod config;
-pub(crate) mod session;
-pub(crate) mod spec;
+pub mod chat;
+pub mod completion;
+pub mod config;
+pub mod session;
+pub mod spec;

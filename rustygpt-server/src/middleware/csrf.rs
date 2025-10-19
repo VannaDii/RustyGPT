@@ -67,7 +67,7 @@ pub async fn enforce_csrf(
     }
 }
 
-fn is_method_idempotent(method: &Method) -> bool {
+const fn is_method_idempotent(method: &Method) -> bool {
     matches!(method, &Method::GET | &Method::HEAD | &Method::OPTIONS)
 }
 
@@ -86,4 +86,109 @@ fn extract_cookie(request: &Request<Body>, cookie_name: &str) -> Option<String> 
         .flatten()
         .find(|cookie| cookie.name() == cookie_name)
         .map(|cookie| cookie.value().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        Router,
+        routing::{get, post},
+    };
+    use shared::config::server::Profile;
+    use tower::ServiceExt;
+
+    fn csrf_state(enabled: bool) -> CsrfState {
+        let mut config = Config::default_for_profile(Profile::Test);
+        config.security.csrf.enabled = enabled;
+        CsrfState::from_config(&config)
+    }
+
+    async fn call(state: CsrfState, request: Request<Body>) -> Response {
+        async fn ok_handler() -> Response {
+            Response::new(Body::empty())
+        }
+
+        let router = Router::new()
+            .route("/api/messages", get(ok_handler).post(ok_handler))
+            .route("/api/conversations", get(ok_handler))
+            .route("/api/auth/login", post(ok_handler))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                enforce_csrf,
+            ))
+            .with_state(state);
+
+        router.oneshot(request).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn allows_idempotent_methods_without_tokens() {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("/api/conversations")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = call(csrf_state(true), request).await;
+        assert_eq!(response.status(), http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_header_token() {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/api/messages")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = call(csrf_state(true), request).await;
+        assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn rejects_mismatched_tokens() {
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri("/api/messages")
+            .header("X-CSRF-Token", "header-token")
+            .body(Body::empty())
+            .unwrap();
+        request.headers_mut().insert(
+            header::COOKIE,
+            header::HeaderValue::from_static("CSRF-TOKEN=cookie-token"),
+        );
+
+        let response = call(csrf_state(true), request).await;
+        assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn accepts_matching_tokens() {
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri("/api/messages")
+            .header("X-CSRF-Token", "token")
+            .body(Body::empty())
+            .unwrap();
+        request.headers_mut().insert(
+            header::COOKIE,
+            header::HeaderValue::from_static("CSRF-TOKEN=token"),
+        );
+
+        let response = call(csrf_state(true), request).await;
+        assert_eq!(response.status(), http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn bypasses_auth_endpoints() {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/api/auth/login")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = call(csrf_state(true), request).await;
+        assert_eq!(response.status(), http::StatusCode::OK);
+    }
 }

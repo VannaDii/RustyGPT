@@ -6,8 +6,7 @@ use shared::models::{
     UnreadSummaryResponse,
 };
 use shared::models::{SetupRequest, SetupResponse};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlDocument, Window};
@@ -25,7 +24,7 @@ thread_local! {
 pub struct RustyGPTClient {
     base_url: String,
     client: Client,
-    csrf_token: Rc<RefCell<Option<String>>>,
+    csrf_token: Arc<Mutex<Option<String>>>,
 }
 
 impl RustyGPTClient {
@@ -34,7 +33,7 @@ impl RustyGPTClient {
         let client = Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             client: Client::new(),
-            csrf_token: Rc::new(RefCell::new(None)),
+            csrf_token: Arc::new(Mutex::new(None)),
         };
 
         if let Some(token) = read_cookie(CSRF_COOKIE_NAME) {
@@ -45,10 +44,7 @@ impl RustyGPTClient {
     }
 
     pub fn shared() -> Self {
-        SHARED_CLIENT.with(|cell| {
-            cell.get_or_init(|| RustyGPTClient::new(DEFAULT_BASE_URL))
-                .clone()
-        })
+        SHARED_CLIENT.with(|cell| cell.get_or_init(|| Self::new(DEFAULT_BASE_URL)).clone())
     }
 
     fn api_url(&self, path: &str) -> String {
@@ -56,11 +52,16 @@ impl RustyGPTClient {
     }
 
     pub fn set_csrf_token(&self, token: Option<String>) {
-        *self.csrf_token.borrow_mut() = token;
+        if let Ok(mut guard) = self.csrf_token.lock() {
+            *guard = token;
+        }
     }
 
     pub fn current_csrf_token(&self) -> Option<String> {
-        self.csrf_token.borrow().clone()
+        self.csrf_token
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned())
     }
 
     fn apply_csrf(&self, request: RequestBuilder) -> RequestBuilder {

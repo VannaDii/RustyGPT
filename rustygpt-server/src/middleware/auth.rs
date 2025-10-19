@@ -117,8 +117,7 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
     }
 
     let mut response = next.run(req).await;
-    let mut rotation_header_set = false;
-    if let Some(bundle) = &bundle {
+    let rotation_header_set = bundle.as_ref().map_or(false, |bundle| {
         if let Ok(value) = http::HeaderValue::from_str(&bundle.session_cookie.to_string()) {
             response.headers_mut().append(header::SET_COOKIE, value);
         }
@@ -129,8 +128,8 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
             header::HeaderName::from_static("x-session-rotated"),
             http::HeaderValue::from_static("1"),
         );
-        rotation_header_set = true;
-    }
+        true
+    });
 
     if rotated && !rotation_header_set {
         response.headers_mut().insert(

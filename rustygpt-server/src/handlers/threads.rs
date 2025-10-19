@@ -20,7 +20,7 @@ use crate::{
     middleware::request_context::RequestContext,
     services::{
         assistant_service::{AssistantService, finish_reason_to_string},
-        chat_service::{ChatService, ChatServiceError},
+        chat_service::{ChatService, ChatServiceError, ThreadSummaryWithConversation},
     },
 };
 use futures::StreamExt;
@@ -28,6 +28,7 @@ use serde_json::json;
 use shared::{
     llms::{
         ThreadContextBuilder,
+        traits::StreamingResponseStream,
         types::{LLMConfig, LLMRequest, TokenUsage},
     },
     models::{
@@ -455,8 +456,202 @@ async fn presence_heartbeat(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn should_spawn_assistant(role: Option<MessageRole>) -> bool {
+const fn should_spawn_assistant(role: Option<MessageRole>) -> bool {
     matches!(role, None | Some(MessageRole::User))
+}
+
+struct StreamOutcome {
+    accumulated: String,
+    reply_response: Option<ReplyMessageResponse>,
+    summary: Option<ThreadSummaryWithConversation>,
+    resolved_conversation: Option<Uuid>,
+    finish_reason: Option<String>,
+    usage: Option<TokenUsage>,
+    stream_error: Option<String>,
+}
+
+async fn process_assistant_stream(
+    service: &ChatService,
+    hub: &SharedStreamHub,
+    actor: Uuid,
+    parent_message_id: Uuid,
+    stream: &mut StreamingResponseStream,
+    persist_chunks: bool,
+) -> Result<StreamOutcome, ChatServiceError> {
+    let mut accumulated = String::new();
+    let mut reply_response: Option<ReplyMessageResponse> = None;
+    let mut summary = None;
+    let mut resolved_conversation = None;
+    let mut finish_reason: Option<String> = None;
+    let mut usage: Option<TokenUsage> = None;
+    let mut stream_error: Option<String> = None;
+    let mut chunk_index: i32 = 0;
+
+    while let Some(next) = stream.next().await {
+        match next {
+            Ok(chunk) => {
+                if let Some(reason) = &chunk.finish_reason {
+                    finish_reason = Some(finish_reason_to_string(reason));
+                }
+
+                usage = Some(chunk.usage.clone());
+
+                if !chunk.text_delta.is_empty() {
+                    accumulated.push_str(&chunk.text_delta);
+                }
+
+                if ensure_reply_response(
+                    service,
+                    actor,
+                    parent_message_id,
+                    &accumulated,
+                    &mut reply_response,
+                    &mut resolved_conversation,
+                    &mut summary,
+                )
+                .await?
+                {
+                    continue;
+                }
+
+                let Some(created) = reply_response.as_ref() else {
+                    continue;
+                };
+
+                persist_chunk_if_needed(
+                    service,
+                    actor,
+                    created,
+                    chunk_index,
+                    persist_chunks,
+                    &chunk.text_delta,
+                )
+                .await;
+
+                if !chunk.text_delta.is_empty() {
+                    let conversation = resolved_conversation.unwrap_or(created.conversation_id);
+                    publish_delta_event(hub, conversation, created, &chunk.text_delta, chunk_index)
+                        .await;
+                    chunk_index = chunk_index.saturating_add(1);
+                }
+
+                if chunk.is_final {
+                    break;
+                }
+            }
+            Err(err) => {
+                stream_error = Some(err.to_string());
+                break;
+            }
+        }
+    }
+
+    Ok(StreamOutcome {
+        accumulated,
+        reply_response,
+        summary,
+        resolved_conversation,
+        finish_reason,
+        usage,
+        stream_error,
+    })
+}
+
+async fn ensure_reply_response(
+    service: &ChatService,
+    actor: Uuid,
+    parent_message_id: Uuid,
+    accumulated: &str,
+    reply_response: &mut Option<ReplyMessageResponse>,
+    resolved_conversation: &mut Option<Uuid>,
+    summary: &mut Option<ThreadSummaryWithConversation>,
+) -> Result<bool, ChatServiceError> {
+    if reply_response.is_none() {
+        if accumulated.is_empty() {
+            return Ok(true);
+        }
+
+        let created = service
+            .reply_as_assistant(actor, parent_message_id, accumulated.to_string())
+            .await?;
+
+        *resolved_conversation = Some(created.conversation_id);
+        *summary = service
+            .get_thread_summary(actor, created.root_id)
+            .await
+            .ok();
+        *reply_response = Some(created);
+    } else if let Some(created) = reply_response.as_ref() {
+        if let Err(err) = service
+            .update_message_content(actor, created.message_id, accumulated.to_string())
+            .await
+        {
+            warn!(error = %err, "failed to update assistant message content");
+        }
+    }
+
+    Ok(false)
+}
+
+async fn persist_chunk_if_needed(
+    service: &ChatService,
+    actor: Uuid,
+    created: &ReplyMessageResponse,
+    chunk_index: i32,
+    persist_chunks: bool,
+    text_delta: &str,
+) {
+    if persist_chunks && !text_delta.is_empty() {
+        if let Err(err) = service
+            .append_chunk(
+                actor,
+                created.message_id,
+                chunk_index,
+                text_delta.to_string(),
+            )
+            .await
+        {
+            warn!(error = %err, "failed to store assistant chunk");
+        }
+    }
+}
+
+async fn publish_delta_event(
+    hub: &SharedStreamHub,
+    conversation_id: Uuid,
+    created: &ReplyMessageResponse,
+    text_delta: &str,
+    chunk_index: i32,
+) {
+    if text_delta.is_empty() {
+        return;
+    }
+
+    let delta = ConversationStreamEvent::MessageDelta {
+        payload: ChatDeltaChunk {
+            id: format!("{}:{}", created.message_id, chunk_index),
+            object: "chat.completion.chunk".to_string(),
+            root_id: created.root_id,
+            message_id: created.message_id,
+            conversation_id: created.conversation_id,
+            parent_id: created.parent_id,
+            depth: Some(created.depth),
+            choices: vec![ChatDeltaChoice {
+                index: 0,
+                delta: ChatDelta {
+                    role: if chunk_index == 0 {
+                        Some(MessageRole::Assistant)
+                    } else {
+                        None
+                    },
+                    content: Some(text_delta.to_string()),
+                },
+                finish_reason: None,
+            }],
+        },
+    };
+
+    hub.publish(conversation_id, delta).await;
 }
 
 fn spawn_assistant_reply(
@@ -510,114 +705,31 @@ async fn run_assistant_reply(
         .map_err(|err| ChatServiceError::Validation(err.to_string()))?;
 
     let mut stream = session.stream;
-    let mut accumulated = String::new();
-    let mut reply_response: Option<ReplyMessageResponse> = None;
-    let mut summary = None;
-    let mut resolved_conversation = None;
-    let mut finish_reason: Option<String> = None;
-    let mut usage: Option<TokenUsage> = None;
-    let mut chunk_index: i32 = 0;
-    let mut stream_error: Option<String> = None;
     let persist_chunks = assistant.persist_stream_chunks();
+    let StreamOutcome {
+        accumulated: initial_content,
+        reply_response: initial_reply,
+        summary: initial_summary,
+        resolved_conversation: initial_conversation,
+        finish_reason,
+        usage,
+        stream_error,
+    } = process_assistant_stream(
+        &service,
+        &hub,
+        actor,
+        parent_message_id,
+        &mut stream,
+        persist_chunks,
+    )
+    .await?;
 
-    while let Some(next) = stream.next().await {
-        match next {
-            Ok(chunk) => {
-                if let Some(reason) = &chunk.finish_reason {
-                    finish_reason = Some(finish_reason_to_string(reason));
-                }
+    let mut accumulated = initial_content;
+    let mut summary = initial_summary;
+    let mut resolved_conversation = initial_conversation;
+    let mut finish_reason = finish_reason;
 
-                usage = Some(chunk.usage.clone());
-
-                if !chunk.text_delta.is_empty() {
-                    accumulated.push_str(&chunk.text_delta);
-                }
-
-                if reply_response.is_none() {
-                    if accumulated.is_empty() {
-                        continue;
-                    }
-
-                    let created = service
-                        .reply_as_assistant(actor, parent_message_id, accumulated.clone())
-                        .await?;
-
-                    resolved_conversation = Some(created.conversation_id);
-                    summary = service
-                        .get_thread_summary(actor, created.root_id)
-                        .await
-                        .ok();
-
-                    reply_response = Some(created);
-                } else if let Some(created) = reply_response.as_ref() {
-                    if let Err(err) = service
-                        .update_message_content(actor, created.message_id, accumulated.clone())
-                        .await
-                    {
-                        warn!(error = %err, "failed to update assistant message content");
-                    }
-                }
-
-                let Some(created) = reply_response.as_ref() else {
-                    continue;
-                };
-
-                if persist_chunks && !chunk.text_delta.is_empty() {
-                    if let Err(err) = service
-                        .append_chunk(
-                            actor,
-                            created.message_id,
-                            chunk_index,
-                            chunk.text_delta.clone(),
-                        )
-                        .await
-                    {
-                        warn!(error = %err, "failed to store assistant chunk");
-                    }
-                }
-
-                if !chunk.text_delta.is_empty() {
-                    let delta = ConversationStreamEvent::MessageDelta {
-                        payload: ChatDeltaChunk {
-                            id: format!("{}:{}", created.message_id, chunk_index),
-                            object: "chat.completion.chunk".to_string(),
-                            root_id: created.root_id,
-                            message_id: created.message_id,
-                            conversation_id: created.conversation_id,
-                            parent_id: created.parent_id,
-                            depth: Some(created.depth),
-                            choices: vec![ChatDeltaChoice {
-                                index: 0,
-                                delta: ChatDelta {
-                                    role: if chunk_index == 0 {
-                                        Some(MessageRole::Assistant)
-                                    } else {
-                                        None
-                                    },
-                                    content: Some(chunk.text_delta.clone()),
-                                },
-                                finish_reason: None,
-                            }],
-                        },
-                    };
-
-                    let conversation = resolved_conversation.unwrap_or(created.conversation_id);
-                    hub.publish(conversation, delta).await;
-                    chunk_index = chunk_index.saturating_add(1);
-                }
-
-                if chunk.is_final {
-                    break;
-                }
-            }
-            Err(err) => {
-                stream_error = Some(err.to_string());
-                break;
-            }
-        }
-    }
-
-    let reply_response = if let Some(reply) = reply_response {
+    let reply_response = if let Some(reply) = initial_reply {
         reply
     } else {
         let fallback = "I'm sorry, I couldn't generate a response right now.".to_string();
@@ -668,7 +780,7 @@ async fn run_assistant_reply(
 
     let finish_reason_value = stream_error
         .map(|_| "error".to_string())
-        .or(finish_reason.clone())
+        .or_else(|| finish_reason.clone())
         .unwrap_or_else(|| "stop".to_string());
 
     let done = ConversationStreamEvent::MessageDone {
@@ -808,19 +920,23 @@ fn build_stream_request(
         }
     }
 
+    let mut append_assistant = false;
+
     if lines.is_empty() {
         let fallback = fallback_user_message.trim();
-        if fallback.is_empty() {
-            lines.push("Assistant:".to_string());
-        } else {
+        if !fallback.is_empty() {
             lines.push(format!("User: {fallback}"));
-            lines.push("Assistant:".to_string());
         }
+        append_assistant = true;
     } else if !lines
         .last()
         .map(|line| line.starts_with("Assistant:"))
         .unwrap_or(false)
     {
+        append_assistant = true;
+    }
+
+    if append_assistant {
         lines.push("Assistant:".to_string());
     }
 

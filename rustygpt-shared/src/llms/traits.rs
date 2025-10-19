@@ -264,7 +264,7 @@ mod tests {
         type Model = MockModel;
 
         async fn new(_config: LLMConfig) -> LLMResult<Self> {
-            Ok(MockProvider)
+            Ok(Self)
         }
 
         async fn load_model(&self, _model_path: &str) -> LLMResult<Self::Model> {

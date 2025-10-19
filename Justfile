@@ -43,7 +43,7 @@ dev:
 check:
     cargo fmt -- --check
     cargo check --workspace
-    cargo clippy --workspace --all --all-targets --all-features -- -D warnings -D clippy::pedantic
+    cargo clippy --workspace --all-targets --all-features -- -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery -Aclippy::multiple_crate_versions
 
 # Auto-fix what can be
 fix:
@@ -62,11 +62,11 @@ build-release:
 
 # Test everything
 test:
-    cargo test --workspace --lib -- --test-threads=1
+    cargo test --workspace --lib
 
 # Run all tests and generate coverage report
 coverage:
-    cargo llvm-cov --workspace --lib --html --output-dir .coverage -- --test-threads=1
+    cargo llvm-cov --workspace --lib --html --output-dir .coverage
     @echo "📊 Coverage report generated at file://$PWD/.coverage/html/index.html"
 
 docs:

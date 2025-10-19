@@ -34,16 +34,15 @@ async fn well_known_handler(
     }
 
     let requested_path = format!(".well-known/{path}");
-    if let Some(entry) = config
+    config
         .well_known
         .entries
         .iter()
         .find(|candidate| candidate.path == requested_path)
-    {
-        Ok(build_response(entry))
-    } else {
-        Err(StatusCode::NOT_FOUND)
-    }
+        .map_or_else(
+            || Err(StatusCode::NOT_FOUND),
+            |entry| Ok(build_response(entry)),
+        )
 }
 
 pub fn create_router_well_known() -> Router<Arc<AppState>> {

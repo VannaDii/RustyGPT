@@ -58,12 +58,11 @@ pub fn clean_translation_files(_trans_dir: &Path, audit_result: &AuditResult) ->
 
         // Ensure we're not removing all keys
         let used_keys = audit_result.keys_in_use.intersection(&data.all_keys);
-        if used_keys.count() == 0
-            && !content
-                .as_object()
-                .unwrap_or(&serde_json::Map::new())
-                .is_empty()
-        {
+        let has_entries = content
+            .as_object()
+            .map_or(false, |object| !object.is_empty());
+
+        if used_keys.count() == 0 && has_entries {
             println!(
                 "Warning: Would remove all keys from {}.json, skipping to avoid data loss",
                 lang_code

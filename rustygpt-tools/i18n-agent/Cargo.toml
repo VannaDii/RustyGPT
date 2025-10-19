@@ -3,6 +3,11 @@ name = "i18n-agent"
 version = "0.1.0"
 edition = "2021"
 description = "A tool for managing i18n translation files"
+license = "Apache-2.0"
+repository = "https://github.com/vanna/rusty_gpt"
+readme = "../../README.md"
+keywords = ["rustygpt", "i18n", "internationalization", "tooling"]
+categories = ["internationalization"]
 
 [dependencies]
 clap = { workspace = true }

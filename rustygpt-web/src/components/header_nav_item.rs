@@ -4,14 +4,14 @@ use yew_router::prelude::{Link, Routable};
 
 use crate::routes::AppRoute;
 
-#[derive(Properties, PartialEq)]
-pub struct HeaderNavItemProps<R: Routable + Clone + Into<AppRoute> + 'static> {
+#[derive(Properties, PartialEq, Eq)]
+pub struct HeaderNavItemProps<R: Routable + Clone + Eq + Into<AppRoute> + 'static> {
     pub route: R,
     pub current_route: Option<AppRoute>,
 }
 
 #[function_component(HeaderNavItem)]
-pub fn header_nav_item_dropdown<R: Routable + Clone + PartialEq + Into<AppRoute> + 'static>(
+pub fn header_nav_item_dropdown<R: Routable + Clone + PartialEq + Eq + Into<AppRoute> + 'static>(
     props: &HeaderNavItemProps<R>,
 ) -> Html {
     let (i18n, ..) = use_translation();

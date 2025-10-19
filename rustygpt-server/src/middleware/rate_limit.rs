@@ -51,75 +51,35 @@ impl RateLimitState {
     }
 
     pub async fn reload_from_db(&self) -> Result<(), sqlx::Error> {
-        let pool = match &self.pool {
-            Some(pool) => pool.clone(),
-            None => return Ok(()),
+        let Some(pool) = self.pool.clone() else {
+            return Ok(());
         };
 
-        let profiles = sqlx::query_as::<_, DbProfile>(
-            "SELECT profile_id, algorithm, params FROM rustygpt.sp_limits_list_profiles()",
-        )
-        .fetch_all(&pool)
-        .await?;
-
-        let mut profile_map = HashMap::new();
-        for profile in profiles {
-            if let Some(strategy) = strategy_from_profile(&profile.algorithm, &profile.params) {
-                profile_map.insert(profile.profile_id, strategy);
-            } else {
-                warn!(profile_id = %profile.profile_id, algorithm = %profile.algorithm, "unsupported rate limit algorithm");
-            }
-        }
-
-        let assignments = sqlx::query_as::<_, DbAssignment>(
-            "SELECT assignment_id, profile_id, profile_name, method, path_pattern FROM rustygpt.sp_limits_list_assignments()",
-        )
-        .fetch_all(&pool)
-        .await?;
-
-        let mut routes = Vec::with_capacity(assignments.len());
-        for assignment in assignments.iter() {
-            let Some(strategy) = profile_map.get(&assignment.profile_id) else {
-                warn!(assignment_id = %assignment.assignment_id, profile_id = %assignment.profile_id, "missing profile for assignment");
-                continue;
-            };
-
-            let method = match Method::from_bytes(assignment.method.as_bytes()) {
-                Ok(method) => method,
-                Err(_) => {
-                    warn!(assignment_id = %assignment.assignment_id, method = %assignment.method, "invalid HTTP method in rate limit assignment");
-                    continue;
-                }
-            };
-
-            routes.push(RouteStrategy {
-                method,
-                pattern: assignment.path_pattern.clone(),
-                bucket_key: assignment.path_pattern.clone(),
-                strategy: *strategy,
-                profile: assignment.profile_name.clone(),
-            });
-        }
+        let profile_map = load_profile_strategies(&pool).await?;
+        let routes = load_route_assignments(&pool, &profile_map).await?;
 
         gauge!("rustygpt_limits_profiles").set(profile_map.len() as f64);
         gauge!("rustygpt_limits_assignments").set(routes.len() as f64);
 
-        let mut guard = self.assignments.write().await;
-        *guard = routes;
+        self.replace_routes(routes).await;
 
         Ok(())
     }
 
     async fn select_strategy(&self, method: &Method, path: &str) -> AppliedStrategy {
-        let assignments = self.assignments.read().await;
-        if let Some(route) = assignments
-            .iter()
-            .find(|route| route.method == *method && route.matches(path))
-        {
+        let matched = {
+            let assignments = self.assignments.read().await;
+            assignments
+                .iter()
+                .find(|route| route.method == *method && route.matches(path))
+                .cloned()
+        };
+
+        if let Some(route) = matched {
             return AppliedStrategy {
                 strategy: route.strategy,
-                bucket_key: route.bucket_key.clone(),
-                profile: route.profile.clone(),
+                bucket_key: route.bucket_key,
+                profile: route.profile,
             };
         }
 
@@ -151,6 +111,67 @@ impl RateLimitState {
             }
         })
     }
+
+    async fn replace_routes(&self, routes: Vec<RouteStrategy>) {
+        let mut guard = self.assignments.write().await;
+        *guard = routes;
+    }
+}
+
+async fn load_profile_strategies(pool: &PgPool) -> Result<HashMap<Uuid, Strategy>, sqlx::Error> {
+    let profiles = sqlx::query_as::<_, DbProfile>(
+        "SELECT profile_id, algorithm, params FROM rustygpt.sp_limits_list_profiles()",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut profile_map = HashMap::with_capacity(profiles.len());
+    for profile in profiles {
+        match strategy_from_profile(&profile.algorithm, &profile.params) {
+            Some(strategy) => {
+                profile_map.insert(profile.profile_id, strategy);
+            }
+            None => {
+                warn!(profile_id = %profile.profile_id, algorithm = %profile.algorithm, "unsupported rate limit algorithm");
+            }
+        }
+    }
+
+    Ok(profile_map)
+}
+
+async fn load_route_assignments(
+    pool: &PgPool,
+    profile_map: &HashMap<Uuid, Strategy>,
+) -> Result<Vec<RouteStrategy>, sqlx::Error> {
+    let assignments = sqlx::query_as::<_, DbAssignment>(
+        "SELECT assignment_id, profile_id, profile_name, method, path_pattern FROM rustygpt.sp_limits_list_assignments()",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut routes = Vec::with_capacity(assignments.len());
+    for assignment in assignments {
+        let Some(strategy) = profile_map.get(&assignment.profile_id) else {
+            warn!(assignment_id = %assignment.assignment_id, profile_id = %assignment.profile_id, "missing profile for assignment");
+            continue;
+        };
+
+        let Ok(method) = Method::from_bytes(assignment.method.as_bytes()) else {
+            warn!(assignment_id = %assignment.assignment_id, method = %assignment.method, "invalid HTTP method in rate limit assignment");
+            continue;
+        };
+
+        routes.push(RouteStrategy {
+            method,
+            pattern: assignment.path_pattern.clone(),
+            bucket_key: assignment.path_pattern,
+            strategy: *strategy,
+            profile: assignment.profile_name,
+        });
+    }
+
+    Ok(routes)
 }
 
 #[derive(Clone)]
@@ -175,7 +196,7 @@ struct Strategy {
 }
 
 impl Strategy {
-    fn new(capacity: f64, refill_per_sec: f64) -> Self {
+    const fn new(capacity: f64, refill_per_sec: f64) -> Self {
         Self {
             capacity: capacity.max(1.0),
             refill_per_sec: refill_per_sec.max(0.1),
@@ -238,8 +259,11 @@ impl Bucket {
             return;
         }
 
-        self.tokens =
-            (self.tokens + elapsed * self.strategy.refill_per_sec).min(self.strategy.capacity);
+        self.tokens = self
+            .strategy
+            .refill_per_sec
+            .mul_add(elapsed, self.tokens)
+            .min(self.strategy.capacity);
         self.last_refill = now;
     }
 }
@@ -331,7 +355,9 @@ async fn acquire(state: &RateLimitState, key: &str, strategy: Strategy) -> RateL
         .entry(key.to_string())
         .or_insert_with(|| Bucket::new(strategy));
     bucket.strategy = strategy;
-    bucket.take()
+    let outcome = bucket.take();
+    drop(guard);
+    outcome
 }
 
 fn attach_rate_limit_headers(

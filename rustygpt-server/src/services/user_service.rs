@@ -12,7 +12,7 @@ pub struct UserService {
 
 impl UserService {
     /// Construct a new service bound to the provided connection pool.
-    pub fn new(pool: PgPool) -> Self {
+    pub const fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 

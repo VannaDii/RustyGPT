@@ -75,3 +75,17 @@ To roll out cookie auth safely:
 1. Apply the PostgreSQL migrations in order: `010_auth.sql`, `034_limits.sql`, `040_rate_limits.sql`, `050_sse_persistence.sql`.
 2. Deploy the backend (`rustygpt-server`) so the new endpoints are available.
 3. Deploy the shared crate followed by the web client and CLI to pick up the new DTOs and cookie handling.
+
+## Session Cutover Runbook
+
+1. **Preflight** – confirm `config.security.cookie.secure = true` in production, and verify `features.auth_v1` is enabled in both application configs and environment variables.
+2. **Drain legacy sessions** – set a maintenance banner and reduce the idle timeout via `SESSION_IDLE_SECONDS` so stale device-code sessions expire quickly. Monitor `rustygpt_auth_active_sessions` gauge in Grafana.
+3. **Roll deploy** – apply migrations, roll the new server build, then redeploy web + CLI artifacts. Validate `/api/auth/me` responds with the current profile and session timestamps.
+4. **Force rotation** – run `SELECT rustygpt.sp_auth_mark_rotation(id, 'cutover') FROM rustygpt.users;` to ensure logged-in clients receive refreshed cookies with the updated role snapshot.
+5. **Smoke test** – use the CLI: `rustygpt session login` → `rustygpt session me`. For the web app, confirm the login flow redirects to the dashboard and that the header shows the authenticated user.
+6. **Post deployment** – watch `rustygpt_auth_session_rotations_total` and Grafana dashboards from `deploy/grafana/auth.json`. Investigate any spikes in `session_conflict` responses or CSRF errors.
+
+### Prometheus & Grafana Validation
+
+- Ensure Prometheus is scraping `/metrics` after deploy. `promtool query instant http://prometheus/api/v1/query 'sum(rustygpt_auth_logins_total)'` is a quick liveness check.
+- Import `deploy/grafana/auth.json` during the rollout to visualise rotation and rejection trends. Keep the JSON in sync with metric names when adding new counters.

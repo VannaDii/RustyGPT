@@ -1,7 +1,7 @@
 use shared::models::{AuthenticatedUser, SessionSummary};
 use yewdux::Store;
 
-#[derive(Default, Clone, PartialEq, Store)]
+#[derive(Default, Clone, PartialEq, Eq, Store)]
 pub struct AppState {
     pub is_setup: Option<bool>,
     pub user: Option<AuthenticatedUser>,

@@ -1,5 +1,5 @@
-pub(crate) mod header;
-pub(crate) mod layout;
-pub(crate) mod page_content;
-pub(crate) mod setup;
-pub(crate) mod setup_validation;
+pub mod header;
+pub mod layout;
+pub mod page_content;
+pub mod setup;
+pub mod setup_validation;

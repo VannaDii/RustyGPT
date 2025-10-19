@@ -29,7 +29,7 @@ struct RequestMetadata {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct HttpMakeSpan;
+pub struct HttpMakeSpan;
 
 impl<B> MakeSpan<B> for HttpMakeSpan {
     fn make_span(&mut self, request: &Request<B>) -> Span {
@@ -69,7 +69,7 @@ impl<B> MakeSpan<B> for HttpMakeSpan {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct HttpOnResponse;
+pub struct HttpOnResponse;
 
 impl<B> OnResponse<B> for HttpOnResponse {
     fn on_response(self, response: &Response<B>, latency: Duration, span: &Span) {
@@ -128,7 +128,7 @@ impl<B> OnResponse<B> for HttpOnResponse {
 }
 
 /// Handle incoming request logging
-pub(crate) fn on_request_handler(req: &Request<Body>, span: &Span) {
+pub fn on_request_handler(req: &Request<Body>, span: &Span) {
     span.in_scope(|| {
         info!(
             method = %req.method(),
@@ -140,7 +140,7 @@ pub(crate) fn on_request_handler(req: &Request<Body>, span: &Span) {
 }
 
 /// Handle failure logging
-pub(crate) fn on_failure_handler(error: ServerErrorsFailureClass, latency: Duration, span: &Span) {
+pub fn on_failure_handler(error: ServerErrorsFailureClass, latency: Duration, span: &Span) {
     span.in_scope(|| {
         error!(
             error = %error,

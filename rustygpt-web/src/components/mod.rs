@@ -1,14 +1,14 @@
-pub(crate) mod header_nav_item;
-pub(crate) mod language_selector;
-pub(crate) mod language_selector_button;
-pub(crate) mod loading;
-pub(crate) mod message_node;
-pub(crate) mod theme_switcher;
-pub(crate) mod thread_composer;
-pub(crate) mod thread_list;
-pub(crate) mod thread_view;
-pub(crate) mod typing_indicator;
-pub(crate) mod user_dropdown;
+pub mod header_nav_item;
+pub mod language_selector;
+pub mod language_selector_button;
+pub mod loading;
+pub mod message_node;
+pub mod theme_switcher;
+pub mod thread_composer;
+pub mod thread_list;
+pub mod thread_view;
+pub mod typing_indicator;
+pub mod user_dropdown;
 
 // Re-export components for convenience
 pub use thread_composer::ThreadComposer;

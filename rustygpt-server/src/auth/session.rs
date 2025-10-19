@@ -131,7 +131,7 @@ pub struct SessionService {
 }
 
 impl SessionService {
-    pub fn new(pool: PgPool, config: Arc<Config>) -> Self {
+    pub const fn new(pool: PgPool, config: Arc<Config>) -> Self {
         Self { pool, config }
     }
 
@@ -151,7 +151,7 @@ impl SessionService {
                 SessionError::TimeConversion(format!("failed to convert cookie expiry: {err}"))
             })?;
         let max_age = (expires_utc - OffsetDateTime::now_utc()).max(TimeDuration::seconds(0));
-        let same_site = self.map_same_site(self.config.security.cookie.same_site);
+        let same_site = Self::map_same_site(self.config.security.cookie.same_site);
 
         let mut builder = Cookie::build((
             self.config.session.session_cookie_name.clone(),
@@ -199,7 +199,7 @@ impl SessionService {
         Ok(builder.build())
     }
 
-    fn map_same_site(&self, value: CookieSameSite) -> SameSite {
+    const fn map_same_site(value: CookieSameSite) -> SameSite {
         match value {
             CookieSameSite::Lax => SameSite::Lax,
             CookieSameSite::Strict => SameSite::Strict,
@@ -362,10 +362,7 @@ impl SessionService {
         let needs_rotation =
             row.requires_rotation || snapshot_mismatch || (row.expires_at - now) <= threshold;
 
-        let mut rotated = false;
-        let mut bundle = None;
-
-        if needs_rotation {
+        let (rotated, bundle) = if needs_rotation {
             let rotated_bundle = self
                 .rotate_session(&mut conn, row.session_id, row.user_id, &roles, metadata)
                 .await?;
@@ -374,12 +371,12 @@ impl SessionService {
             row.issued_at = rotated_bundle.issued_at;
             row.expires_at = rotated_bundle.expires_at;
             row.absolute_expires_at = rotated_bundle.absolute_expires_at;
-            rotated = true;
-            bundle = Some(rotated_bundle);
+            (true, Some(rotated_bundle))
         } else {
             self.touch_session(&mut conn, row.session_id, metadata)
                 .await?;
-        }
+            (false, None)
+        };
 
         drop(conn);
 
@@ -721,4 +718,71 @@ struct SessionRefreshRow {
     issued_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
     absolute_expires_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::config::server::Profile;
+    use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+
+    fn service_with_config(config: Config) -> SessionService {
+        let pool = PgPoolOptions::new().connect_lazy_with(
+            PgConnectOptions::new()
+                .host("localhost")
+                .username("postgres")
+                .password("postgres")
+                .database("postgres"),
+        );
+        SessionService::new(pool, Arc::new(config))
+    }
+
+    #[tokio::test]
+    async fn build_cookie_honours_security_settings() {
+        let mut config = Config::default_for_profile(Profile::Test);
+        config.security.cookie.secure = true;
+        config.security.cookie.same_site = CookieSameSite::Strict;
+        config.security.cookie.domain = Some("example.com".into());
+
+        let service = service_with_config(config.clone());
+        let expires_at = Utc::now() + Duration::hours(1);
+        let cookie = service
+            .build_cookie("token", expires_at)
+            .expect("cookie built");
+
+        assert!(cookie.secure().unwrap());
+        assert_eq!(cookie.same_site().unwrap(), SameSite::Strict);
+        assert_eq!(cookie.domain(), config.security.cookie.domain.as_deref());
+    }
+
+    #[tokio::test]
+    async fn csrf_cookie_is_strict_and_secure() {
+        let mut config = Config::default_for_profile(Profile::Test);
+        config.security.cookie.secure = true;
+        let service = service_with_config(config);
+        let expires_at = Utc::now() + Duration::hours(1);
+
+        let csrf_cookie = service
+            .build_csrf_cookie("csrf", expires_at)
+            .expect("csrf cookie");
+
+        assert!(csrf_cookie.secure().unwrap());
+        assert_eq!(csrf_cookie.same_site().unwrap(), SameSite::Strict);
+    }
+
+    #[test]
+    fn map_same_site_covers_variants() {
+        assert_eq!(
+            SessionService::map_same_site(CookieSameSite::Lax),
+            SameSite::Lax
+        );
+        assert_eq!(
+            SessionService::map_same_site(CookieSameSite::Strict),
+            SameSite::Strict
+        );
+        assert_eq!(
+            SessionService::map_same_site(CookieSameSite::None),
+            SameSite::None
+        );
+    }
 }

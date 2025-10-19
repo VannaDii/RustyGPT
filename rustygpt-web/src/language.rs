@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 /// Information about a supported language
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct LanguageInfo {
     pub code: &'static str,
     pub flag: &'static str,

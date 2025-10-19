@@ -32,22 +32,22 @@ impl ChatServiceError {
         if let sqlx::Error::Database(db) = &err {
             let message = db.message();
             if message.contains("RGP.401") {
-                return ChatServiceError::Forbidden(message.to_string());
+                return Self::Forbidden(message.to_string());
             }
             if message.contains("RGP.403") {
-                return ChatServiceError::Forbidden(message.to_string());
+                return Self::Forbidden(message.to_string());
             }
             if message.contains("RGP.404") {
-                return ChatServiceError::NotFound(message.to_string());
+                return Self::NotFound(message.to_string());
             }
             if message.contains("RGP.VALIDATION") {
-                return ChatServiceError::Validation(message.to_string());
+                return Self::Validation(message.to_string());
             }
             if message.contains("RGP.429") {
-                return ChatServiceError::RateLimited(message.to_string());
+                return Self::RateLimited(message.to_string());
             }
         }
-        ChatServiceError::Database(err)
+        Self::Database(err)
     }
 }
 
@@ -77,7 +77,7 @@ pub struct AcceptInviteResult {
 }
 
 impl ChatService {
-    pub fn new(pool: PgPool) -> Self {
+    pub const fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 

@@ -26,7 +26,7 @@ pub fn login_page(props: &LoginPageProps) -> Html {
         let error_handle = error.clone();
         let loading_handle = loading.clone();
         let on_success = props.on_success.clone();
-        let navigator = navigator.clone();
+        let navigator = navigator;
         Callback::from(move |event: SubmitEvent| {
             event.prevent_default();
             let email_value = (*email_handle).clone();

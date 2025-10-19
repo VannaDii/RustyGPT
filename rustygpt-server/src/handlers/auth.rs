@@ -96,7 +96,7 @@ fn build_authenticated_user(user: &crate::auth::session::SessionUser) -> Authent
     }
 }
 
-fn build_session_summary(bundle: &crate::auth::session::SessionBundle) -> SessionSummary {
+const fn build_session_summary(bundle: &crate::auth::session::SessionBundle) -> SessionSummary {
     SessionSummary {
         id: bundle.session_id,
         issued_at: Timestamp(bundle.issued_at),

@@ -26,15 +26,13 @@ struct Task {
 impl Task {
     /// Derive a base name from the working directory and command.
     fn derive_base_name(&self) -> String {
-        if let Some(ref dir) = self.working_dir {
-            if let Some(dir_name) = dir.file_name() {
-                format!("{}:{}", dir_name.to_string_lossy(), self.command)
-            } else {
-                self.command.clone()
-            }
-        } else {
-            self.command.clone()
-        }
+        self.working_dir
+            .as_ref()
+            .and_then(|dir| {
+                dir.file_name()
+                    .map(|dir_name| format!("{}:{}", dir_name.to_string_lossy(), self.command))
+            })
+            .unwrap_or_else(|| self.command.clone())
     }
 }
 
@@ -146,10 +144,10 @@ fn parse_color(s: &str) -> Color {
 fn parse_command(cmd_str: &str, default_cwd: Option<PathBuf>) -> Task {
     // Split the input into a prefix (everything before the colon, if present)
     // and the remainder (the actual command and arguments).
-    let (prefix_opt, command_str) = match cmd_str.find(':') {
-        Some(idx) => (Some(cmd_str[..idx].trim()), cmd_str[idx + 1..].trim()),
-        None => (None, cmd_str.trim()),
-    };
+    let (prefix_opt, command_str) = cmd_str.split_once(':').map_or_else(
+        || (None, cmd_str.trim()),
+        |(prefix, rest)| (Some(prefix.trim()), rest.trim()),
+    );
 
     // Parse the command and its arguments using shlex.
     let parts = shlex::split(command_str).expect("Failed to parse command arguments");
@@ -158,33 +156,21 @@ fn parse_command(cmd_str: &str, default_cwd: Option<PathBuf>) -> Task {
     }
 
     // Extract name and working directory from the prefix if available.
-    let (name, working_dir) = if let Some(prefix) = prefix_opt {
-        if let Some(at_index) = prefix.find('@') {
-            // The prefix is of the form "<name>@<working_dir>"
-            let name_part = prefix[..at_index].trim();
-            let cwd_part = prefix[at_index + 1..].trim();
-            (
-                if name_part.is_empty() {
-                    None
-                } else {
-                    Some(name_part.to_string())
-                },
-                Some(PathBuf::from(cwd_part)),
-            )
-        } else {
-            // The prefix only specifies the name.
-            (
-                if prefix.is_empty() {
-                    None
-                } else {
-                    Some(prefix.to_string())
-                },
-                default_cwd,
-            )
-        }
-    } else {
-        (None, default_cwd)
-    };
+    let prefix_data = prefix_opt.map(|prefix| {
+        prefix.split_once('@').map_or_else(
+            || ((!prefix.is_empty()).then_some(prefix.to_string()), None),
+            |(name_part, cwd_part)| {
+                let trimmed_name = name_part.trim();
+                (
+                    (!trimmed_name.is_empty()).then_some(trimmed_name.to_string()),
+                    Some(PathBuf::from(cwd_part.trim())),
+                )
+            },
+        )
+    });
+
+    let (name, working_dir_override) = prefix_data.unwrap_or((None, None));
+    let working_dir = working_dir_override.or(default_cwd);
 
     Task {
         name,
@@ -195,7 +181,7 @@ fn parse_command(cmd_str: &str, default_cwd: Option<PathBuf>) -> Task {
 }
 
 /// Returns a unique icon for each color for accessibility, ensuring varied shapes.
-fn icon_for_color(color: Color) -> &'static str {
+const fn icon_for_color(color: Color) -> &'static str {
     match color {
         Color::Blue => "🔵",          // Blue circle
         Color::BrightYellow => "🟨",  // Yellow square

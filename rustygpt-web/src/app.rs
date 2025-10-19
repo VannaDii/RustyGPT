@@ -4,7 +4,7 @@ use crate::models::app_state::AppState;
 use crate::pages::login::LoginPage;
 use crate::routes::MainRoute;
 use reqwest::StatusCode;
-use shared::models::LoginResponse;
+use shared::models::{LoginResponse, MeResponse};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use yew::suspense::Suspense;
@@ -24,11 +24,10 @@ pub fn app() -> Html {
     let app_state = use_state(|| None::<AppState>);
 
     {
-        let app_state = app_state.clone();
-        let store_dispatch = store_dispatch.clone();
+        let app_state_handle = app_state.clone();
+        let store_dispatch_handle = store_dispatch.clone();
         use_effect_with((), move |_| {
-            let app_state = app_state.clone();
-            let store_dispatch = store_dispatch.clone();
+            let app_state_handle = app_state_handle.clone();
             spawn_local(async move {
                 let client = RustyGPTClient::shared();
                 let is_setup = client
@@ -42,21 +41,21 @@ pub fn app() -> Html {
                         is_setup: Some(false),
                         ..Default::default()
                     };
-                    app_state.set(Some(state.clone()));
-                    store_dispatch.set(state);
+                    app_state_handle.set(Some(state.clone()));
+                    store_dispatch_handle.set(state);
                     return;
                 }
 
                 match client.get_profile().await {
-                    Ok(profile) => {
+                    Ok(MeResponse { user, session }) => {
                         let state = AppState {
                             is_setup: Some(true),
-                            user: Some(profile.user.clone()),
-                            session: Some(profile.session.clone()),
+                            user: Some(user),
+                            session: Some(session),
                             csrf_token: client.current_csrf_token(),
                         };
-                        app_state.set(Some(state.clone()));
-                        store_dispatch.set(state);
+                        app_state_handle.set(Some(state.clone()));
+                        store_dispatch_handle.set(state);
                     }
                     Err(err) => {
                         let unauthorized = err
@@ -80,8 +79,8 @@ pub fn app() -> Html {
                                 ..Default::default()
                             }
                         };
-                        app_state.set(Some(state.clone()));
-                        store_dispatch.set(state);
+                        app_state_handle.set(Some(state.clone()));
+                        store_dispatch_handle.set(state);
                     }
                 }
             });
@@ -89,11 +88,9 @@ pub fn app() -> Html {
         });
     }
 
-    let state_setter = app_state.clone();
-    let logout_dispatch = store_dispatch.clone();
     let logout_callback = {
-        let state_setter = state_setter.clone();
-        let logout_dispatch = logout_dispatch.clone();
+        let state_setter = app_state.clone();
+        let logout_dispatch = store_dispatch.clone();
         Callback::from(move |_| {
             let client = RustyGPTClient::shared();
             client.set_csrf_token(None);
@@ -117,30 +114,33 @@ pub fn app() -> Html {
                         <Setup />
                     },
                     Some(ref state) if state.is_setup == Some(true) && state.user.is_none() => {
-                        let login_dispatch = store_dispatch.clone();
                         let on_success = {
-                            let state_setter = state_setter.clone();
-                            let login_dispatch = login_dispatch.clone();
+                            let state_setter = app_state.clone();
+                            let store_dispatch = store_dispatch;
                             Callback::from(move |login: LoginResponse| {
                                 let client = RustyGPTClient::shared();
-                                client.set_csrf_token(Some(login.csrf_token.clone()));
+                                let LoginResponse {
+                                    user,
+                                    session,
+                                    csrf_token,
+                                } = login;
+                                client.set_csrf_token(Some(csrf_token.clone()));
                                 let state = AppState {
                                     is_setup: Some(true),
-                                    user: Some(login.user.clone()),
-                                    session: Some(login.session.clone()),
-                                    csrf_token: Some(login.csrf_token.clone()),
+                                    user: Some(user),
+                                    session: Some(session),
+                                    csrf_token: Some(csrf_token),
                                 };
                                 state_setter.set(Some(state.clone()));
-                                login_dispatch.set(state);
+                                store_dispatch.set(state);
                             })
                         };
                         html! { <LoginPage {on_success} /> }
                     }
                     Some(ref state) if state.is_setup == Some(true) => {
-                        let logout_cb = logout_callback.clone();
                         html! {
                             <BrowserRouter>
-                                <Switch<MainRoute> render={move |route| crate::routes::switch_with_logout(route, logout_cb.clone())} />
+                                <Switch<MainRoute> render={move |route| crate::routes::switch_with_logout(route, logout_callback.clone())} />
                             </BrowserRouter>
                         }
                     },

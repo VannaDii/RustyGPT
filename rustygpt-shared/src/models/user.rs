@@ -16,7 +16,7 @@ pub enum UserRole {
 impl UserRole {
     /// Return the canonical string representation expected by persistence layers.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Admin => "admin",
             Self::Member => "member",

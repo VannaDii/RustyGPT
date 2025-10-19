@@ -57,10 +57,10 @@ fn parse_command(
 ) -> (Option<String>, String, Vec<String>, Option<PathBuf>) {
     // Split the input into a prefix (everything before the colon, if present)
     // and the remainder (the actual command and arguments).
-    let (prefix_opt, command_str) = match cmd_str.find(':') {
-        Some(idx) => (Some(cmd_str[..idx].trim()), cmd_str[idx + 1..].trim()),
-        None => (None, cmd_str.trim()),
-    };
+    let (prefix_opt, command_str) = cmd_str.split_once(':').map_or_else(
+        || (None, cmd_str.trim()),
+        |(prefix, rest)| (Some(prefix.trim()), rest.trim()),
+    );
 
     // Parse the command and its arguments using shlex.
     let parts = shlex::split(command_str).expect("Failed to parse command arguments");
@@ -69,33 +69,21 @@ fn parse_command(
     }
 
     // Extract name and working directory from the prefix if available.
-    let (name, working_dir) = if let Some(prefix) = prefix_opt {
-        if let Some(at_index) = prefix.find('@') {
-            // The prefix is of the form "<name>@<working_dir>"
-            let name_part = prefix[..at_index].trim();
-            let cwd_part = prefix[at_index + 1..].trim();
-            (
-                if name_part.is_empty() {
-                    None
-                } else {
-                    Some(name_part.to_string())
-                },
-                Some(PathBuf::from(cwd_part)),
-            )
-        } else {
-            // The prefix only specifies the name.
-            (
-                if prefix.is_empty() {
-                    None
-                } else {
-                    Some(prefix.to_string())
-                },
-                default_cwd,
-            )
-        }
-    } else {
-        (None, default_cwd)
-    };
+    let prefix_data = prefix_opt.map(|prefix| {
+        prefix.split_once('@').map_or_else(
+            || ((!prefix.is_empty()).then_some(prefix.to_string()), None),
+            |(name_part, cwd_part)| {
+                let trimmed_name = name_part.trim();
+                (
+                    (!trimmed_name.is_empty()).then_some(trimmed_name.to_string()),
+                    Some(PathBuf::from(cwd_part.trim())),
+                )
+            },
+        )
+    });
+
+    let (name, working_dir_override) = prefix_data.unwrap_or((None, None));
+    let working_dir = working_dir_override.or(default_cwd);
 
     (name, parts[0].clone(), parts[1..].to_vec(), working_dir)
 }

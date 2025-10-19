@@ -35,6 +35,25 @@ pub fn header(props: &HeaderProps) -> Html {
     let user_opt = (*user).clone();
     let is_authenticated = user_opt.is_some();
 
+    let render_routes = |routes: &[AppRoute]| -> Html {
+        html! {
+            { for routes.iter().map(|route| match route {
+                AppRoute::Admin(admin_route) => html! {
+                    <HeaderNavItem<AdminRoute>
+                        current_route={props.current_route.clone()}
+                        route={admin_route.clone()}
+                    />
+                },
+                AppRoute::Main(main_route) => html! {
+                    <HeaderNavItem<MainRoute>
+                        current_route={props.current_route.clone()}
+                        route={main_route.clone()}
+                    />
+                },
+            }) }
+        }
+    };
+
     html! {
         <nav class="navbar justify-between bg-base-300">
             <a class="btn btn-ghost text-lg">
@@ -50,66 +69,39 @@ pub fn header(props: &HeaderProps) -> Html {
                 tabindex="0"
                 class="dropdown-content menu z-[1] bg-base-200 p-6 rounded-box shadow w-56 gap-2"
                 >
-                { if let Some(routes) = &props.header_routes {
-                    html! {
-                        { for routes.iter().map(|route| html! {
-                            if let AppRoute::Admin(admin_route) = route {
-                                <HeaderNavItem<AdminRoute>
-                                    current_route={props.current_route.clone()}
-                                    route={admin_route.clone()}
-                                />
-                            } else if let AppRoute::Main(main_route) = route {
-                                <HeaderNavItem<MainRoute>
-                                    current_route={props.current_route.clone()}
-                                    route={main_route.clone()}
-                                />
-                            }
-                        })}
-                    }
-                } else {
-                    html!{}
-                }}
+                {
+                    props
+                        .header_routes
+                        .as_ref()
+                        .map_or_else(|| html! {}, |routes| render_routes(routes))
+                }
                 </ul>
             </div>
             <ul class="hidden menu sm:menu-horizontal">
-                { if let Some(routes) = &props.header_routes {
-                    html! {
-                        { for routes.iter().map(|route| html! {
-                            if let AppRoute::Admin(admin_route) = route {
-                                <HeaderNavItem<AdminRoute>
-                                    current_route={props.current_route.clone()}
-                                    route={admin_route.clone()}
-                                />
-                            } else if let AppRoute::Main(main_route) = route {
-                                <HeaderNavItem<MainRoute>
-                                    current_route={props.current_route.clone()}
-                                    route={main_route.clone()}
-                                />
-                            }
-                        })}
-                    }
-                } else {
-                    html!{}
-                }}
+                {
+                    props
+                        .header_routes
+                        .as_ref()
+                        .map_or_else(|| html! {}, |routes| render_routes(routes))
+                }
             </ul>
             <div class="hidden sm:flex">
                 <LanguageSelector />
                 <ThemeSwitcher />
                 {
-                    if let Some(user) = user_opt.as_ref() {
-                        html! {
+                    user_opt.as_ref().map_or_else(
+                        || html! {
+                            <Link<MainRoute> to={MainRoute::Login} classes="btn btn-primary btn-sm">
+                                {i18n.t("header.login")}
+                            </Link<MainRoute>>
+                        },
+                        |user| html! {
                             <>
                                 <span class="text-sm text-base-content/80 mr-2">{ &user.username }</span>
                                 <UserDropdown on_logout={props.on_logout.clone()} />
                             </>
-                        }
-                    } else {
-                        html! {
-                            <Link<MainRoute> to={MainRoute::Login} classes="btn btn-primary btn-sm">
-                                {i18n.t("header.login")}
-                            </Link<MainRoute>>
-                        }
-                    }
+                        },
+                    )
                 }
             </div>
             <div class="sm:hidden flex items-center gap-2">

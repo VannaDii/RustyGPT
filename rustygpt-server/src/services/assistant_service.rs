@@ -172,6 +172,7 @@ impl AssistantService {
 
         let arc = Arc::new(model);
         guard.insert(cache_key.to_string(), arc.clone());
+        drop(guard);
         Ok(arc)
     }
 
@@ -226,12 +227,14 @@ impl AssistantMetrics {
         let key = format!("{provider}::{model}");
         let count = guard.entry(key).or_insert(0);
         *count += 1;
+        let current = *count;
+        drop(guard);
         metrics::gauge!(
             "llm_active_sessions",
             "provider" => provider.to_string(),
             "model" => model.to_string()
         )
-        .set(*count as f64);
+        .set(current as f64);
     }
 
     fn decrement(&self, provider: &str, model: &str) {
@@ -240,18 +243,20 @@ impl AssistantMetrics {
             .lock()
             .expect("assistant metrics mutex poisoned");
         let key = format!("{provider}::{model}");
-        let current = if let Some(count) = guard.get_mut(&key) {
+        let mut remove_entry = false;
+        let current = guard.get_mut(&key).map_or(0, |count| {
             if *count > 0 {
                 *count -= 1;
             }
-            let value = *count;
-            if value == 0 {
-                guard.remove(&key);
+            if *count == 0 {
+                remove_entry = true;
             }
-            value
-        } else {
-            0
-        };
+            *count
+        });
+        if remove_entry {
+            guard.remove(&key);
+        }
+        drop(guard);
         metrics::gauge!(
             "llm_active_sessions",
             "provider" => provider.to_string(),

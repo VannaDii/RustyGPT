@@ -44,7 +44,7 @@ impl ErrorResponse {
     ///
     /// # Returns
     /// `true` if details are present, `false` otherwise.
-    pub fn has_details(&self) -> bool {
+    pub const fn has_details(&self) -> bool {
         self.details.is_some()
     }
 }

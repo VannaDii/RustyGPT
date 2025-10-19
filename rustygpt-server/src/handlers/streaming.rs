@@ -107,49 +107,7 @@ impl StreamHub {
 
         let _ = channel.sender.send(stamped);
 
-        if let Some(store) = &self.persistence {
-            match serde_json::to_value(&event) {
-                Ok(json_payload) => {
-                    let record = StreamEventRecord {
-                        sequence: sequence as i64,
-                        event_id: event_id(sequence, &event)
-                            .unwrap_or_else(|| sequence.to_string()),
-                        event_type: event_name(&event).to_string(),
-                        payload: json_payload,
-                        root_message_id: event_root_id(&event),
-                    };
-                    if let Err(err) = store.record_event(conversation_id, &record).await {
-                        warn!(error = %err, "failed to persist SSE event");
-                    }
-                    if let Some(cfg) = &self.persistence_config {
-                        let retention = Duration::from_secs(
-                            u64::from(cfg.retention_hours).saturating_mul(3600),
-                        );
-                        let hard_limit = if cfg.max_events_per_user > 0 {
-                            Some(cfg.max_events_per_user)
-                        } else {
-                            None
-                        };
-                        if retention > Duration::ZERO || hard_limit.is_some() {
-                            if let Err(err) = store
-                                .prune_events(
-                                    conversation_id,
-                                    retention,
-                                    cfg.prune_batch_size,
-                                    hard_limit,
-                                )
-                                .await
-                            {
-                                warn!(error = %err, "failed to prune SSE history");
-                            }
-                        }
-                    }
-                }
-                Err(err) => {
-                    warn!(error = %err, "failed to encode SSE event for persistence");
-                }
-            }
-        }
+        persist_event(self, conversation_id, sequence, &event).await;
     }
 
     pub async fn subscribe(
@@ -205,53 +163,135 @@ impl StreamHub {
         match query_result {
             Ok(records) => records
                 .into_iter()
-                .filter_map(|record| {
-                    let PersistedStreamEvent {
-                        sequence,
-                        event_id: stored_event_id,
-                        event_type: stored_event_type,
-                        payload,
-                        root_message_id: stored_root_id,
-                        ..
-                    } = record;
-
-                    let sequence = match u64::try_from(sequence) {
-                        Ok(value) => value,
-                        Err(_) => return None,
-                    };
-
-                    match serde_json::from_value::<ConversationStreamEvent>(payload) {
-                        Ok(event) => {
-                            let computed_type = event_name(&event);
-                            if stored_event_type != computed_type {
-                                warn!(stored = %stored_event_type, computed = %computed_type, "SSE event type mismatch in persistence");
-                            }
-
-                            if let Some(root_id) = stored_root_id {
-                                if Some(root_id) != event_root_id(&event) {
-                                    warn!(stored = %root_id, "SSE event root mismatch in persistence");
-                                }
-                            }
-
-                            if let Some(computed_id) = event_id(sequence, &event) {
-                                if stored_event_id != computed_id {
-                                    warn!(stored = %stored_event_id, computed = %computed_id, "SSE event id mismatch in persistence");
-                                }
-                            }
-
-                            Some((sequence, event))
-                        }
-                        Err(err) => {
-                            warn!(error = %err, "failed to deserialize persisted SSE event");
-                            None
-                        }
-                    }
-                })
+                .filter_map(convert_persisted_record)
                 .collect(),
             Err(err) => {
                 warn!(error = %err, "failed to load persisted SSE history");
                 Vec::new()
             }
+        }
+    }
+}
+
+async fn persist_event(
+    hub: &StreamHub,
+    conversation_id: Uuid,
+    sequence: u64,
+    event: &ConversationStreamEvent,
+) {
+    let Some(store) = &hub.persistence else {
+        return;
+    };
+
+    match serde_json::to_value(event) {
+        Ok(json_payload) => {
+            let record = StreamEventRecord {
+                sequence: sequence as i64,
+                event_id: event_id(sequence, event).unwrap_or_else(|| sequence.to_string()),
+                event_type: event_name(event).to_string(),
+                payload: json_payload,
+                root_message_id: event_root_id(event),
+            };
+
+            if let Err(err) = store.record_event(conversation_id, &record).await {
+                warn!(error = %err, "failed to persist SSE event");
+            }
+
+            prune_history(hub, store, conversation_id).await;
+        }
+        Err(err) => {
+            warn!(error = %err, "failed to encode SSE event for persistence");
+        }
+    }
+}
+
+async fn prune_history(hub: &StreamHub, store: &Arc<dyn SsePersistence>, conversation_id: Uuid) {
+    let Some(cfg) = &hub.persistence_config else {
+        return;
+    };
+    if cfg.max_events_per_user == 0 {
+        return;
+    }
+
+    let retention = Duration::from_secs(u64::from(cfg.retention_hours).saturating_mul(3600));
+    let hard_limit = (cfg.max_events_per_user > 0).then_some(cfg.max_events_per_user);
+
+    if retention == Duration::ZERO && hard_limit.is_none() {
+        return;
+    }
+
+    if let Err(err) = store
+        .prune_events(conversation_id, retention, cfg.prune_batch_size, hard_limit)
+        .await
+    {
+        warn!(error = %err, "failed to prune SSE history");
+    }
+}
+
+fn convert_persisted_record(record: PersistedStreamEvent) -> Option<StampedEvent> {
+    let PersistedStreamEvent {
+        sequence,
+        event_id: stored_event_id,
+        event_type: stored_event_type,
+        payload,
+        root_message_id: stored_root_id,
+        ..
+    } = record;
+
+    let sequence = u64::try_from(sequence).ok()?;
+    let event = deserialize_persisted_event(payload)?;
+
+    validate_persisted_event(
+        sequence,
+        &event,
+        &stored_event_type,
+        stored_root_id,
+        &stored_event_id,
+    );
+
+    Some((sequence, event))
+}
+
+fn deserialize_persisted_event(payload: serde_json::Value) -> Option<ConversationStreamEvent> {
+    serde_json::from_value(payload)
+        .map_err(|err| {
+            warn!(error = %err, "failed to deserialize persisted SSE event");
+            err
+        })
+        .ok()
+}
+
+fn validate_persisted_event(
+    sequence: u64,
+    event: &ConversationStreamEvent,
+    stored_event_type: &str,
+    stored_root_id: Option<Uuid>,
+    stored_event_id: &str,
+) {
+    warn_on_type_mismatch(stored_event_type, event);
+    warn_on_root_mismatch(stored_root_id, event);
+    warn_on_id_mismatch(sequence, stored_event_id, event);
+}
+
+fn warn_on_type_mismatch(stored_event_type: &str, event: &ConversationStreamEvent) {
+    let computed_type = event_name(event);
+    if stored_event_type != computed_type {
+        warn!(stored = %stored_event_type, computed = %computed_type, "SSE event type mismatch in persistence");
+    }
+}
+
+fn warn_on_root_mismatch(stored_root_id: Option<Uuid>, event: &ConversationStreamEvent) {
+    if let Some(root_id) = stored_root_id {
+        if Some(root_id) != event_root_id(event) {
+            warn!(stored = %root_id, "SSE event root mismatch in persistence");
+        }
+    }
+}
+
+fn warn_on_id_mismatch(sequence: u64, stored_event_id: &str, event: &ConversationStreamEvent) {
+    if let Some(computed_id) = event_id(sequence, event) {
+        if stored_event_id != computed_id {
+            warn!(stored = %stored_event_id, computed = %computed_id, "SSE event id mismatch in persistence");
         }
     }
 }
@@ -307,7 +347,7 @@ fn convert_event(stamped: StampedEvent) -> Option<Event> {
     Some(event)
 }
 
-fn event_name(event: &ConversationStreamEvent) -> &'static str {
+const fn event_name(event: &ConversationStreamEvent) -> &'static str {
     match event {
         ConversationStreamEvent::ThreadNew { .. } => "thread.new",
         ConversationStreamEvent::ThreadActivity { .. } => "thread.activity",
@@ -335,7 +375,7 @@ fn event_id(sequence: u64, event: &ConversationStreamEvent) -> Option<String> {
     }
 }
 
-fn event_root_id(event: &ConversationStreamEvent) -> Option<Uuid> {
+const fn event_root_id(event: &ConversationStreamEvent) -> Option<Uuid> {
     match event {
         ConversationStreamEvent::ThreadNew { payload } => Some(payload.root_id),
         ConversationStreamEvent::ThreadActivity { payload } => Some(payload.root_id),
@@ -391,24 +431,27 @@ mod tests {
             conversation_id: Uuid,
             record: &StreamEventRecord,
         ) -> Result<()> {
-            let mut guard = self.records.lock().unwrap();
-            let entry = guard.entry(conversation_id).or_default();
-            let persisted = PersistedStreamEvent {
-                sequence: record.sequence,
-                event_id: record.event_id.clone(),
-                event_type: record.event_type.clone(),
-                payload: record.payload.clone(),
-                root_message_id: record.root_message_id,
-                created_at: chrono::Utc::now(),
-            };
-            if let Some(existing) = entry
-                .iter_mut()
-                .find(|existing| existing.sequence == persisted.sequence)
             {
-                *existing = persisted;
-            } else {
-                entry.push(persisted);
-                entry.sort_by_key(|rec| rec.sequence);
+                let mut guard = self.records.lock().unwrap();
+                let entry = guard.entry(conversation_id).or_default();
+                let persisted = PersistedStreamEvent {
+                    sequence: record.sequence,
+                    event_id: record.event_id.clone(),
+                    event_type: record.event_type.clone(),
+                    payload: record.payload.clone(),
+                    root_message_id: record.root_message_id,
+                    created_at: chrono::Utc::now(),
+                };
+                if let Some(existing) = entry
+                    .iter_mut()
+                    .find(|existing| existing.sequence == persisted.sequence)
+                {
+                    *existing = persisted;
+                } else {
+                    entry.push(persisted);
+                    entry.sort_by_key(|rec| rec.sequence);
+                }
+                drop(guard);
             }
             Ok(())
         }
@@ -418,8 +461,10 @@ mod tests {
             conversation_id: Uuid,
             limit: usize,
         ) -> Result<Vec<PersistedStreamEvent>> {
-            let guard = self.records.lock().unwrap();
-            let events = guard.get(&conversation_id).cloned().unwrap_or_default();
+            let events = {
+                let guard = self.records.lock().unwrap();
+                guard.get(&conversation_id).cloned().unwrap_or_default()
+            };
             Ok(events.into_iter().take(limit).collect())
         }
 
@@ -429,15 +474,17 @@ mod tests {
             last_sequence: i64,
             limit: usize,
         ) -> Result<Vec<PersistedStreamEvent>> {
-            let guard = self.records.lock().unwrap();
-            let events = guard
-                .get(&conversation_id)
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|record| record.sequence > last_sequence)
-                .take(limit)
-                .collect();
+            let events = {
+                let guard = self.records.lock().unwrap();
+                guard
+                    .get(&conversation_id)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|record| record.sequence > last_sequence)
+                    .take(limit)
+                    .collect()
+            };
             Ok(events)
         }
 
@@ -448,13 +495,17 @@ mod tests {
             prune_batch: usize,
             hard_limit: Option<usize>,
         ) -> Result<()> {
-            let mut guard = self.records.lock().unwrap();
-            if let (Some(records), Some(limit)) = (guard.get_mut(&conversation_id), hard_limit) {
-                if records.len() > limit {
-                    let excess = records.len().saturating_sub(limit);
-                    let remove = excess.min(prune_batch);
-                    records.drain(0..remove);
+            {
+                let mut guard = self.records.lock().unwrap();
+                if let (Some(records), Some(limit)) = (guard.get_mut(&conversation_id), hard_limit)
+                {
+                    if records.len() > limit {
+                        let excess = records.len().saturating_sub(limit);
+                        let remove = excess.min(prune_batch);
+                        records.drain(0..remove);
+                    }
                 }
+                drop(guard);
             }
             Ok(())
         }

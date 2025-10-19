@@ -14,7 +14,7 @@ pub fn create_router_admin() -> Router<Arc<AppState>> {
             get(admin_limits::list_profiles).post(admin_limits::create_profile),
         )
         .route(
-            "/admin/limits/profiles/:id",
+            "/admin/limits/profiles/{id}",
             put(admin_limits::update_profile).delete(admin_limits::delete_profile),
         )
         .route(
@@ -22,7 +22,7 @@ pub fn create_router_admin() -> Router<Arc<AppState>> {
             get(admin_limits::list_assignments).post(admin_limits::assign_route),
         )
         .route(
-            "/admin/limits/assignments/:id",
+            "/admin/limits/assignments/{id}",
             delete(admin_limits::delete_assignment),
         )
         .route_layer(middleware::from_fn(auth_middleware))

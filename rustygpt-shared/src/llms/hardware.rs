@@ -123,7 +123,7 @@ impl SystemHardware {
         let supports_mmap = Self::detect_mmap_support();
         let architecture = Self::detect_architecture();
 
-        Ok(SystemHardware {
+        Ok(Self {
             total_memory,
             available_memory,
             cpu_cores,
@@ -406,7 +406,7 @@ impl SystemHardware {
     }
 
     /// Detect memory mapping support
-    fn detect_mmap_support() -> bool {
+    const fn detect_mmap_support() -> bool {
         // Most Unix-like systems support mmap
         #[cfg(unix)]
         {
@@ -443,93 +443,13 @@ impl SystemHardware {
     ///
     /// [`OptimalParams`] with recommended settings for optimal performance.
     pub fn calculate_optimal_params(&self, model_size_estimate: Option<u64>) -> OptimalParams {
-        // Calculate safe memory usage (leave buffer for system)
-        let memory_buffer_percent = match self.total_memory {
-            mem if mem < 4 * 1024 * 1024 * 1024 => 0.3, // 30% buffer for systems with < 4GB
-            mem if mem < 8 * 1024 * 1024 * 1024 => 0.25, // 25% buffer for systems with < 8GB
-            mem if mem < 16 * 1024 * 1024 * 1024 => 0.2, // 20% buffer for systems with < 16GB
-            _ => 0.15,                                  // 15% buffer for systems with >= 16GB
-        };
-
-        let available_for_model =
-            (self.available_memory as f32 * (1.0 - memory_buffer_percent)) as u64;
-
-        // Calculate optimal thread count
-        let n_threads = match self.cpu_cores {
-            cores if cores <= 2 => cores.max(1),
-            cores if cores <= 4 => cores - 1, // Leave one core for system
-            cores if cores <= 8 => cores - 2, // Leave two cores for system
-            cores => cores.min(12),           // Cap at 12 for diminishing returns
-        };
-
-        // Calculate GPU layers based on GPU type and memory
-        let n_gpu_layers = match &self.gpu_type {
-            GpuType::None | GpuType::Intel => 0, // No GPU acceleration
-            GpuType::AppleSilicon => {
-                // Apple Silicon can use significant GPU acceleration
-                match self.total_memory {
-                    mem if mem >= 16 * 1024 * 1024 * 1024 => 35, // 16GB+ unified memory
-                    mem if mem >= 8 * 1024 * 1024 * 1024 => 25,  // 8GB+ unified memory
-                    _ => 15,                                     // Lower memory systems
-                }
-            }
-            GpuType::Nvidia => {
-                if let Some(gpu_mem) = self.gpu_memory {
-                    match gpu_mem {
-                        mem if mem >= 12 * 1024 * 1024 * 1024 => 35, // 12GB+ VRAM
-                        mem if mem >= 8 * 1024 * 1024 * 1024 => 28,  // 8GB+ VRAM
-                        mem if mem >= 6 * 1024 * 1024 * 1024 => 20,  // 6GB+ VRAM
-                        mem if mem >= 4 * 1024 * 1024 * 1024 => 15,  // 4GB+ VRAM
-                        _ => 10,                                     // Lower VRAM
-                    }
-                } else {
-                    // Conservative estimate without memory info
-                    15
-                }
-            }
-            GpuType::Amd => {
-                // AMD GPU support varies, be more conservative
-                if let Some(gpu_mem) = self.gpu_memory {
-                    match gpu_mem {
-                        mem if mem >= 8 * 1024 * 1024 * 1024 => 20,
-                        mem if mem >= 4 * 1024 * 1024 * 1024 => 10,
-                        _ => 5,
-                    }
-                } else {
-                    10
-                }
-            }
-        };
-
-        // Calculate context size based on available memory
-        let context_size = if let Some(model_size) = model_size_estimate {
-            // Leave enough memory for model + context + overhead
-            let remaining_memory = available_for_model.saturating_sub(model_size);
-            match remaining_memory {
-                mem if mem >= 4 * 1024 * 1024 * 1024 => 8192, // 4GB+ remaining
-                mem if mem >= 2 * 1024 * 1024 * 1024 => 4096, // 2GB+ remaining
-                mem if mem >= 1024 * 1024 * 1024 => 2048,     // 1GB+ remaining
-                _ => 1024,                                    // Conservative for low memory
-            }
-        } else {
-            // Default context sizes based on total memory
-            match self.total_memory {
-                mem if mem >= 32 * 1024 * 1024 * 1024 => 8192, // 32GB+
-                mem if mem >= 16 * 1024 * 1024 * 1024 => 4096, // 16GB+
-                mem if mem >= 8 * 1024 * 1024 * 1024 => 2048,  // 8GB+
-                _ => 1024,                                     // Conservative default
-            }
-        };
-
-        // Calculate batch size
-        let batch_size = match self.total_memory {
-            mem if mem >= 16 * 1024 * 1024 * 1024 => 1024, // 16GB+
-            mem if mem >= 8 * 1024 * 1024 * 1024 => 512,   // 8GB+
-            _ => 256,                                      // Conservative for lower memory
-        };
-
-        // Maximum model size we can safely load
-        let max_model_size = (available_for_model as f32 * 0.7) as u64; // Use 70% of available memory
+        let memory_buffer_percent = self.memory_buffer_percent();
+        let available_for_model = self.available_memory_for_model(memory_buffer_percent);
+        let n_threads = self.optimal_thread_count();
+        let n_gpu_layers = self.recommended_gpu_layers();
+        let context_size = self.recommended_context_size(available_for_model, model_size_estimate);
+        let batch_size = self.recommended_batch_size();
+        let max_model_size = (available_for_model as f32 * 0.7) as u64;
 
         OptimalParams {
             n_threads,
@@ -539,6 +459,97 @@ impl SystemHardware {
             max_model_size,
             use_mmap: self.supports_mmap,
             memory_buffer_percent,
+        }
+    }
+
+    const fn memory_buffer_percent(&self) -> f32 {
+        match self.total_memory {
+            mem if mem < 4 * 1024 * 1024 * 1024 => 0.3,
+            mem if mem < 8 * 1024 * 1024 * 1024 => 0.25,
+            mem if mem < 16 * 1024 * 1024 * 1024 => 0.2,
+            _ => 0.15,
+        }
+    }
+
+    fn available_memory_for_model(&self, buffer_percent: f32) -> u64 {
+        (self.available_memory as f32 * (1.0 - buffer_percent)) as u64
+    }
+
+    const fn optimal_thread_count(&self) -> u32 {
+        let cores = self.cpu_cores;
+        if cores <= 2 {
+            if cores == 0 { 1 } else { cores }
+        } else if cores <= 4 {
+            cores - 1
+        } else if cores <= 8 {
+            cores - 2
+        } else if cores > 12 {
+            12
+        } else {
+            cores
+        }
+    }
+
+    fn recommended_gpu_layers(&self) -> u32 {
+        match &self.gpu_type {
+            GpuType::None | GpuType::Intel => 0,
+            GpuType::AppleSilicon => match self.total_memory {
+                mem if mem >= 16 * 1024 * 1024 * 1024 => 35,
+                mem if mem >= 8 * 1024 * 1024 * 1024 => 25,
+                _ => 15,
+            },
+            GpuType::Nvidia => self.gpu_memory.map_or(15, |gpu_mem| match gpu_mem {
+                mem if mem >= 12 * 1024 * 1024 * 1024 => 35,
+                mem if mem >= 8 * 1024 * 1024 * 1024 => 28,
+                mem if mem >= 6 * 1024 * 1024 * 1024 => 20,
+                mem if mem >= 4 * 1024 * 1024 * 1024 => 15,
+                _ => 10,
+            }),
+            GpuType::Amd => self.gpu_memory.map_or(10, |gpu_mem| match gpu_mem {
+                mem if mem >= 8 * 1024 * 1024 * 1024 => 20,
+                mem if mem >= 4 * 1024 * 1024 * 1024 => 10,
+                _ => 5,
+            }),
+        }
+    }
+
+    fn recommended_context_size(
+        &self,
+        available_for_model: u64,
+        model_size_estimate: Option<u64>,
+    ) -> u32 {
+        model_size_estimate.map_or_else(
+            || self.default_context_size(),
+            |model_size| {
+                let remaining_memory = available_for_model.saturating_sub(model_size);
+                Self::context_size_from_remaining(remaining_memory)
+            },
+        )
+    }
+
+    const fn default_context_size(&self) -> u32 {
+        match self.total_memory {
+            mem if mem >= 32 * 1024 * 1024 * 1024 => 8192,
+            mem if mem >= 16 * 1024 * 1024 * 1024 => 4096,
+            mem if mem >= 8 * 1024 * 1024 * 1024 => 2048,
+            _ => 1024,
+        }
+    }
+
+    const fn context_size_from_remaining(remaining_memory: u64) -> u32 {
+        match remaining_memory {
+            mem if mem >= 4 * 1024 * 1024 * 1024 => 8192,
+            mem if mem >= 2 * 1024 * 1024 * 1024 => 4096,
+            mem if mem >= 1024 * 1024 * 1024 => 2048,
+            _ => 1024,
+        }
+    }
+
+    const fn recommended_batch_size(&self) -> u32 {
+        match self.total_memory {
+            mem if mem >= 16 * 1024 * 1024 * 1024 => 1024,
+            mem if mem >= 8 * 1024 * 1024 * 1024 => 512,
+            _ => 256,
         }
     }
 
@@ -569,14 +580,12 @@ impl SystemHardware {
             self.total_memory as f64 / (1024.0 * 1024.0 * 1024.0),
             self.available_memory as f64 / (1024.0 * 1024.0 * 1024.0),
             self.gpu_type,
-            if let Some(gpu_mem) = self.gpu_memory {
+            self.gpu_memory.map_or_else(String::new, |gpu_mem| {
                 format!(
                     " ({:.1}GB VRAM)",
                     gpu_mem as f64 / (1024.0 * 1024.0 * 1024.0)
                 )
-            } else {
-                String::new()
-            }
+            })
         )
     }
 }

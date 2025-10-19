@@ -7,7 +7,7 @@ pub struct MessageNodeProps {
     pub on_reply: Callback<MessageView>,
 }
 
-fn role_classes(role: &MessageRole) -> &'static str {
+const fn role_classes(role: &MessageRole) -> &'static str {
     match role {
         MessageRole::User => "bg-primary text-primary-content",
         MessageRole::Assistant => "bg-base-200 text-base-content",
@@ -16,7 +16,7 @@ fn role_classes(role: &MessageRole) -> &'static str {
     }
 }
 
-fn role_label(role: &MessageRole) -> &'static str {
+const fn role_label(role: &MessageRole) -> &'static str {
     match role {
         MessageRole::User => "User",
         MessageRole::Assistant => "Assistant",

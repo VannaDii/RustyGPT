@@ -34,7 +34,7 @@ struct StreamingEntry {
     content: String,
 }
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties, PartialEq, Eq)]
 pub struct ChatPageProps {
     #[prop_or(None)]
     pub conversation_id: Option<String>,
@@ -170,7 +170,7 @@ fn register_stream_listeners(
                                         entry.root_id = payload.root_id;
                                         entry.conversation_id = payload.conversation_id;
                                     })
-                                    .or_insert(StreamingEntry {
+                                    .or_insert_with(|| StreamingEntry {
                                         message_id: payload.message_id,
                                         root_id: payload.root_id,
                                         parent_id: payload.parent_id,
@@ -485,7 +485,7 @@ fn register_stream_listeners(
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 enum ComposerTarget {
     Root,
     Reply { parent_id: Uuid, root_id: Uuid },
@@ -541,7 +541,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                         let selected_thread = selected_thread_handle.clone();
                         let composer_target = composer_target_handle.clone();
                         let error = error_handle.clone();
-                        let unread_counts = unread_counts_handle.clone();
+                        let unread_counts = unread_counts_handle;
                         spawn_local(async move {
                             let client = RustyGPTClient::shared();
                             match client.list_threads(&conv_id, None, Some(50)).await {
@@ -595,12 +595,11 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
 
     // Load thread messages when selection changes
     {
-        let selected_thread_handle = selected_thread.clone();
         let messages_handle = messages.clone();
         let error_handle = error_message.clone();
         let composer_target_handle = composer_target.clone();
         let composer_text_handle = composer_text.clone();
-        use_effect_with(*selected_thread_handle, move |root_opt| {
+        use_effect_with(*selected_thread, move |root_opt| {
             if let Some(root_id) = *root_opt {
                 messages_handle.set(Vec::new());
                 composer_text_handle.set(String::new());
@@ -610,7 +609,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                 });
 
                 let messages = messages_handle.clone();
-                let error = error_handle.clone();
+                let error = error_handle;
                 let current_root = root_id;
                 spawn_local(async move {
                     let client = RustyGPTClient::shared();
@@ -638,9 +637,9 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
         let messages_handle = messages.clone();
         let error_handle = error_message.clone();
         let typing_handle = typing_active.clone();
-        let typing_timer_handle = typing_timer.clone();
+        let typing_timer_handle = typing_timer;
         let streaming_handle = streaming_buffers.clone();
-        let pending_activity_handle = pending_activity_roots.clone();
+        let pending_activity_handle = pending_activity_roots;
         let online_users_handle = online_users.clone();
         let unread_counts_handle = unread_counts.clone();
 
@@ -675,7 +674,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                             &unread_counts_handle,
                         );
 
-                        cleanup = Some((event_source.clone(), listeners));
+                        cleanup = Some((event_source, listeners));
                     }
                 }
             }
@@ -763,8 +762,8 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                 return;
             };
 
-            let content = (*composer_text).trim().to_string();
-            if content.is_empty() {
+            let trimmed = (*composer_text).trim();
+            if trimmed.is_empty() {
                 return;
             }
 
@@ -778,7 +777,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                     let composer_target = composer_target.clone();
                     let messages = messages.clone();
                     let error = error.clone();
-                    let text_to_send = content.clone();
+                    let text_to_send = trimmed.to_owned();
                     spawn_local(async move {
                         let client = RustyGPTClient::shared();
                         let request = PostRootMessageRequest {
@@ -828,10 +827,11 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                     let error = error.clone();
                     let typing = typing.clone();
                     let threads_handle = threads_handle.clone();
+                    let reply_content = trimmed.to_owned();
                     spawn_local(async move {
                         let client = RustyGPTClient::shared();
                         let request = ReplyMessageRequest {
-                            content: content.clone(),
+                            content: reply_content,
                             role: Some(MessageRole::User),
                         };
                         match client.reply_message(&parent_id, &request).await {
@@ -859,9 +859,9 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                                                         .messages
                                                         .last()
                                                         .map(|msg| msg.created_at.clone())
-                                                        .unwrap_or(
-                                                            summary.last_activity_at.clone(),
-                                                        );
+                                                        .unwrap_or_else(|| {
+                                                            summary.last_activity_at.clone()
+                                                        });
                                                     summary.message_count += 1;
                                                 }
                                                 next.sort_by(|a, b| {
@@ -944,11 +944,14 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                 </div>
             </div>
             <div class="flex-1 flex flex-col">
-                { if let Some(error) = (*error_message).clone() {
-                    html! { <div class="alert alert-error rounded-none">{ error }</div> }
-                } else {
-                    html! {}
-                }}
+                {
+                    (*error_message)
+                        .clone()
+                        .map_or_else(
+                            || html! {},
+                            |error| html! { <div class="alert alert-error rounded-none">{ error }</div> },
+                        )
+                }
                 <div class="flex-1 overflow-y-auto p-4 space-y-2">
                     <ThreadView
                         messages={(*messages).clone()}

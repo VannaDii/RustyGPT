@@ -2,6 +2,12 @@
 name = "server"
 version = "0.1.0"
 edition = "2024"
+description = "RustyGPT HTTP server powering authentication, conversations, and SSE streaming."
+license = "Apache-2.0"
+repository = "https://github.com/vanna/rusty_gpt"
+readme = "../README.md"
+keywords = ["rustygpt", "server", "sse", "chatbot", "axum"]
+categories = ["web-programming::http-server"]
 
 [dependencies]
 anyhow = { workspace = true }
