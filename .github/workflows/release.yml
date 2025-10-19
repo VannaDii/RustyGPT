@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
-      
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,7 +77,7 @@ jobs:
             os: windows-latest
 
     runs-on: ${{ matrix.os }}
-    
+
     steps:
       - uses: actions/checkout@v4
 
