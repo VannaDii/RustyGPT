@@ -61,9 +61,7 @@ jobs:
         run: cp .env.template .env
 
       - name: Install required tools
-        run: |
-          cargo install trunk wasm-pack
-          rustup target add wasm32-unknown-unknown
+        run: just install-ci
 
       - name: Check formatting and linting
         run: just check

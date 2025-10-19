@@ -25,6 +25,8 @@ jobs:
       - name: Install documentation tooling
         run: |
           cargo install --locked mdbook mdbook-mermaid mdbook-versions just
+          mdbook-mermaid install .
+          mv -f mermaid*.js scripts/
 
       - name: Build docs
         run: just docs-build
