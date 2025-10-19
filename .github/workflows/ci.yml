@@ -80,24 +80,8 @@ jobs:
         with:
           cache-on-failure: true
 
-      - name: Install frontend dependencies
-        run: |
-          if ! command -v trunk &> /dev/null; then
-            cargo install trunk
-          fi
-          if ! command -v wasm-pack &> /dev/null; then
-            cargo install wasm-pack
-          fi
-          rustup target add wasm32-unknown-unknown
-
-      - name: Install additional tools
-        run: |
-          if ! command -v sqlx &> /dev/null; then
-            cargo install --locked sqlx-cli
-          fi
-          if ! command -v cargo-llvm-cov &> /dev/null; then
-            cargo install --locked cargo-llvm-cov
-          fi
+      - name: Install tools
+        run: just install-ci
 
       - name: Create .env file
         run: |

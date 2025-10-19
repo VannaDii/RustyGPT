@@ -20,6 +20,38 @@ install:
     mv -f mermaid*.js scripts/
     scripts/install-hooks.sh
 
+# Recipe to install only essential tools for CI/CD environments
+install-ci:
+    @echo "🔧 Installing CI-specific tools..."
+    # Install frontend tools if not present
+    @if ! command -v trunk >/dev/null 2>&1; then \
+        echo "Installing trunk..."; \
+        cargo install trunk; \
+    else \
+        echo "trunk already installed"; \
+    fi
+    @if ! command -v wasm-pack >/dev/null 2>&1; then \
+        echo "Installing wasm-pack..."; \
+        cargo install wasm-pack; \
+    else \
+        echo "wasm-pack already installed"; \
+    fi
+    # Install backend tools if not present
+    @if ! command -v sqlx >/dev/null 2>&1; then \
+        echo "Installing sqlx-cli..."; \
+        cargo install --locked sqlx-cli; \
+    else \
+        echo "sqlx-cli already installed"; \
+    fi
+    @if ! command -v cargo-llvm-cov >/dev/null 2>&1; then \
+        echo "Installing cargo-llvm-cov..."; \
+        cargo install --locked cargo-llvm-cov; \
+    else \
+        echo "cargo-llvm-cov already installed"; \
+    fi
+    # Add WASM target
+    rustup target add wasm32-unknown-unknown
+
 # Recipe to install all the necessary tools and dependencies OFFLINE
 install-offline:
     export CARGO_NET_JOBS="$(nproc)"
