@@ -34,7 +34,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
 
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
