@@ -49,7 +49,7 @@ _install_tools mode="locked" tools=_all_tools:
     done
 
 # Internal recipe for post-install setup
-_post_install:
+_post_install mode="full":
     # Add wasm-pack if not present (CI needs it)
     @if ! command -v wasm-pack >/dev/null 2>&1; then \
         echo "Installing wasm-pack..."; \
@@ -57,35 +57,39 @@ _post_install:
     else \
         echo "wasm-pack already installed"; \
     fi
-    # Setup mdbook-mermaid if it was installed
-    @if command -v mdbook-mermaid >/dev/null 2>&1; then \
-        mdbook-mermaid install . || true; \
-        mv -f mermaid*.js scripts/ 2>/dev/null || true; \
-    fi
     # Add WASM target
     rustup target add wasm32-unknown-unknown
-    # Install git hooks (dev only)
-    @if [[ -f "scripts/install-hooks.sh" ]]; then \
-        scripts/install-hooks.sh || true; \
+    
+    # Setup mdbook-mermaid if it was installed (full and offline mode only)
+    @if [[ "{{mode}}" != "ci" ]] && command -v mdbook-mermaid >/dev/null 2>&1; then \
+        echo "Setting up mdbook-mermaid..."; \
+        mdbook-mermaid install .; \
+        mv -f mermaid*.js scripts/ 2>/dev/null || true; \
+    fi
+    
+    # Install git hooks (full and offline mode only)
+    @if [[ "{{mode}}" != "ci" && -f "scripts/install-hooks.sh" ]]; then \
+        echo "Installing Git hooks..."; \
+        scripts/install-hooks.sh; \
     fi
 
 # Recipe to install all development tools and dependencies
 install:
     @echo "🔧 Installing all development tools..."
     just _install_tools locked "{{_all_tools}}"
-    just _post_install
+    just _post_install full
 
 # Recipe to install only essential tools for CI/CD environments  
 install-ci:
     @echo "🔧 Installing CI-specific tools..."
     just _install_tools conditional "{{_core_tools}}"
-    just _post_install
+    just _post_install ci
 
 # Recipe to install all tools in offline mode
 install-offline:
     @echo "🔧 Installing all tools (offline mode)..."
     just _install_tools frozen "{{_all_tools}}"
-    just _post_install
+    just _post_install offline
 
 # Recipe to start both frontend and backend watchers concurrently
 dev:
