@@ -1,71 +1,91 @@
 # Default recipe (runs when you just run "just" with no arguments)
 default: check
 
+# Tool lists - SINGLE SOURCE OF TRUTH
+_core_tools := "sqlx-cli trunk cargo-llvm-cov"
+_dev_tools := "cargo-audit wasm-opt wasm-bindgen-cli mdbook-mermaid"
+_all_tools := _core_tools + " " + _dev_tools
+
 fetch:
     @echo "🔄 Fetching all dependencies…"
     cargo fetch --workspace
 
-# Recipe to install all the necessary tools and dependencies
-install:
+# Internal recipe to install tools with specified mode
+_install_tools mode="locked" tools=_all_tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
     export CARGO_NET_JOBS="$(nproc)"
-    cargo install --locked --jobs $(nproc) \
-        sqlx-cli \
-        trunk \
-        cargo-audit \
-        wasm-opt \
-        wasm-bindgen-cli \
-        cargo-llvm-cov \
-        mdbook-mermaid
-    mdbook-mermaid install .
-    mv -f mermaid*.js scripts/
-    scripts/install-hooks.sh
+    
+    # Parse tools into array
+    tools_array=({{tools}})
+    
+    # Install each tool
+    for tool in "${tools_array[@]}"; do
+        if [[ "{{mode}}" == "conditional" ]]; then
+            # Check if tool exists before installing (for CI)
+            case "$tool" in
+                "sqlx-cli")
+                    cmd_check="sqlx"
+                    ;;
+                "cargo-llvm-cov")
+                    cmd_check="cargo-llvm-cov"
+                    ;;
+                *)
+                    cmd_check="$tool"
+                    ;;
+            esac
+            
+            if ! command -v "$cmd_check" >/dev/null 2>&1; then
+                echo "Installing $tool..."
+                cargo install --locked "$tool"
+            else
+                echo "$tool already installed"
+            fi
+        else
+            # Direct install mode
+            install_flag="--{{mode}}"
+            cargo install $install_flag --jobs $(nproc) "$tool"
+        fi
+    done
 
-# Recipe to install only essential tools for CI/CD environments
-install-ci:
-    @echo "🔧 Installing CI-specific tools..."
-    # Install frontend tools if not present
-    @if ! command -v trunk >/dev/null 2>&1; then \
-        echo "Installing trunk..."; \
-        cargo install trunk; \
-    else \
-        echo "trunk already installed"; \
-    fi
+# Internal recipe for post-install setup
+_post_install:
+    # Add wasm-pack if not present (CI needs it)
     @if ! command -v wasm-pack >/dev/null 2>&1; then \
         echo "Installing wasm-pack..."; \
         cargo install wasm-pack; \
     else \
         echo "wasm-pack already installed"; \
     fi
-    # Install backend tools if not present
-    @if ! command -v sqlx >/dev/null 2>&1; then \
-        echo "Installing sqlx-cli..."; \
-        cargo install --locked sqlx-cli; \
-    else \
-        echo "sqlx-cli already installed"; \
-    fi
-    @if ! command -v cargo-llvm-cov >/dev/null 2>&1; then \
-        echo "Installing cargo-llvm-cov..."; \
-        cargo install --locked cargo-llvm-cov; \
-    else \
-        echo "cargo-llvm-cov already installed"; \
+    # Setup mdbook-mermaid if it was installed
+    @if command -v mdbook-mermaid >/dev/null 2>&1; then \
+        mdbook-mermaid install . || true; \
+        mv -f mermaid*.js scripts/ 2>/dev/null || true; \
     fi
     # Add WASM target
     rustup target add wasm32-unknown-unknown
+    # Install git hooks (dev only)
+    @if [[ -f "scripts/install-hooks.sh" ]]; then \
+        scripts/install-hooks.sh || true; \
+    fi
 
-# Recipe to install all the necessary tools and dependencies OFFLINE
+# Recipe to install all development tools and dependencies
+install:
+    @echo "🔧 Installing all development tools..."
+    just _install_tools locked "{{_all_tools}}"
+    just _post_install
+
+# Recipe to install only essential tools for CI/CD environments  
+install-ci:
+    @echo "🔧 Installing CI-specific tools..."
+    just _install_tools conditional "{{_core_tools}}"
+    just _post_install
+
+# Recipe to install all tools in offline mode
 install-offline:
-    export CARGO_NET_JOBS="$(nproc)"
-    cargo install --frozen --jobs $(nproc) \
-        sqlx-cli \
-        trunk \
-        cargo-audit \
-        wasm-opt \
-        wasm-bindgen-cli \
-        cargo-llvm-cov \
-        mdbook-mermaid
-    mdbook-mermaid install .
-    mv -f mermaid*.js scripts/
-    scripts/install-hooks.sh
+    @echo "🔧 Installing all tools (offline mode)..."
+    just _install_tools frozen "{{_all_tools}}"
+    just _post_install
 
 # Recipe to start both frontend and backend watchers concurrently
 dev:
