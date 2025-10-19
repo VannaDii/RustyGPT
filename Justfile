@@ -7,7 +7,6 @@ fetch:
 
 # Recipe to install all the necessary tools and dependencies
 install:
-    rustup update stable
     export CARGO_NET_JOBS="$(nproc)"
     cargo install --locked --jobs $(nproc) \
         sqlx-cli \
@@ -18,12 +17,11 @@ install:
         cargo-llvm-cov \
         mdbook-mermaid
     mdbook-mermaid install .
-    mv mermaid*.js scripts/
+    mv -f mermaid*.js scripts/
     scripts/install-hooks.sh
 
 # Recipe to install all the necessary tools and dependencies OFFLINE
 install-offline:
-    rustup update stable
     export CARGO_NET_JOBS="$(nproc)"
     cargo install --frozen --jobs $(nproc) \
         sqlx-cli \
@@ -33,6 +31,8 @@ install-offline:
         wasm-bindgen-cli \
         cargo-llvm-cov \
         mdbook-mermaid
+    mdbook-mermaid install .
+    mv -f mermaid*.js scripts/
     scripts/install-hooks.sh
 
 # Recipe to start both frontend and backend watchers concurrently
