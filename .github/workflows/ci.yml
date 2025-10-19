@@ -51,11 +51,6 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@v2
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
       - name: Add Cargo bin to PATH
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
@@ -85,8 +80,7 @@ jobs:
 
       - name: Install additional tools
         run: |
-          cargo install cargo-llvm-cov
-          cargo install sqlx-cli --no-default-features --features rustls,postgres
+          just install
 
       - name: Create .env file
         run: |
