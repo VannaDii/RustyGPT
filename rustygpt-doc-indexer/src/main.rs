@@ -34,7 +34,7 @@ fn main() -> Result<()> {
 
 fn run(docs_root: &Path, schema_path: &Path) -> Result<()> {
     if !docs_root.exists() {
-        return Err(anyhow!("Docs path {:?} does not exist", docs_root));
+        return Err(anyhow!("Docs path {} does not exist", docs_root.display()));
     }
 
     let mut entries = Vec::new();

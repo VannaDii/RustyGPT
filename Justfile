@@ -7,6 +7,7 @@ fetch:
 
 # Recipe to install all the necessary tools and dependencies
 install:
+    rustup update stable
     export CARGO_NET_JOBS="$(nproc)"
     cargo install --locked --jobs $(nproc) \
         sqlx-cli \
@@ -22,6 +23,7 @@ install:
 
 # Recipe to install all the necessary tools and dependencies OFFLINE
 install-offline:
+    rustup update stable
     export CARGO_NET_JOBS="$(nproc)"
     cargo install --frozen --jobs $(nproc) \
         sqlx-cli \
@@ -46,7 +48,7 @@ check:
 # Auto-fix what can be
 fix:
     cargo fmt --all
-    cargo clippy --workspace --all --all-features --fix
+    cargo clippy --workspace --all --all-features --fix --allow-staged
 
 # Build everything
 build:
