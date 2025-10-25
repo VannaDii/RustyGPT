@@ -87,7 +87,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
 
       - name: Cache Cargo
         uses: actions/cache@v4
