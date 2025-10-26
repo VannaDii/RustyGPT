@@ -180,39 +180,80 @@
                     <main>
                         <h1 id="quickstart"><a class="header" href="#quickstart">Quickstart</a></h1>
 <blockquote>
-<p>TL;DR – Install the Rust 2024 toolchain, run the RustyGPT server and web UI locally, and verify streaming chat flows with seeded demo data.</p>
+<p>TL;DR – copy <code>config.example.toml</code>, enable the feature flags you need, start PostgreSQL, run the Axum server, complete the
+<code>/api/setup</code> flow, then bring up the Yew frontend and CLI.</p>
 </blockquote>
-<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<h2 id="1-prerequisites"><a class="header" href="#1-prerequisites">1. Prerequisites</a></h2>
 <ul>
-<li>Rust 1.81+ with <code>rustup</code> configured for the 2024 edition</li>
-<li><code>cargo</code> and <code>just</code> on your <code>PATH</code></li>
-<li>PostgreSQL 15+ accessible at <code>postgres://localhost</code></li>
+<li>Rust toolchain (<code>rustup default stable</code>), <code>cargo</code>, and <a href="https://just.systems"><code>just</code></a></li>
+<li><a href="https://trunkrs.dev/"><code>trunk</code></a> for the web client (<code>cargo install trunk</code>)</li>
+<li>PostgreSQL 15+ running locally (the provided <code>docker-compose.yaml</code> exposes one at <code>postgres://tinroof:rusty@localhost:5432/rusty_gpt</code>)</li>
+<li>Optional: llama.cpp-compatible model files if you plan to exercise assistant streaming</li>
 </ul>
-<p>Install workspace dependencies:</p>
-<pre><code class="language-bash">rustup default stable
-cargo fetch --workspace
-just install
+<p>Fetch dependencies once:</p>
+<pre><code class="language-bash">cargo fetch --workspace
 </code></pre>
-<p>For a deeper dive into the dev environment, see <a href="local-dev.html">Local Development</a>.</p>
-<h2 id="start-the-backend"><a class="header" href="#start-the-backend">Start the Backend</a></h2>
-<ol>
-<li>Apply the SQL migrations in <code>deploy/postgres/migrations</code> using your preferred tool.</li>
-<li>Launch the server with configuration pointing at your database:</li>
-</ol>
+<h2 id="2-configure-the-server"><a class="header" href="#2-configure-the-server">2. Configure the server</a></h2>
+<p>Create <code>config.toml</code> and adjust it for your environment:</p>
+<pre><code class="language-bash">cp config.example.toml config.toml
+</code></pre>
+<p>At minimum set:</p>
+<pre><code class="language-toml">[db]
+url = "postgres://tinroof:rusty@localhost/rustygpt_dev"
+
+[features]
+auth_v1 = true
+sse_v1 = true
+well_known = true
+</code></pre>
+<p><code>rustygpt-shared::config::server::Config</code> supports TOML/YAML/JSON files and environment overrides (e.g.
+<code>RUSTYGPT__SERVER__PORT=8080</code>). See <a href="../reference/config.html">Configuration</a> for the complete matrix of keys.</p>
+<h2 id="3-start-postgresql"><a class="header" href="#3-start-postgresql">3. Start PostgreSQL</a></h2>
+<p>If you are using Docker Compose:</p>
+<pre><code class="language-bash">docker compose up postgres -d
+</code></pre>
+<p>On server startup the bootstrap runner executes every SQL script under <code>scripts/pg/{schema,procedures,indexes,seed}</code> in order.
+The seed stage enables feature flags and inserts the default rate-limit profile (<code>conversation.post</code>).</p>
+<h2 id="4-run-the-backend"><a class="header" href="#4-run-the-backend">4. Run the backend</a></h2>
+<p>Either launch directly:</p>
+<pre><code class="language-bash">cargo run -p rustygpt-server -- serve --port 8080
+</code></pre>
+<p>or use the helper recipe that also builds configuration if needed:</p>
 <pre><code class="language-bash">just run-server
 </code></pre>
-<p>Health checks respond at <code>http://localhost:8080/api/health</code>. The chat SSE endpoint is documented under <a href="../reference/api.html">REST API</a>.</p>
-<h2 id="build-the-web-client"><a class="header" href="#build-the-web-client">Build the Web Client</a></h2>
-<p>Open a new terminal and run:</p>
+<p>The process listens on <code>http://127.0.0.1:8080</code>. Health probes are available at <code>/api/healthz</code> and <code>/api/readyz</code>.</p>
+<h2 id="5-complete-initial-setup"><a class="header" href="#5-complete-initial-setup">5. Complete initial setup</a></h2>
+<p>The first authenticated user is created by POSTing to <code>/api/setup</code>:</p>
+<pre><code class="language-bash">curl -X POST http://127.0.0.1:8080/api/setup \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","email":"admin@example.com","password":"change-me"}'
+</code></pre>
+<p>Subsequent calls return <code>400</code> once a user already exists.</p>
+<h2 id="6-start-the-web-client"><a class="header" href="#6-start-the-web-client">6. Start the web client</a></h2>
+<p>In a new terminal:</p>
 <pre><code class="language-bash">cd rustygpt-web
 trunk serve
 </code></pre>
-<p>The Yew client proxies API calls to the backend. Log in using seeded credentials from <code>deploy/dev-seed.sql</code>. Confirm that streaming responses appear in the conversation view; troubleshooting tips live in <a href="../architecture/streaming.html">Streaming Delivery</a>.</p>
-<h2 id="seed-demo-data"><a class="header" href="#seed-demo-data">Seed Demo Data</a></h2>
-<p>Load the included demo dataset to populate agents and sample conversations:</p>
-<pre><code class="language-bash">psql $DATABASE_URL -f deploy/dev-seed.sql
+<p>The SPA proxies <code>/api/*</code> requests to the backend. After logging in you should see:</p>
+<ul>
+<li>Conversation list populated by <code>GET /api/conversations/{conversation_id}/threads</code></li>
+<li>Thread view that streams updates from <code>/api/stream/conversations/{conversation_id}</code></li>
+<li>Presence and typing indicators driven by <code>ConversationStreamEvent</code> payloads</li>
+</ul>
+<h2 id="7-exercise-the-cli"><a class="header" href="#7-exercise-the-cli">7. Exercise the CLI</a></h2>
+<p>The <code>rustygpt</code> binary shares configuration and cookie handling with the server:</p>
+<pre><code class="language-bash">cargo run -p rustygpt-cli -- login
+cargo run -p rustygpt-cli -- chat --conversation &lt;conversation-uuid&gt;
+cargo run -p rustygpt-cli -- follow --root &lt;thread-uuid&gt;
 </code></pre>
-<p>After seeding, visit the dashboard and run a few prompts to validate token usage counters. Follow the operational checklist in <a href="../howto/docker-deploy.html">Docker Deploy</a> before promoting to shared environments.</p>
+<p><code>follow</code> connects to the SSE endpoint, reconstructs events, and prints deltas as they arrive. If you see <code>authentication required</code>
+errors, confirm you completed the setup step and that <code>[features].auth_v1</code> is <code>true</code>.</p>
+<h2 id="8-next-steps"><a class="header" href="#8-next-steps">8. Next steps</a></h2>
+<ul>
+<li>Review <a href="local-dev.html">Local Development</a> for watcher workflows, linting, and debugging tips.</li>
+<li>Explore <a href="../reference/api.html">REST API</a> for a full endpoint catalogue and payload shapes.</li>
+<li>Consult <a href="../architecture/service-topology.html">Service Topology</a> to understand how the components interact at runtime.</li>
+</ul>
 
                     </main>
 

@@ -179,74 +179,59 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="authentication"><a class="header" href="#authentication">Authentication</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT authenticates with HttpOnly cookie sessions backed by Postgres, providing rotation, CSRF protection, and admin observability.</p>
-</blockquote>
-<h2 id="session-endpoints"><a class="header" href="#session-endpoints">Session Endpoints</a></h2>
-<p>All session APIs live under <code>/api/auth</code> and return JSON with the authenticated user and timestamps (<code>issued_at</code>, <code>expires_at</code>, <code>absolute_expires_at</code>).</p>
-<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
-<tr><td>POST</td><td><code>/api/auth/login</code></td><td>Verifies credentials and issues session</td></tr>
-<tr><td>POST</td><td><code>/api/auth/refresh</code></td><td>Rotates session inside idle window</td></tr>
-<tr><td>GET</td><td><code>/api/auth/me</code></td><td>Returns the current session summary</td></tr>
-<tr><td>POST</td><td><code>/api/auth/logout</code></td><td>Revokes the active session</td></tr>
-</tbody></table>
-</div>
-<p>Successful responses include:</p>
+<p>RustyGPT uses cookie-based sessions backed by PostgreSQL. Session management lives in <code>rustygpt-server/src/auth/session.rs</code> and
+is exposed through <code>/api/auth/*</code> handlers when <code>features.auth_v1 = true</code>.</p>
+<h2 id="session-lifecycle"><a class="header" href="#session-lifecycle">Session lifecycle</a></h2>
+<ol>
+<li><strong>Setup</strong> – <code>POST /api/setup</code> hashes the supplied password and inserts the first user (admin + member roles). Further calls
+are rejected.</li>
+<li><strong>Login</strong> – <code>POST /api/auth/login</code> verifies credentials via <code>sp_auth_login</code>. Successful responses include:
 <ul>
-<li><code>Set-Cookie: sid=...; HttpOnly; Secure; SameSite=Lax</code></li>
+<li><code>Set-Cookie: SESSION_ID=...; HttpOnly; Secure?; SameSite=Lax</code></li>
 <li><code>Set-Cookie: CSRF-TOKEN=...; SameSite=Strict</code></li>
-<li><code>X-Session-Rotated: 1</code> when rotation occurs</li>
+<li><code>X-Session-Rotated: 1</code></li>
 </ul>
-<p>Unauthorized responses set <code>WWW-Authenticate: session</code> so clients can attempt a silent refresh. See <a href="api.html">REST API</a> for the broader surface area.</p>
-<h2 id="session-lifecycle"><a class="header" href="#session-lifecycle">Session Lifecycle</a></h2>
-<p>Configuration lives in <code>[session]</code> (see <a href="config.html">Configuration</a>):</p>
+</li>
+<li><strong>Authenticated requests</strong> – non-GET operations must include the CSRF header <code>X-CSRF-TOKEN</code> with the cookie value. The web
+client (<code>rustygpt-web/src/api.rs</code>) and CLI handle this automatically.</li>
+<li><strong>Refresh</strong> – <code>POST /api/auth/refresh</code> rotates cookies inside the idle window (default 8 hours). If either idle or absolute
+expiry is exceeded, the call returns <code>401 session_expired</code>.</li>
+<li><strong>Logout</strong> – <code>POST /api/auth/logout</code> clears the session and CSRF cookies.</li>
+</ol>
+<p>Sessions are stored in <code>rustygpt.user_sessions</code>. The idle and absolute windows come from <code>[session]</code> in configuration. When
+<code>max_sessions_per_user</code> is set the newest session evicts the oldest via <code>sp_auth_login</code>.</p>
+<h2 id="cookie-configuration"><a class="header" href="#cookie-configuration">Cookie configuration</a></h2>
+<p><code>config.toml</code> controls cookie behaviour:</p>
 <pre><code class="language-toml">[session]
 idle_seconds = 28800
 absolute_seconds = 604800
-session_cookie_name = "sid"
+session_cookie_name = "SESSION_ID"
 csrf_cookie_name = "CSRF-TOKEN"
 max_sessions_per_user = 5
+
+[security.cookie]
+domain = ""
+secure = false
+same_site = "lax"
+
+[security.csrf]
+cookie_name = "CSRF-TOKEN"
+header_name = "X-CSRF-TOKEN"
+enabled = true
 </code></pre>
-<ul>
-<li><strong>Sliding rotation</strong> – any authenticated request inside the idle window extends the session and may rotate cookies.</li>
-<li><strong>Absolute lifetime</strong> – once <code>absolute_seconds</code> elapse, <code>/api/auth/refresh</code> returns <code>401 session_expired</code>.</li>
-<li><strong>Privilege changes</strong> – stored procedures mark rows with <code>requires_rotation = TRUE</code>, forcing cookie refresh.</li>
-<li><strong>Max concurrent sessions</strong> – newest sessions evict the oldest when the cap is exceeded.</li>
-</ul>
-<p>Stored procedures <code>rustygpt.sp_auth_login</code> and <code>sp_auth_refresh</code> encapsulate Argon2id verification and rotation logic.</p>
-<h2 id="csrf-enforcement"><a class="header" href="#csrf-enforcement">CSRF Enforcement</a></h2>
-<p>Non-GET requests outside <code>/api/auth/*</code> must include:</p>
-<ul>
-<li><code>X-CSRF-Token</code> header</li>
-<li><code>CSRF-TOKEN</code> cookie</li>
-</ul>
-<p>Failures return <code>403 Forbidden</code>. Exemptions: GET/HEAD/OPTIONS, SSE streaming endpoints, and <code>/api/auth/*</code>.</p>
-<h2 id="client-guidance"><a class="header" href="#client-guidance">Client Guidance</a></h2>
-<ul>
-<li>Persist both cookies; the session id stays HttpOnly while the CSRF token is user-accessible.</li>
-<li>On <code>401</code> with <code>WWW-Authenticate: session</code>, call <code>/api/auth/refresh</code> once before retrying.</li>
-<li>On logout, delete cookies and redirect to <code>/login</code>.</li>
-</ul>
-<p>CLI smoke tests:</p>
-<pre><code class="language-bash">cargo run -p rustygpt-cli -- auth login
-cargo run -p rustygpt-cli -- auth me
+<p>Adjust <code>security.cookie.secure</code> and <code>security.cookie.domain</code> for production deployments. When <code>security.csrf.enabled = false</code>
+the middleware skips header validation (useful for service-to-service calls but not recommended for browsers).</p>
+<h2 id="cli-workflow"><a class="header" href="#cli-workflow">CLI workflow</a></h2>
+<p>The CLI wraps the same endpoints:</p>
+<pre><code class="language-bash">cargo run -p rustygpt-cli -- login
+cargo run -p rustygpt-cli -- me
+cargo run -p rustygpt-cli -- logout
 </code></pre>
+<p>Cookies are stored at <code>~/.config/rustygpt/session.cookies</code> by default (see <code>[cli.session_store]</code>). The <code>follow</code> and <code>chat</code>
+commands automatically attach the CSRF header when present.</p>
 <h2 id="observability"><a class="header" href="#observability">Observability</a></h2>
-<p>Prometheus metrics:</p>
-<ul>
-<li><code>rustygpt_auth_logins_total{result=...}</code></li>
-<li><code>rustygpt_auth_session_rotations_total{reason=...}</code></li>
-<li><code>rustygpt_auth_active_sessions{user_role}</code></li>
-</ul>
-<p>Dashboards live in <code>deploy/grafana/auth.json</code>. Integrate rotation procedures with <a href="../howto/rotate-secrets.html">Rotate Secrets</a> when updating signing keys.</p>
-<h2 id="cutover-runbook"><a class="header" href="#cutover-runbook">Cutover Runbook</a></h2>
-<ol>
-<li>Apply migrations (<code>010_auth.sql</code>, <code>034_limits.sql</code>, <code>040_rate_limits.sql</code>, <code>050_sse_persistence.sql</code>).</li>
-<li>Deploy backend, then web + CLI to pick up DTO changes.</li>
-<li>Force rotations with <code>SELECT rustygpt.sp_auth_mark_rotation(id, 'cutover') FROM rustygpt.users;</code>.</li>
-<li>Smoke test via CLI and web UI.</li>
-</ol>
-<p>If issues arise, follow the incident response guidance in <a href="../howto/docker-deploy.html">Docker Deploy</a>.</p>
+<p>Authentication currently relies on logs for troubleshooting. Set <code>RUST_LOG=rustygpt_server=debug</code> to trace session decisions
+(<code>SessionService::authenticate</code>, <code>SessionService::refresh_session</code>). Prometheus metrics for auth flows are not yet implemented.</p>
 
                     </main>
 

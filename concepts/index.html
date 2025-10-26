@@ -179,17 +179,15 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="concepts-overview"><a class="header" href="#concepts-overview">Concepts Overview</a></h1>
-<blockquote>
-<p>TL;DR – Core principles that underpin RustyGPT’s reasoning, data model, and invariants.</p>
-</blockquote>
-<h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>Concept pages explain <em>why</em> the system behaves the way it does. They define vocabulary, invariants, and trade-offs that appear across codebases and operational guides.</p>
-<h2 id="featured-concepts"><a class="header" href="#featured-concepts">Featured Concepts</a></h2>
+<p>This section explains the core ideas that appear across the server, web client, and CLI. Use it to understand the vocabulary
+used in API responses and stream payloads before diving into the reference material.</p>
 <ul>
-<li><a href="reasoning-dag.html">Reasoning DAG</a> describes branching and joins in the orchestrator.</li>
-<li><a href="dimensioned-entities.html">Dimensioned Entities</a> shows how metadata travels through services.</li>
+<li><a href="reasoning-dag.html">Threaded conversations</a> describes how messages, threads, and <code>ConversationStreamEvent</code> values relate to each
+other.</li>
+<li><a href="dimensioned-entities.html">Shared models</a> covers the <code>rustygpt-shared</code> crate, focusing on how typed DTOs and enums keep clients
+in sync with the server.</li>
 </ul>
-<p>Use these pages alongside <a href="../architecture/index.html">Architecture</a> to connect ideas with concrete components.</p>
+<p>Pair these concepts with the <a href="../architecture/index.html">Architecture</a> diagrams to see where each part lives at runtime.</p>
 
                     </main>
 

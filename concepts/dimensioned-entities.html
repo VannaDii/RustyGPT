@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Dimensioned Entities - RustyGPT Documentation</title>
+        <title>Shared models - RustyGPT Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -178,37 +178,36 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="dimensioned-entities"><a class="header" href="#dimensioned-entities">Dimensioned Entities</a></h1>
-<blockquote>
-<p>TL;DR – Dimensioned entities annotate RustyGPT data structures with semantic and temporal dimensions so downstream systems can reason about provenance and lifecycle.</p>
-</blockquote>
-<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
-<p>Conversation transcripts, tool inputs, and generated artifacts need contextual metadata to remain auditable. Dimensioned entities encode:</p>
+                        <h1 id="shared-models"><a class="header" href="#shared-models">Shared models</a></h1>
+<p><code>rustygpt-shared</code> centralises the data structures consumed by the server, web client, and CLI. Keeping these DTOs in one crate
+prevents drift between components and allows <code>serde</code> + <code>utoipa</code> derives to stay consistent.</p>
+<h2 id="configuration-loader"><a class="header" href="#configuration-loader">Configuration loader</a></h2>
+<p><code>src/config/server.rs</code> defines the <code>Config</code> struct and associated sub-structures (<code>ServerConfig</code>, <code>RateLimitConfig</code>,
+<code>SseConfig</code>, etc.). Every binary loads configuration through <code>Config::load_config</code>, which merges defaults, optional files, and
+environment overrides. Feature flags such as <code>features.auth_v1</code> gate server subsystems without requiring code changes.</p>
+<h2 id="api-payloads"><a class="header" href="#api-payloads">API payloads</a></h2>
+<p>The <code>src/models</code> directory contains strongly typed request/response structs:</p>
 <ul>
-<li><strong>Subject</strong> – the domain object (<code>conversation</code>, <code>agent</code>, <code>session</code>).</li>
-<li><strong>Scope</strong> – user, tenant, or system ownership.</li>
-<li><strong>Temporal dimension</strong> – creation time, last mutation, retention deadline.</li>
-<li><strong>Sensitivity</strong> – policy hints for redaction and export.</li>
+<li><code>models/chat.rs</code> – conversations, threads, message payloads, and streaming events</li>
+<li><code>models/oauth.rs</code> – GitHub/Apple OAuth exchanges</li>
+<li><code>models/setup.rs</code> – first-time setup contract (<code>SetupRequest</code>, <code>SetupResponse</code>)</li>
+<li><code>models/limits.rs</code> – rate limit admin DTOs (<code>CreateRateLimitProfileRequest</code>, <code>RateLimitAssignment</code>, ...)</li>
+<li><code>models/session.rs</code> – session summaries returned by <code>/api/auth/*</code></li>
 </ul>
-<p>These attributes ride along with each payload in <code>rustygpt-shared</code>, ensuring services apply the right policies without duplicating logic.</p>
-<h2 id="implementation"><a class="header" href="#implementation">Implementation</a></h2>
+<p>All types derive <code>Serialize</code>, <code>Deserialize</code>, and when relevant <code>utoipa::ToSchema</code> so the OpenAPI generator stays in sync.</p>
+<h2 id="llm-abstractions"><a class="header" href="#llm-abstractions">LLM abstractions</a></h2>
+<p><code>src/llms</code> exposes traits (<code>LLMProvider</code>, <code>LLMModel</code>) and helpers for llama.cpp integration. The server’s
+<code>AssistantService</code> uses these traits to stream responses and emit metrics (<code>llm_model_cache_hits_total</code>, <code>llm_model_load_seconds</code>).
+When you add a new provider, implement the traits here and update the configuration schema.</p>
+<h2 id="why-it-matters"><a class="header" href="#why-it-matters">Why it matters</a></h2>
 <ul>
-<li>Structs derive <code>Dimensioned</code> via a procedural macro that injects helpers for tagging and serialisation.</li>
-<li><code>rustygpt-server</code> enforces scope isolation using the dimension metadata during database queries.</li>
-<li>Export pipelines honour retention windows by consulting the temporal dimensions before emitting records.</li>
+<li><strong>Type safety</strong> – clients compile against the same structs the server uses, catching breaking changes early.</li>
+<li><strong>Single-source documentation</strong> – OpenAPI docs and mdBook pages pull names directly from these types.</li>
+<li><strong>Testing</strong> – shared fixtures in <code>shared::models</code> make it easier to write integration tests that cover both server handlers and
+CLI commands.</li>
 </ul>
-<p>Refer to <a href="reasoning-dag.html">Reasoning DAG</a> for how dimensions propagate across reasoning nodes.</p>
-<h2 id="usage-guidelines"><a class="header" href="#usage-guidelines">Usage Guidelines</a></h2>
-<ul>
-<li>Prefer explicit dimensions over ad-hoc metadata fields.</li>
-<li>When introducing a new entity, document its semantics under <a href="../reference/config.html">Configuration</a> if tunable.</li>
-<li>Include dimension checks in integration tests to catch accidental policy regressions.</li>
-</ul>
-<h2 id="further-reading"><a class="header" href="#further-reading">Further Reading</a></h2>
-<ul>
-<li><a href="../architecture/service-topology.html">Service Topology</a> shows where dimension enforcement lives in the runtime.</li>
-<li><a href="../howto/rotate-secrets.html">Rotate Secrets</a> demonstrates applying dimension metadata during credential refresh workflows.</li>
-</ul>
+<p>Whenever you extend the API, add or update the relevant struct in <code>rustygpt-shared</code> first, then regenerate the OpenAPI spec with
+<code>cargo run -p rustygpt-cli -- spec</code>.</p>
 
                     </main>
 

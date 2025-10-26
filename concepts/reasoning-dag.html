@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Reasoning DAG - RustyGPT Documentation</title>
+        <title>Threaded conversations - RustyGPT Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -178,36 +178,43 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="reasoning-dag"><a class="header" href="#reasoning-dag">Reasoning DAG</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT models agent reasoning as a directed acyclic graph so parallel branches can explore hypotheses while preserving deterministic joins.</p>
-</blockquote>
-<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
-<p>RustyGPT splits complex prompts into nodes that represent specialised reasoning steps—retrieval, tool execution, synthesis, and user messaging. Nodes execute concurrently when dependencies permit, then merge downstream results. The orchestrator’s scheduler lives in <code>rustygpt-server/src/reasoning</code>.</p>
-<h2 id="node-types"><a class="header" href="#node-types">Node Types</a></h2>
-<div class="table-wrapper"><table><thead><tr><th>Node</th><th>Purpose</th></tr></thead><tbody>
-<tr><td><code>Prompt</code></td><td>Emits the initial LLM prompt</td></tr>
-<tr><td><code>Retriever</code></td><td>Executes vector or keyword search</td></tr>
-<tr><td><code>Tool</code></td><td>Calls out to deterministic actions</td></tr>
-<tr><td><code>Reducer</code></td><td>Merges branch outputs</td></tr>
-<tr><td><code>Responder</code></td><td>Streams user-facing tokens</td></tr>
+                        <h1 id="threaded-conversations"><a class="header" href="#threaded-conversations">Threaded conversations</a></h1>
+<p>RustyGPT models chat history as <strong>threaded conversations</strong> stored in PostgreSQL. Each conversation has participants, invites,
+thread roots, and replies. The server exposes this structure through the DTOs in <code>rustygpt-shared/src/models/chat.rs</code>.</p>
+<h2 id="core-data-types"><a class="header" href="#core-data-types">Core data types</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Type</th><th>Purpose</th><th>Defined in</th></tr></thead><tbody>
+<tr><td><code>ConversationCreateRequest</code></td><td>Payload for creating a new conversation.</td><td><code>shared::models::chat</code></td></tr>
+<tr><td><code>ThreadTreeResponse</code></td><td>Depth-first snapshot of a thread including metadata for each node.</td><td><code>shared::models::chat</code></td></tr>
+<tr><td><code>MessageChunk</code></td><td>Persisted assistant output chunk (used when streaming replies).</td><td><code>shared::models::chat</code></td></tr>
+<tr><td><code>ConversationStreamEvent</code></td><td>Enum describing SSE events (<code>thread.new</code>, <code>message.delta</code>, etc.).</td><td><code>shared::models::chat</code></td></tr>
 </tbody></table>
 </div>
-<p>Each node publishes structured telemetry through <code>rustygpt-shared::telemetry</code>, enabling downstream analytics and reliability alerts.</p>
-<h2 id="benefits"><a class="header" href="#benefits">Benefits</a></h2>
+<p>Each thread is anchored by a root message (<code>POST /api/threads/{conversation_id}/root</code>). Replies hang off the tree using parent
+IDs (<code>POST /api/messages/{message_id}/reply</code>). The <code>ThreadTreeResponse</code> payload includes ancestry hints so clients can render the
+structure without additional queries.</p>
+<h2 id="streaming-lifecycle"><a class="header" href="#streaming-lifecycle">Streaming lifecycle</a></h2>
+<p>When <code>features.sse_v1 = true</code>, the server emits <code>ConversationStreamEvent</code> variants via <code>StreamHub</code> (<code>handlers/streaming.rs</code>). The
+naming mirrors the enum variants:</p>
 <ul>
-<li><strong>Determinism</strong> – Branch IDs are deterministic, enabling reproducible transcripts.</li>
-<li><strong>Parallelism</strong> – Low-latency branches (e.g., caching, fast lookups) unblock slower tool invocations.</li>
-<li><strong>Observability</strong> – Joins track input provenance, aiding postmortems and safety audits.</li>
+<li><code>thread.new</code> – new thread summary created</li>
+<li><code>thread.activity</code> – updated <code>last_activity_at</code></li>
+<li><code>message.delta</code> – incremental assistant tokens (<code>ChatDeltaChunk</code>)</li>
+<li><code>message.done</code> – completion marker with usage stats</li>
+<li><code>presence.update</code> – user presence heartbeat</li>
+<li><code>typing.update</code> – typing indicator state</li>
+<li><code>unread.update</code> – unread count per thread root</li>
+<li><code>membership.changed</code> – conversation membership change</li>
+<li><code>error</code> – terminal failure while streaming</li>
 </ul>
-<p>See <a href="../architecture/streaming.html">Streaming Delivery</a> for how reducer output flows to SSE clients.</p>
-<h2 id="extending-the-graph"><a class="header" href="#extending-the-graph">Extending the Graph</a></h2>
-<p>New node types implement the <code>ReasoningNode</code> trait. Add integration tests under <code>rustygpt-server/tests/reasoning.rs</code> to validate invariants. Captured node metadata propagates to the <a href="../reference/api.html">REST API</a> for clients that reconstruct reasoning trails.</p>
-<h2 id="related-concepts"><a class="header" href="#related-concepts">Related Concepts</a></h2>
-<ul>
-<li><a href="dimensioned-entities.html">Dimensioned Entities</a> define the typed payloads that move through each edge.</li>
-<li><a href="../architecture/service-topology.html">Service Topology</a> explains where reasoning orchestration runs relative to other services.</li>
-</ul>
+<p>Events carry both the <code>conversation_id</code> and (when applicable) <code>root_id</code> so clients can scope updates precisely. SSE persistence is
+optional: enable <code>[sse.persistence]</code> in configuration to record events in <code>rustygpt.sse_event_log</code> via
+<code>services::sse_persistence</code> and replay them on reconnect.</p>
+<h2 id="access-control"><a class="header" href="#access-control">Access control</a></h2>
+<p>The chat service (<code>services::chat_service.rs</code>) enforces membership checks and rate limits before mutating data. Rate limit
+profiles are backed by tables in <code>scripts/pg/schema/040_rate_limits.sql</code> and can be tuned via the admin API. Presence updates
+mark the acting user online and emit events so all subscribers stay consistent.</p>
+<p>For endpoint details see <a href="../reference/api.html">REST API</a>; for the transport-level diagram visit
+<a href="../architecture/streaming.html">Streaming Delivery</a>.</p>
 
                     </main>
 

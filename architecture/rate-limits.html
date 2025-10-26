@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Rate-Limit Architecture - RustyGPT Documentation</title>
+        <title>Rate-limit architecture - RustyGPT Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -178,73 +178,49 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="rate-limit-architecture"><a class="header" href="#rate-limit-architecture">Rate-Limit Architecture</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT enforces per-route throttling through Postgres-backed profiles cached in memory, exposing admin APIs for live tuning.</p>
-</blockquote>
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
+                        <h1 id="rate-limit-architecture"><a class="header" href="#rate-limit-architecture">Rate-limit architecture</a></h1>
+<p>RustyGPT enforces per-route throttling using a leaky-bucket strategy implemented in <code>middleware::rate_limit</code>. Configuration
+comes from two tables managed by stored procedures in <code>scripts/pg/procs/034_limits.sql</code>.</p>
+<h2 id="data-model"><a class="header" href="#data-model">Data model</a></h2>
 <ul>
-<li><code>rustygpt.rate_limit_profiles</code> – GCRA parameters (<code>algorithm</code>, <code>params</code> JSON, optional description).</li>
-<li><code>rustygpt.rate_limit_assignments</code> – Maps <code>{method, path_pattern}</code> pairs to profiles.</li>
-<li><code>rustygpt.message_rate_limits</code> – Conversation-scoped throttling reused by the chat service.</li>
+<li><code>rustygpt.rate_limit_profiles</code> – named profiles containing algorithm + JSON parameters (currently <code>gcra</code> style with
+<code>requests_per_second</code> / <code>burst</code> options).</li>
+<li><code>rustygpt.rate_limit_assignments</code> – maps HTTP method + path pattern to a profile.</li>
+<li><code>rustygpt.message_rate_limits</code> – per-user, per-conversation state used by <code>sp_user_can_post</code> to throttle message posting.</li>
 </ul>
-<p>Stored procedures (<code>sp_limits_*</code>) manage CRUD operations. After each change, call <code>RateLimitState::reload_from_db</code> to refresh the cache.</p>
-<h2 id="admin-api"><a class="header" href="#admin-api">Admin API</a></h2>
-<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
-<tr><td>GET</td><td><code>/api/admin/limits/profiles</code></td><td>List profiles</td></tr>
-<tr><td>POST</td><td><code>/api/admin/limits/profiles</code></td><td>Create a profile</td></tr>
-<tr><td>PUT</td><td><code>/api/admin/limits/profiles/:id</code></td><td>Update a profile</td></tr>
-<tr><td>DELETE</td><td><code>/api/admin/limits/profiles/:id</code></td><td>Delete a profile</td></tr>
-<tr><td>GET</td><td><code>/api/admin/limits/assignments</code></td><td>List assignments</td></tr>
-<tr><td>POST</td><td><code>/api/admin/limits/assignments</code></td><td>Assign profile to a route</td></tr>
-<tr><td>DELETE</td><td><code>/api/admin/limits/assignments/:id</code></td><td>Remove an assignment</td></tr>
-</tbody></table>
-</div>
-<p>Payloads align with DTOs in <code>rustygpt-shared/src/models/limits.rs</code> and are documented in <a href="../reference/api.html">REST API</a>.</p>
-<h3 id="create-a-profile"><a class="header" href="#create-a-profile">Create a Profile</a></h3>
-<pre><code class="language-http">POST /api/admin/limits/profiles
-Content-Type: application/json
-
-{
-  "name": "messages.fast-track",
-  "algorithm": "gcra",
-  "params": { "requests_per_second": 20, "burst": 40 },
-  "description": "Lenient burst bucket for trusted integrations"
-}
-</code></pre>
-<h3 id="assign-to-a-route"><a class="header" href="#assign-to-a-route">Assign to a Route</a></h3>
-<pre><code class="language-http">POST /api/admin/limits/assignments
-Content-Type: application/json
-
-{
-  "profile_id": "f26d1c7c-621c-4e9a-815c-21ed6f63c1db",
-  "method": "POST",
-  "path": "/api/messages/:id/reply"
-}
-</code></pre>
-<h2 id="runtime-matching"><a class="header" href="#runtime-matching">Runtime Matching</a></h2>
+<p><code>RateLimitState::reload_from_db</code> loads profiles and assignments into memory. The admin API under <code>/api/admin/limits/*</code> can
+create, update, or delete records at runtime; after each change the state refreshes automatically.</p>
+<h2 id="matching-logic"><a class="header" href="#matching-logic">Matching logic</a></h2>
+<p><code>enforce_rate_limits</code> computes a cache key as <code>"{METHOD} {path}"</code> and finds the first matching pattern. Supported patterns:</p>
 <ul>
-<li>Keys normalise to uppercase method + path pattern (<code>POST /api/messages/:id/reply</code>).</li>
-<li>Patterns support <code>*</code> suffix (<code>/api/admin/*</code>) and colon parameters (<code>:id</code>).</li>
-<li>Auth endpoints fallback to <code>auth_strategy</code> so login traffic cannot exhaust the global bucket.</li>
-<li>Defaults use <code>[default_rps, default_burst]</code> from configuration.</li>
+<li>Exact path matches (<code>/api/messages/{id}/reply</code> becomes <code>/api/messages/:id/reply</code> in the database)</li>
+<li><code>*</code> suffix for prefixes (e.g. <code>/api/admin/*</code>)</li>
 </ul>
-<p>Denials return:</p>
-<pre><code class="language-json">{
-  "code": "rate_limit_exceeded",
-  "message": "...",
-  "details": { "retry_after_seconds": 3 }
-}
-</code></pre>
-<p>Headers include <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code>, <code>RateLimit-Reset</code>, and <code>X-RateLimit-Profile</code>.</p>
-<h2 id="observability"><a class="header" href="#observability">Observability</a></h2>
-<p>Prometheus metrics:</p>
+<p>If no assignment matches, the middleware falls back to the default strategy derived from <code>[rate_limits.default_rps]</code> and
+<code>[rate_limits.burst]</code>. Login routes (<code>/api/auth/login</code>) use the dedicated <code>auth_login_per_ip_per_min</code> limiter.</p>
+<h2 id="metrics-and-headers"><a class="header" href="#metrics-and-headers">Metrics and headers</a></h2>
+<p>When a request is evaluated the middleware records:</p>
 <ul>
-<li><code>rustygpt_limits_profiles{count}</code></li>
-<li><code>rustygpt_limits_assignments{count}</code></li>
-<li><code>rustygpt_rate_limit_denials_total</code></li>
+<li><code>http_rate_limit_requests_total{profile,result}</code> – allowed vs denied counts</li>
+<li><code>http_rate_limit_remaining{profile}</code> – remaining tokens after the decision</li>
+<li><code>http_rate_limit_reset_seconds{profile}</code> – seconds until the bucket refills</li>
+<li><code>rustygpt_limits_profiles</code> / <code>rustygpt_limits_assignments</code> – gauges updated on reload</li>
 </ul>
-<p>Dashboards live in <code>deploy/grafana/limits.json</code>. Roll out configuration changes using <a href="../howto/docker-deploy.html">Docker Deploy</a> for production and validate with <code>lychee</code> or smoke tests in <a href="../guide/local-dev.html">Local Development</a>.</p>
+<p>Responses include the standard headers <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code>, <code>RateLimit-Reset</code>, and
+<code>X-RateLimit-Profile</code> so clients can react accordingly.</p>
+<h2 id="admin-api-payloads"><a class="header" href="#admin-api-payloads">Admin API payloads</a></h2>
+<p>All admin payloads live in <code>shared::models::limits</code>:</p>
+<ul>
+<li><code>CreateRateLimitProfileRequest</code></li>
+<li><code>UpdateRateLimitProfileRequest</code></li>
+<li><code>AssignRateLimitRequest</code></li>
+<li><code>RateLimitProfile</code> / <code>RateLimitAssignment</code></li>
+</ul>
+<p>These endpoints require an authenticated session with the <code>admin</code> role (<code>handlers/admin_limits.rs</code>).</p>
+<h2 id="conversation-posting-limits"><a class="header" href="#conversation-posting-limits">Conversation posting limits</a></h2>
+<p><code>ChatService::post_root_message</code> and <code>ChatService::reply_message</code> call <code>sp_user_can_post</code>, which enforces a GCRA window per
+<code>(user_id, conversation_id)</code> using <code>rustygpt.message_rate_limits</code>. Tweak the <code>conversation.post</code> profile via SQL or the admin
+API to adjust posting cadence.</p>
 
                     </main>
 

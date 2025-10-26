@@ -1,16 +1,18 @@
 ```mermaid
 sequenceDiagram
-  participant C as Client
-  participant GW as Gateway
-  participant HUB as StreamHub
-  participant DB as Event Log
-  C->>GW: POST /api/chat
-  GW->>HUB: enqueue request
-  HUB->>DB: persist event
-  HUB-->>C: SSE message
-  C->>GW: Last-Event-ID
-  GW->>HUB: replay request
-  HUB->>DB: load window
-  DB-->>HUB: persisted events
-  HUB-->>C: replay + live stream
+  participant Client
+  participant API as Axum /api
+  participant Hub as StreamHub
+  participant DB as rustygpt.sse_event_log
+
+  Client->>API: POST /api/threads/{conversation}/root
+  API->>Hub: publish ConversationStreamEvent
+  Hub->>Client: SSE event (thread.new)
+  Note over Hub,DB: if persistence enabled
+  Hub->>DB: sp_record_sse_event
+  Client->>API: reconnect with Last-Event-ID
+  API->>Hub: subscribe(after)
+  Hub->>DB: fn_load_recent_sse_events
+  DB-->>Hub: persisted events
+  Hub-->>Client: replay then live stream
 ```

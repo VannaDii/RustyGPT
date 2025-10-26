@@ -179,16 +179,14 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="architecture-overview"><a class="header" href="#architecture-overview">Architecture Overview</a></h1>
-<blockquote>
-<p>TL;DR – System-level views of RustyGPT services, data flows, and cross-cutting behaviours such as streaming and rate limiting.</p>
-</blockquote>
-<h2 id="whats-inside"><a class="header" href="#whats-inside">What’s Inside</a></h2>
+<p>These chapters document the runtime architecture of RustyGPT: how the Axum server is composed, how the SSE stream hub works,
+and how rate limiting integrates with PostgreSQL. Use them alongside the <a href="../concepts/index.html">concepts</a> and
+<a href="../reference/index.html">reference</a> sections when exploring the code.</p>
 <ul>
-<li><a href="service-topology.html">Service Topology</a> maps runtime components and communication paths.</li>
-<li><a href="streaming.html">Streaming Delivery</a> details the SSE fan-out model.</li>
-<li><a href="rate-limits.html">Rate-Limit Architecture</a> covers runtime throttling against Postgres-backed profiles.</li>
+<li><a href="service-topology.html">Service topology</a></li>
+<li><a href="streaming.html">Streaming delivery</a></li>
+<li><a href="rate-limits.html">Rate-limit architecture</a></li>
 </ul>
-<p>Pair these diagrams with conceptual background from <a href="../concepts/index.html">Concepts</a> and operational runbooks in <a href="../howto/index.html">How-to</a>.</p>
 
                     </main>
 

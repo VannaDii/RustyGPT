@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Docker Deploy - RustyGPT Documentation</title>
+        <title>Docker deploy - RustyGPT Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -178,40 +178,54 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="docker-deploy"><a class="header" href="#docker-deploy">Docker Deploy</a></h1>
-<blockquote>
-<p>TL;DR – Build RustyGPT images with Cargo, push to your registry, and deploy via Docker Compose or Kubernetes with environment-specific configuration.</p>
-</blockquote>
-<h2 id="build-containers"><a class="header" href="#build-containers">Build Containers</a></h2>
-<p>Use the provided multi-stage Dockerfile:</p>
-<pre><code class="language-bash">docker build -t registry.example.com/rustygpt/server:latest -f Dockerfile .
+                        <h1 id="docker-deploy"><a class="header" href="#docker-deploy">Docker deploy</a></h1>
+<p>This guide covers building the RustyGPT container image and running it alongside PostgreSQL with Docker Compose.</p>
+<h2 id="build-the-image"><a class="header" href="#build-the-image">Build the image</a></h2>
+<p>The repository ships a multi-stage <a href="../../Dockerfile"><code>Dockerfile</code></a> that builds the workspace and bundles the server binary plus
+static assets:</p>
+<pre><code class="language-bash">docker build -t rustygpt/server:latest -f Dockerfile .
 </code></pre>
-<p>Set <code>BUILD_PROFILE=release</code> for production builds. Verify the binary boots by running <code>docker run --rm -p 8080:8080 registry.example.com/rustygpt/server:latest</code>.</p>
-<h2 id="provision-dependencies"><a class="header" href="#provision-dependencies">Provision Dependencies</a></h2>
-<p>RustyGPT requires:</p>
+<p>Set <code>BUILD_PROFILE=release</code> to compile with optimisations. The final image exposes the server on port <code>8080</code>.</p>
+<h2 id="compose-stack"><a class="header" href="#compose-stack">Compose stack</a></h2>
+<p><a href="../../docker-compose.yaml"><code>docker-compose.yaml</code></a> defines two services:</p>
 <ul>
-<li>PostgreSQL 15+ with the schema in <code>deploy/postgres/migrations</code>.</li>
-<li>Optional Redis for caching (if enabled in config).</li>
-<li>HTTPS termination (e.g., Traefik or Nginx) that forwards SSE headers transparently.</li>
+<li><code>backend</code> – builds from the Dockerfile (target <code>runtime</code>). Environment variables include <code>DATABASE_URL</code>, OAuth credentials, and
+feature toggles. Update them to match your deployment.</li>
+<li><code>postgres</code> – <code>postgres:17-alpine</code> with credentials matching <code>config.example.toml</code>.</li>
 </ul>
-<p>Align credentials with the secrets workflow in <a href="rotate-secrets.html">Rotate Secrets</a>.</p>
-<h2 id="compose-deployment"><a class="header" href="#compose-deployment">Compose Deployment</a></h2>
-<pre><code class="language-bash">docker compose -f docker-compose.yaml up -d
+<p>Bring the stack up:</p>
+<pre><code class="language-bash">docker compose up --build
 </code></pre>
-<p>Review <code>docker-compose.yaml</code> for service names and volume mounts. Override environment settings via <code>.env</code> or Compose overrides when promoting to staging or production.</p>
-<h2 id="post-deployment-checks"><a class="header" href="#post-deployment-checks">Post-Deployment Checks</a></h2>
+<p>The compose file mounts <code>./.data/postgres</code> for database storage and <code>./.data/postgres-init</code> for init scripts. To reuse the
+workspace schema, copy the contents of <code>scripts/pg</code> into that directory before the first run:</p>
+<pre><code class="language-bash">mkdir -p .data/postgres-init
+cp -r scripts/pg/* .data/postgres-init/
+</code></pre>
+<p>Alternatively, rely on the server’s bootstrap runner by exposing the same directory inside the backend container and pointing
+<code>[db].bootstrap_path</code> at it.</p>
+<h2 id="configuration-and-secrets"><a class="header" href="#configuration-and-secrets">Configuration and secrets</a></h2>
+<ul>
+<li>Copy <code>config.example.toml</code> to a volume or bake it into the image and set <code>RUSTYGPT__CONFIG</code> variables as needed.</li>
+<li>Provide OAuth credentials (<code>GITHUB_*</code>, <code>APPLE_*</code>) if you plan to use those flows; otherwise the endpoints return placeholder
+URLs.</li>
+<li>Set <code>features.auth_v1</code>, <code>features.sse_v1</code>, and <code>features.well_known</code> to <code>true</code> via environment variables or the config file.</li>
+<li>If running behind TLS terminate HTTPS at the reverse proxy and set <code>server.public_base_url</code> to the external URL.</li>
+</ul>
+<h2 id="post-deployment-checks"><a class="header" href="#post-deployment-checks">Post-deployment checks</a></h2>
 <ol>
-<li>Hit <code>/api/health</code> until it returns <code>200</code>.</li>
-<li>Tail logs for <code>rustygpt_server</code> and ensure migrations succeeded.</li>
-<li>Exercise SSE streaming with <code>curl -N</code> as described in <a href="../architecture/streaming.html">Streaming Delivery</a>.</li>
-<li>Inspect Prometheus metrics at <code>/metrics</code>.</li>
+<li>Hit <code>http://HOST:8080/healthz</code> and <code>http://HOST:8080/readyz</code> until both return <code>200</code>.</li>
+<li>POST to <code>/api/setup</code> to create the initial admin account.</li>
+<li>Use the CLI container (or a local build) to log in: <code>docker compose exec backend rustygpt login</code>.</li>
+<li>Visit <code>/metrics</code> and confirm counters increment when making requests.</li>
+<li>If using the web UI, serve the <code>rustygpt-web</code> build either from the same container (set <code>[web.static_dir]</code>) or via a separate
+static host.</li>
 </ol>
 <h2 id="rollback"><a class="header" href="#rollback">Rollback</a></h2>
-<ul>
-<li>Keep the previous tag available in your registry.</li>
-<li>Downgrade via <code>docker compose pull</code> and <code>docker compose up -d</code>.</li>
-<li>Validate user sessions remain valid by following <a href="../guide/local-dev.html">Local Development</a> steps to test login flows in a sandbox environment first.</li>
-</ul>
+<p>Tag each release in your registry. To roll back:</p>
+<pre><code class="language-bash">docker compose pull backend:previous-tag
+docker compose up -d backend
+</code></pre>
+<p>The PostgreSQL data directory is persisted on disk so sessions and conversations remain intact.</p>
 
                     </main>
 

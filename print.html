@@ -180,653 +180,795 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="rustygpt-documentation"><a class="header" href="#rustygpt-documentation">RustyGPT Documentation</a></h1>
-<blockquote>
-<p>TL;DR – Everything you need to build, run, and extend RustyGPT with a pure Rust toolchain. Start with Quickstart, then dive into Concepts and Architecture for deeper system insight.</p>
-</blockquote>
-<p>Welcome to the RustyGPT docs. This site is:</p>
+<p>Welcome! This mdBook describes the RustyGPT workspace in depth: how the server and clients are structured, how the
+PostgreSQL-backed features behave, and how to operate the platform locally or in shared environments.</p>
+<p><em>Start with the guides to get a local environment running, then dive into the reference and architecture chapters for precise
+APIs and design notes.</em></p>
+<h2 id="quick-navigation"><a class="header" href="#quick-navigation">Quick navigation</a></h2>
 <ul>
-<li><strong>Rust-native</strong>: powered by mdBook with Rust preprocessors</li>
-<li><strong>Versioned</strong>: each release is immutable; <code>latest</code> tracks <code>main</code></li>
-<li><strong>Machine-friendly</strong>: LLM manifests are published beside the book</li>
+<li><a href="guide/quickstart.html">Quickstart</a> – configure and launch the server, web client, and CLI.</li>
+<li><a href="guide/local-dev.html">Local development</a> – watcher workflows, debugging tools, and environment variables.</li>
+<li><a href="reference/api.html">REST API</a> – endpoint catalogue for conversations, streaming, authentication, and admin features.</li>
+<li><a href="architecture/service-topology.html">Service topology</a> – how the Axum server, Yew SPA, PostgreSQL, and SSE stream hub fit together.</li>
 </ul>
-<h2 id="fast-links"><a class="header" href="#fast-links">Fast Links</a></h2>
+<h2 id="what-rustygpt-ships-today"><a class="header" href="#what-rustygpt-ships-today">What RustyGPT ships today</a></h2>
+<p>RustyGPT focuses on a cohesive Rust stack:</p>
 <ul>
-<li><a href="guide/quickstart.html">Quickstart</a></li>
-<li><a href="guide/local-dev.html">Local Development</a></li>
-<li><a href="architecture/streaming.html">Streaming Delivery</a></li>
-<li><a href="reference/api.html">REST API</a></li>
+<li><code>rustygpt-server</code> exposes REST + SSE endpoints with cookie-based auth (<code>handlers/auth.rs</code>), rate limiting
+(<code>middleware/rate_limit.rs</code>), and OpenAPI documentation (<code>openapi.rs</code>).</li>
+<li><code>rustygpt-web</code> is a Yew SPA that consumes the server API via <code>src/api.rs</code> and renders threaded conversations, presence, and
+typing indicators.</li>
+<li><code>rustygpt-cli</code> shares the same models as the server, providing commands for login, conversation inspection, SSE following, and
+OpenAPI generation (<code>src/commands</code>).</li>
+<li><code>rustygpt-shared</code> houses configuration loading, llama.cpp bindings, and the data transfer objects used across all crates.</li>
 </ul>
-<h2 id="about-rustygpt"><a class="header" href="#about-rustygpt">About RustyGPT</a></h2>
-<p>RustyGPT is a modular chat platform composed of a Rust backend, CLI tools, and a Yew-powered web client. The project emphasises deterministic reasoning, low-latency streaming, and reproducible deployments. For system context, read <a href="architecture/service-topology.html">Service Topology</a> and the shared <a href="concepts/reasoning-dag.html">Reasoning DAG</a>.</p>
-<h2 id="governance--support"><a class="header" href="#governance--support">Governance &amp; Support</a></h2>
-<p>Documentation changes follow the <a href="../CONTRIBUTING.html">docs review checklist</a> and this repository’s <a href="../CODE_OF_CONDUCT.html">CODE_OF_CONDUCT.md</a>. Open issues and proposals in the <code>docs</code> label so we can triage them efficiently.</p>
+<p>Each documentation section links back to the relevant modules so you can cross-reference behaviour with the implementation.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="guide-overview"><a class="header" href="#guide-overview">Guide Overview</a></h1>
-<blockquote>
-<p>TL;DR – Step-by-step walkthroughs for installing, running, and validating RustyGPT locally and in shared environments.</p>
-</blockquote>
-<h2 id="when-to-use-guides"><a class="header" href="#when-to-use-guides">When To Use Guides</a></h2>
-<p>Follow these pages when you need concrete instructions from a clean starting state. They assume minimal prior knowledge and reference hand-off artifacts, configuration files, and CLI commands.</p>
-<h2 id="featured-walkthroughs"><a class="header" href="#featured-walkthroughs">Featured Walkthroughs</a></h2>
+<p>These walkthroughs assume you are starting from a fresh checkout. They show how to configure <code>config.toml</code>, run the
+Axum server, keep the Yew frontend hot-reloading, and validate that authentication + streaming work end to end.</p>
 <ul>
-<li><a href="guide/quickstart.html">Quickstart</a> to get a local instance running.</li>
-<li><a href="guide/local-dev.html">Local Development</a> to wire watchers and smoke tests.</li>
+<li><a href="guide/quickstart.html">Quickstart</a> bootstraps the database, enables feature flags, and walks through the setup flow.</li>
+<li><a href="guide/local-dev.html">Local Development</a> documents the <code>just</code> recipes, watcher processes, and debugging tips.</li>
 </ul>
-<p>Prefer conceptual context? Jump to <a href="guide/../concepts/index.html">Concepts</a>. For operational checklists, head to the <a href="guide/../howto/index.html">How-to</a> section.</p>
+<p>For conceptual background jump to <a href="guide/../concepts/index.html">Concepts</a>; for task-specific runbooks see <a href="guide/../howto/index.html">How-to</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="quickstart"><a class="header" href="#quickstart">Quickstart</a></h1>
 <blockquote>
-<p>TL;DR – Install the Rust 2024 toolchain, run the RustyGPT server and web UI locally, and verify streaming chat flows with seeded demo data.</p>
+<p>TL;DR – copy <code>config.example.toml</code>, enable the feature flags you need, start PostgreSQL, run the Axum server, complete the
+<code>/api/setup</code> flow, then bring up the Yew frontend and CLI.</p>
 </blockquote>
-<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<h2 id="1-prerequisites"><a class="header" href="#1-prerequisites">1. Prerequisites</a></h2>
 <ul>
-<li>Rust 1.81+ with <code>rustup</code> configured for the 2024 edition</li>
-<li><code>cargo</code> and <code>just</code> on your <code>PATH</code></li>
-<li>PostgreSQL 15+ accessible at <code>postgres://localhost</code></li>
+<li>Rust toolchain (<code>rustup default stable</code>), <code>cargo</code>, and <a href="https://just.systems"><code>just</code></a></li>
+<li><a href="https://trunkrs.dev/"><code>trunk</code></a> for the web client (<code>cargo install trunk</code>)</li>
+<li>PostgreSQL 15+ running locally (the provided <code>docker-compose.yaml</code> exposes one at <code>postgres://tinroof:rusty@localhost:5432/rusty_gpt</code>)</li>
+<li>Optional: llama.cpp-compatible model files if you plan to exercise assistant streaming</li>
 </ul>
-<p>Install workspace dependencies:</p>
-<pre><code class="language-bash">rustup default stable
-cargo fetch --workspace
-just install
+<p>Fetch dependencies once:</p>
+<pre><code class="language-bash">cargo fetch --workspace
 </code></pre>
-<p>For a deeper dive into the dev environment, see <a href="guide/local-dev.html">Local Development</a>.</p>
-<h2 id="start-the-backend"><a class="header" href="#start-the-backend">Start the Backend</a></h2>
-<ol>
-<li>Apply the SQL migrations in <code>deploy/postgres/migrations</code> using your preferred tool.</li>
-<li>Launch the server with configuration pointing at your database:</li>
-</ol>
+<h2 id="2-configure-the-server"><a class="header" href="#2-configure-the-server">2. Configure the server</a></h2>
+<p>Create <code>config.toml</code> and adjust it for your environment:</p>
+<pre><code class="language-bash">cp config.example.toml config.toml
+</code></pre>
+<p>At minimum set:</p>
+<pre><code class="language-toml">[db]
+url = "postgres://tinroof:rusty@localhost/rustygpt_dev"
+
+[features]
+auth_v1 = true
+sse_v1 = true
+well_known = true
+</code></pre>
+<p><code>rustygpt-shared::config::server::Config</code> supports TOML/YAML/JSON files and environment overrides (e.g.
+<code>RUSTYGPT__SERVER__PORT=8080</code>). See <a href="guide/../reference/config.html">Configuration</a> for the complete matrix of keys.</p>
+<h2 id="3-start-postgresql"><a class="header" href="#3-start-postgresql">3. Start PostgreSQL</a></h2>
+<p>If you are using Docker Compose:</p>
+<pre><code class="language-bash">docker compose up postgres -d
+</code></pre>
+<p>On server startup the bootstrap runner executes every SQL script under <code>scripts/pg/{schema,procedures,indexes,seed}</code> in order.
+The seed stage enables feature flags and inserts the default rate-limit profile (<code>conversation.post</code>).</p>
+<h2 id="4-run-the-backend"><a class="header" href="#4-run-the-backend">4. Run the backend</a></h2>
+<p>Either launch directly:</p>
+<pre><code class="language-bash">cargo run -p rustygpt-server -- serve --port 8080
+</code></pre>
+<p>or use the helper recipe that also builds configuration if needed:</p>
 <pre><code class="language-bash">just run-server
 </code></pre>
-<p>Health checks respond at <code>http://localhost:8080/api/health</code>. The chat SSE endpoint is documented under <a href="guide/../reference/api.html">REST API</a>.</p>
-<h2 id="build-the-web-client"><a class="header" href="#build-the-web-client">Build the Web Client</a></h2>
-<p>Open a new terminal and run:</p>
+<p>The process listens on <code>http://127.0.0.1:8080</code>. Health probes are available at <code>/api/healthz</code> and <code>/api/readyz</code>.</p>
+<h2 id="5-complete-initial-setup"><a class="header" href="#5-complete-initial-setup">5. Complete initial setup</a></h2>
+<p>The first authenticated user is created by POSTing to <code>/api/setup</code>:</p>
+<pre><code class="language-bash">curl -X POST http://127.0.0.1:8080/api/setup \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","email":"admin@example.com","password":"change-me"}'
+</code></pre>
+<p>Subsequent calls return <code>400</code> once a user already exists.</p>
+<h2 id="6-start-the-web-client"><a class="header" href="#6-start-the-web-client">6. Start the web client</a></h2>
+<p>In a new terminal:</p>
 <pre><code class="language-bash">cd rustygpt-web
 trunk serve
 </code></pre>
-<p>The Yew client proxies API calls to the backend. Log in using seeded credentials from <code>deploy/dev-seed.sql</code>. Confirm that streaming responses appear in the conversation view; troubleshooting tips live in <a href="guide/../architecture/streaming.html">Streaming Delivery</a>.</p>
-<h2 id="seed-demo-data"><a class="header" href="#seed-demo-data">Seed Demo Data</a></h2>
-<p>Load the included demo dataset to populate agents and sample conversations:</p>
-<pre><code class="language-bash">psql $DATABASE_URL -f deploy/dev-seed.sql
+<p>The SPA proxies <code>/api/*</code> requests to the backend. After logging in you should see:</p>
+<ul>
+<li>Conversation list populated by <code>GET /api/conversations/{conversation_id}/threads</code></li>
+<li>Thread view that streams updates from <code>/api/stream/conversations/{conversation_id}</code></li>
+<li>Presence and typing indicators driven by <code>ConversationStreamEvent</code> payloads</li>
+</ul>
+<h2 id="7-exercise-the-cli"><a class="header" href="#7-exercise-the-cli">7. Exercise the CLI</a></h2>
+<p>The <code>rustygpt</code> binary shares configuration and cookie handling with the server:</p>
+<pre><code class="language-bash">cargo run -p rustygpt-cli -- login
+cargo run -p rustygpt-cli -- chat --conversation &lt;conversation-uuid&gt;
+cargo run -p rustygpt-cli -- follow --root &lt;thread-uuid&gt;
 </code></pre>
-<p>After seeding, visit the dashboard and run a few prompts to validate token usage counters. Follow the operational checklist in <a href="guide/../howto/docker-deploy.html">Docker Deploy</a> before promoting to shared environments.</p>
+<p><code>follow</code> connects to the SSE endpoint, reconstructs events, and prints deltas as they arrive. If you see <code>authentication required</code>
+errors, confirm you completed the setup step and that <code>[features].auth_v1</code> is <code>true</code>.</p>
+<h2 id="8-next-steps"><a class="header" href="#8-next-steps">8. Next steps</a></h2>
+<ul>
+<li>Review <a href="guide/local-dev.html">Local Development</a> for watcher workflows, linting, and debugging tips.</li>
+<li>Explore <a href="guide/../reference/api.html">REST API</a> for a full endpoint catalogue and payload shapes.</li>
+<li>Consult <a href="guide/../architecture/service-topology.html">Service Topology</a> to understand how the components interact at runtime.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="local-development"><a class="header" href="#local-development">Local Development</a></h1>
 <blockquote>
-<p>TL;DR – Configure environment variables, run the server, CLI, and web client together, and tighten the feedback loop with watch commands.</p>
+<p>TL;DR – keep <code>config.toml</code> in sync with your environment, use <code>just dev</code> for paired watchers, and rely on the CLI for quick
+smoke tests of authentication and streaming.</p>
 </blockquote>
-<h2 id="environment-setup"><a class="header" href="#environment-setup">Environment Setup</a></h2>
-<p>Copy the sample configuration and customise secrets for local use:</p>
-<pre><code class="language-bash">cp config.example.toml config.toml
-</code></pre>
-<p>Set <code>DATABASE_URL</code>, <code>OPENAI_API_KEY</code> (if required), and optional SMTP credentials in your shell or using <code>.env</code>. Refer to <a href="guide/../reference/config.html">Configuration</a> for the full list of supported keys.</p>
-<h2 id="run-watchers"><a class="header" href="#run-watchers">Run Watchers</a></h2>
-<p>Use <code>just</code> to orchestrate simultaneous watchers:</p>
-<pre><code class="language-bash">just dev
-</code></pre>
-<p>This spawns an auto-reloading backend (<code>rustygpt-server</code>) and a Trunk-powered Yew frontend. Logs route to stdout, and the SSE stream is available at <code>http://localhost:8080/api/chat/stream</code>.</p>
-<p>For targeted backend iterations, run:</p>
-<pre><code class="language-bash">cargo watch -x 'test -p rustygpt-server'
-</code></pre>
-<h2 id="cli-tooling"><a class="header" href="#cli-tooling">CLI Tooling</a></h2>
-<p>Build the CLI for quick smoke tests:</p>
-<pre><code class="language-bash">cargo run -p rustygpt-cli -- chat "Summarise deployment state"
-</code></pre>
-<p>The CLI shares configuration parsing with the server, so ensure the same <code>.env</code> is loaded. Inspect token accounting and stream behaviour in <a href="guide/../architecture/streaming.html">Streaming Delivery</a>.</p>
-<h2 id="debugging"><a class="header" href="#debugging">Debugging</a></h2>
-<ul>
-<li>View tracing spans by setting <code>RUST_LOG=rustygpt=debug,tower_http=info</code>.</li>
-<li>Inspect SSE payloads with <code>curl -N http://localhost:8080/api/chat/stream</code>.</li>
-<li>When debugging auth issues, follow the runbook in <a href="guide/../howto/rotate-secrets.html">Rotate Secrets</a>.</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="concepts-overview"><a class="header" href="#concepts-overview">Concepts Overview</a></h1>
-<blockquote>
-<p>TL;DR – Core principles that underpin RustyGPT’s reasoning, data model, and invariants.</p>
-</blockquote>
-<h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>Concept pages explain <em>why</em> the system behaves the way it does. They define vocabulary, invariants, and trade-offs that appear across codebases and operational guides.</p>
-<h2 id="featured-concepts"><a class="header" href="#featured-concepts">Featured Concepts</a></h2>
-<ul>
-<li><a href="concepts/reasoning-dag.html">Reasoning DAG</a> describes branching and joins in the orchestrator.</li>
-<li><a href="concepts/dimensioned-entities.html">Dimensioned Entities</a> shows how metadata travels through services.</li>
-</ul>
-<p>Use these pages alongside <a href="concepts/../architecture/index.html">Architecture</a> to connect ideas with concrete components.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="reasoning-dag"><a class="header" href="#reasoning-dag">Reasoning DAG</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT models agent reasoning as a directed acyclic graph so parallel branches can explore hypotheses while preserving deterministic joins.</p>
-</blockquote>
-<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
-<p>RustyGPT splits complex prompts into nodes that represent specialised reasoning steps—retrieval, tool execution, synthesis, and user messaging. Nodes execute concurrently when dependencies permit, then merge downstream results. The orchestrator’s scheduler lives in <code>rustygpt-server/src/reasoning</code>.</p>
-<h2 id="node-types"><a class="header" href="#node-types">Node Types</a></h2>
-<div class="table-wrapper"><table><thead><tr><th>Node</th><th>Purpose</th></tr></thead><tbody>
-<tr><td><code>Prompt</code></td><td>Emits the initial LLM prompt</td></tr>
-<tr><td><code>Retriever</code></td><td>Executes vector or keyword search</td></tr>
-<tr><td><code>Tool</code></td><td>Calls out to deterministic actions</td></tr>
-<tr><td><code>Reducer</code></td><td>Merges branch outputs</td></tr>
-<tr><td><code>Responder</code></td><td>Streams user-facing tokens</td></tr>
-</tbody></table>
-</div>
-<p>Each node publishes structured telemetry through <code>rustygpt-shared::telemetry</code>, enabling downstream analytics and reliability alerts.</p>
-<h2 id="benefits"><a class="header" href="#benefits">Benefits</a></h2>
-<ul>
-<li><strong>Determinism</strong> – Branch IDs are deterministic, enabling reproducible transcripts.</li>
-<li><strong>Parallelism</strong> – Low-latency branches (e.g., caching, fast lookups) unblock slower tool invocations.</li>
-<li><strong>Observability</strong> – Joins track input provenance, aiding postmortems and safety audits.</li>
-</ul>
-<p>See <a href="concepts/../architecture/streaming.html">Streaming Delivery</a> for how reducer output flows to SSE clients.</p>
-<h2 id="extending-the-graph"><a class="header" href="#extending-the-graph">Extending the Graph</a></h2>
-<p>New node types implement the <code>ReasoningNode</code> trait. Add integration tests under <code>rustygpt-server/tests/reasoning.rs</code> to validate invariants. Captured node metadata propagates to the <a href="concepts/../reference/api.html">REST API</a> for clients that reconstruct reasoning trails.</p>
-<h2 id="related-concepts"><a class="header" href="#related-concepts">Related Concepts</a></h2>
-<ul>
-<li><a href="concepts/dimensioned-entities.html">Dimensioned Entities</a> define the typed payloads that move through each edge.</li>
-<li><a href="concepts/../architecture/service-topology.html">Service Topology</a> explains where reasoning orchestration runs relative to other services.</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="dimensioned-entities"><a class="header" href="#dimensioned-entities">Dimensioned Entities</a></h1>
-<blockquote>
-<p>TL;DR – Dimensioned entities annotate RustyGPT data structures with semantic and temporal dimensions so downstream systems can reason about provenance and lifecycle.</p>
-</blockquote>
-<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
-<p>Conversation transcripts, tool inputs, and generated artifacts need contextual metadata to remain auditable. Dimensioned entities encode:</p>
-<ul>
-<li><strong>Subject</strong> – the domain object (<code>conversation</code>, <code>agent</code>, <code>session</code>).</li>
-<li><strong>Scope</strong> – user, tenant, or system ownership.</li>
-<li><strong>Temporal dimension</strong> – creation time, last mutation, retention deadline.</li>
-<li><strong>Sensitivity</strong> – policy hints for redaction and export.</li>
-</ul>
-<p>These attributes ride along with each payload in <code>rustygpt-shared</code>, ensuring services apply the right policies without duplicating logic.</p>
-<h2 id="implementation"><a class="header" href="#implementation">Implementation</a></h2>
-<ul>
-<li>Structs derive <code>Dimensioned</code> via a procedural macro that injects helpers for tagging and serialisation.</li>
-<li><code>rustygpt-server</code> enforces scope isolation using the dimension metadata during database queries.</li>
-<li>Export pipelines honour retention windows by consulting the temporal dimensions before emitting records.</li>
-</ul>
-<p>Refer to <a href="concepts/reasoning-dag.html">Reasoning DAG</a> for how dimensions propagate across reasoning nodes.</p>
-<h2 id="usage-guidelines"><a class="header" href="#usage-guidelines">Usage Guidelines</a></h2>
-<ul>
-<li>Prefer explicit dimensions over ad-hoc metadata fields.</li>
-<li>When introducing a new entity, document its semantics under <a href="concepts/../reference/config.html">Configuration</a> if tunable.</li>
-<li>Include dimension checks in integration tests to catch accidental policy regressions.</li>
-</ul>
-<h2 id="further-reading"><a class="header" href="#further-reading">Further Reading</a></h2>
-<ul>
-<li><a href="concepts/../architecture/service-topology.html">Service Topology</a> shows where dimension enforcement lives in the runtime.</li>
-<li><a href="concepts/../howto/rotate-secrets.html">Rotate Secrets</a> demonstrates applying dimension metadata during credential refresh workflows.</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="architecture-overview"><a class="header" href="#architecture-overview">Architecture Overview</a></h1>
-<blockquote>
-<p>TL;DR – System-level views of RustyGPT services, data flows, and cross-cutting behaviours such as streaming and rate limiting.</p>
-</blockquote>
-<h2 id="whats-inside"><a class="header" href="#whats-inside">What’s Inside</a></h2>
-<ul>
-<li><a href="architecture/service-topology.html">Service Topology</a> maps runtime components and communication paths.</li>
-<li><a href="architecture/streaming.html">Streaming Delivery</a> details the SSE fan-out model.</li>
-<li><a href="architecture/rate-limits.html">Rate-Limit Architecture</a> covers runtime throttling against Postgres-backed profiles.</li>
-</ul>
-<p>Pair these diagrams with conceptual background from <a href="architecture/../concepts/index.html">Concepts</a> and operational runbooks in <a href="architecture/../howto/index.html">How-to</a>.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="streaming-delivery"><a class="header" href="#streaming-delivery">Streaming Delivery</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT streams conversation updates over Server-Sent Events (SSE) with persisted replay, ensuring reconnecting clients rebuild state without losing tokens.</p>
-</blockquote>
-<h2 id="diagram"><a class="header" href="#diagram">Diagram</a></h2>
-<pre class="mermaid">sequenceDiagram
-  participant C as Client
-  participant GW as Gateway
-  participant HUB as StreamHub
-  participant DB as Event Log
-  C-&gt;&gt;GW: POST /api/chat
-  GW-&gt;&gt;HUB: enqueue request
-  HUB-&gt;&gt;DB: persist event
-  HUB--&gt;&gt;C: SSE message
-  C-&gt;&gt;GW: Last-Event-ID
-  GW-&gt;&gt;HUB: replay request
-  HUB-&gt;&gt;DB: load window
-  DB--&gt;&gt;HUB: persisted events
-  HUB--&gt;&gt;C: replay + live stream
-</pre>
-<p><em>Caption: SSE requests flow through the gateway, persist to the event log, and replay before live streaming.</em></p>
-<p>See <a href="architecture/service-topology.html">Service Topology</a> for broader context on how StreamHub integrates with other components.</p>
-<h2 id="event-model"><a class="header" href="#event-model">Event Model</a></h2>
-<p>All SSE messages share the shape <code>{ "type": "...", "payload": { ... } }</code> defined in <code>shared::models::ConversationStreamEvent</code>.</p>
-<div class="table-wrapper"><table><thead><tr><th>Event name</th><th>Description</th></tr></thead><tbody>
-<tr><td><code>thread.new</code></td><td>New thread summary</td></tr>
-<tr><td><code>thread.activity</code></td><td>Updated activity timestamp for a thread</td></tr>
-<tr><td><code>message.delta</code></td><td>Streaming chunk for an in-flight assistant reply</td></tr>
-<tr><td><code>message.done</code></td><td>Completion marker plus usage stats</td></tr>
-<tr><td><code>presence.update</code></td><td>User presence status update</td></tr>
-<tr><td><code>typing.update</code></td><td>Typing indicator with expiry timestamp</td></tr>
-<tr><td><code>unread.update</code></td><td>Unread count snapshot for a thread</td></tr>
-<tr><td><code>membership.changed</code></td><td>Conversation membership mutation</td></tr>
-<tr><td><code>error</code></td><td>Terminal errors propagated to the client</td></tr>
-</tbody></table>
-</div>
-<p>The <code>root_id</code> field keeps replay ordering stable for thread-scoped events.</p>
-<h2 id="persistence-window"><a class="header" href="#persistence-window">Persistence Window</a></h2>
-<p><code>rustygpt.sse_event_log</code> stores a rolling window controlled by:</p>
-<ul>
-<li><code>sse.persistence.retention_hours</code> (clamped 24–72h)</li>
-<li><code>sse.persistence.max_events_per_user</code> (replay batch size)</li>
-</ul>
-<p>Key stored procedures in <code>services::sse_persistence</code>:</p>
-<ul>
-<li><code>record_event(conversation_id, record)</code> – invoked alongside live fan-out</li>
-<li><code>load_recent_events(conversation_id, limit)</code> – fetches the most recent persisted window</li>
-<li><code>load_events_after(conversation_id, last_sequence, limit)</code> – used when clients send <code>Last-Event-ID</code></li>
-</ul>
-<p><code>StreamHub::subscribe</code> merges persisted and live events by sequence before emitting to SSE clients.</p>
-<h2 id="replay-contract"><a class="header" href="#replay-contract">Replay Contract</a></h2>
+<h2 id="environment-configuration"><a class="header" href="#environment-configuration">Environment configuration</a></h2>
+<p>All binaries load configuration through <code>rustygpt-shared::config::server::Config</code>. The loader merges:</p>
 <ol>
-<li>Clients send <code>Last-Event-ID</code> (or <code>since=</code> query param) when reconnecting.</li>
-<li>The server replays persisted rows newer than the recorded sequence before live events resume.</li>
-<li>Responses include <code>event.id</code> fields combining <code>root_id</code>, <code>message_id</code>, and sequence (<code>rowid:messageid:sequence</code> for deltas).</li>
-<li>When the window no longer covers a requested sequence, clients re-sync via REST APIs using <a href="architecture/../reference/api.html">REST API</a>.</li>
+<li>Built-in defaults selected by the active profile (Dev/Test/Prod)</li>
+<li>Optional <code>config.toml</code> / <code>config.yaml</code> / <code>config.json</code></li>
+<li>Environment variables such as <code>RUSTYGPT__SERVER__PORT=9000</code></li>
+<li>CLI overrides (e.g. <code>cargo run -p rustygpt-server -- serve --port 9000</code>)</li>
 </ol>
-<p>Metrics emitted during replay:</p>
+<p>Keep secrets out of the repo—override them with environment variables or a private <code>config.toml</code>. See
+<a href="guide/../reference/config.html">Configuration</a> for the full key list.</p>
+<h2 id="watcher-workflows"><a class="header" href="#watcher-workflows">Watcher workflows</a></h2>
+<p>The <a href="guide/../../Justfile"><code>Justfile</code></a> orchestrates the common flows:</p>
+<pre><code class="language-bash"># Run server + web watchers together (uses rustygpt-tools/confuse)
+just dev
+
+# Backend only hot-reload
+just watch-server
+
+# Run fmt, check, and clippy
+just check
+</code></pre>
+<p><code>just dev</code> spawns two subprocesses:</p>
 <ul>
-<li><code>rustygpt_sse_replay_events_total{type=...}</code></li>
-<li><code>rustygpt_sse_replay_duration_ms</code></li>
+<li><code>rustygpt-server</code> via <code>cargo watch -x 'run -- serve --port 8080'</code></li>
+<li><code>rustygpt-web</code> via <code>trunk watch</code></li>
 </ul>
-<p>Dashboards live in <code>deploy/grafana/sse.json</code>; see <a href="architecture/../howto/docker-deploy.html">Docker Deploy</a> for production rollouts.</p>
-<h2 id="client-responsibilities"><a class="header" href="#client-responsibilities">Client Responsibilities</a></h2>
+<p>Logs stream to stdout so you can confirm when migrations finish (<code>db_bootstrap_*</code> metrics) and when the SSE hub accepts
+connections.</p>
+<h2 id="cli-smoke-tests"><a class="header" href="#cli-smoke-tests">CLI smoke tests</a></h2>
+<p>The CLI binary lives at <code>rustygpt-cli</code>. Useful commands while iterating:</p>
+<pre><code class="language-bash"># Launch the server directly from the CLI crate
+cargo run -p rustygpt-cli -- serve --port 8080
+
+# Generate the OpenAPI spec
+cargo run -p rustygpt-cli -- spec openapi.yaml
+
+# Generate config skeletons
+cargo run -p rustygpt-cli -- config --format toml
+
+# Manage sessions
+cargo run -p rustygpt-cli -- login
+cargo run -p rustygpt-cli -- me
+cargo run -p rustygpt-cli -- logout
+</code></pre>
+<p>CLI commands reuse the same cookie jar as the web client. Cookies are stored under <code>~/.config/rustygpt/session.cookies</code> by
+default (see <code>[cli]</code> in the configuration schema).</p>
+<h2 id="debugging-tips"><a class="header" href="#debugging-tips">Debugging tips</a></h2>
 <ul>
-<li>React to <code>X-Session-Rotated</code> headers and retry the SSE connection if a <code>401</code> with <code>WWW-Authenticate: session</code> arrives.</li>
-<li>Accept persisted events interleaved with live ones.</li>
-<li>Honour CSRF tokens for any POST/DELETE calls triggered by replayed events.</li>
+<li>Enable verbose tracing: <code>RUST_LOG=rustygpt_server=debug,tower_http=info just run-server</code></li>
+<li>Inspect SSE payloads: <code>curl -N http://127.0.0.1:8080/api/stream/conversations/&lt;conversation-id&gt;</code> (requires an authenticated
+session and <code>features.sse_v1 = true</code>)</li>
+<li>Verify configuration resolution: <code>cargo run -p rustygpt-cli -- config --format json</code> and inspect the generated file</li>
+<li>Regenerate database bindings or seed data by restarting the server; bootstrap scripts rerun automatically when the process
+starts</li>
+<li>Use <code>docker compose logs postgres</code> if migrations fail during bootstrap</li>
 </ul>
-<p>For end-to-end reliability, combine this guidance with <a href="architecture/../howto/rotate-secrets.html">Rotate Secrets</a> to avoid invalidating sessions mid-stream.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="service-topology"><a class="header" href="#service-topology">Service Topology</a></h1>
-<blockquote>
-<p>TL;DR – The RustyGPT platform pairs an Axum-based API, background workers, and a Yew web client connected through message queues and SSE streams.</p>
-</blockquote>
+<p>For operational playbooks (e.g. Docker deployment or rotating secrets) see the <a href="guide/../howto/index.html">How-to</a> section.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="concepts-overview"><a class="header" href="#concepts-overview">Concepts Overview</a></h1>
+<p>This section explains the core ideas that appear across the server, web client, and CLI. Use it to understand the vocabulary
+used in API responses and stream payloads before diving into the reference material.</p>
+<ul>
+<li><a href="concepts/reasoning-dag.html">Threaded conversations</a> describes how messages, threads, and <code>ConversationStreamEvent</code> values relate to each
+other.</li>
+<li><a href="concepts/dimensioned-entities.html">Shared models</a> covers the <code>rustygpt-shared</code> crate, focusing on how typed DTOs and enums keep clients
+in sync with the server.</li>
+</ul>
+<p>Pair these concepts with the <a href="concepts/../architecture/index.html">Architecture</a> diagrams to see where each part lives at runtime.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="threaded-conversations"><a class="header" href="#threaded-conversations">Threaded conversations</a></h1>
+<p>RustyGPT models chat history as <strong>threaded conversations</strong> stored in PostgreSQL. Each conversation has participants, invites,
+thread roots, and replies. The server exposes this structure through the DTOs in <code>rustygpt-shared/src/models/chat.rs</code>.</p>
+<h2 id="core-data-types"><a class="header" href="#core-data-types">Core data types</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Type</th><th>Purpose</th><th>Defined in</th></tr></thead><tbody>
+<tr><td><code>ConversationCreateRequest</code></td><td>Payload for creating a new conversation.</td><td><code>shared::models::chat</code></td></tr>
+<tr><td><code>ThreadTreeResponse</code></td><td>Depth-first snapshot of a thread including metadata for each node.</td><td><code>shared::models::chat</code></td></tr>
+<tr><td><code>MessageChunk</code></td><td>Persisted assistant output chunk (used when streaming replies).</td><td><code>shared::models::chat</code></td></tr>
+<tr><td><code>ConversationStreamEvent</code></td><td>Enum describing SSE events (<code>thread.new</code>, <code>message.delta</code>, etc.).</td><td><code>shared::models::chat</code></td></tr>
+</tbody></table>
+</div>
+<p>Each thread is anchored by a root message (<code>POST /api/threads/{conversation_id}/root</code>). Replies hang off the tree using parent
+IDs (<code>POST /api/messages/{message_id}/reply</code>). The <code>ThreadTreeResponse</code> payload includes ancestry hints so clients can render the
+structure without additional queries.</p>
+<h2 id="streaming-lifecycle"><a class="header" href="#streaming-lifecycle">Streaming lifecycle</a></h2>
+<p>When <code>features.sse_v1 = true</code>, the server emits <code>ConversationStreamEvent</code> variants via <code>StreamHub</code> (<code>handlers/streaming.rs</code>). The
+naming mirrors the enum variants:</p>
+<ul>
+<li><code>thread.new</code> – new thread summary created</li>
+<li><code>thread.activity</code> – updated <code>last_activity_at</code></li>
+<li><code>message.delta</code> – incremental assistant tokens (<code>ChatDeltaChunk</code>)</li>
+<li><code>message.done</code> – completion marker with usage stats</li>
+<li><code>presence.update</code> – user presence heartbeat</li>
+<li><code>typing.update</code> – typing indicator state</li>
+<li><code>unread.update</code> – unread count per thread root</li>
+<li><code>membership.changed</code> – conversation membership change</li>
+<li><code>error</code> – terminal failure while streaming</li>
+</ul>
+<p>Events carry both the <code>conversation_id</code> and (when applicable) <code>root_id</code> so clients can scope updates precisely. SSE persistence is
+optional: enable <code>[sse.persistence]</code> in configuration to record events in <code>rustygpt.sse_event_log</code> via
+<code>services::sse_persistence</code> and replay them on reconnect.</p>
+<h2 id="access-control"><a class="header" href="#access-control">Access control</a></h2>
+<p>The chat service (<code>services::chat_service.rs</code>) enforces membership checks and rate limits before mutating data. Rate limit
+profiles are backed by tables in <code>scripts/pg/schema/040_rate_limits.sql</code> and can be tuned via the admin API. Presence updates
+mark the acting user online and emit events so all subscribers stay consistent.</p>
+<p>For endpoint details see <a href="concepts/../reference/api.html">REST API</a>; for the transport-level diagram visit
+<a href="concepts/../architecture/streaming.html">Streaming Delivery</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="shared-models"><a class="header" href="#shared-models">Shared models</a></h1>
+<p><code>rustygpt-shared</code> centralises the data structures consumed by the server, web client, and CLI. Keeping these DTOs in one crate
+prevents drift between components and allows <code>serde</code> + <code>utoipa</code> derives to stay consistent.</p>
+<h2 id="configuration-loader"><a class="header" href="#configuration-loader">Configuration loader</a></h2>
+<p><code>src/config/server.rs</code> defines the <code>Config</code> struct and associated sub-structures (<code>ServerConfig</code>, <code>RateLimitConfig</code>,
+<code>SseConfig</code>, etc.). Every binary loads configuration through <code>Config::load_config</code>, which merges defaults, optional files, and
+environment overrides. Feature flags such as <code>features.auth_v1</code> gate server subsystems without requiring code changes.</p>
+<h2 id="api-payloads"><a class="header" href="#api-payloads">API payloads</a></h2>
+<p>The <code>src/models</code> directory contains strongly typed request/response structs:</p>
+<ul>
+<li><code>models/chat.rs</code> – conversations, threads, message payloads, and streaming events</li>
+<li><code>models/oauth.rs</code> – GitHub/Apple OAuth exchanges</li>
+<li><code>models/setup.rs</code> – first-time setup contract (<code>SetupRequest</code>, <code>SetupResponse</code>)</li>
+<li><code>models/limits.rs</code> – rate limit admin DTOs (<code>CreateRateLimitProfileRequest</code>, <code>RateLimitAssignment</code>, ...)</li>
+<li><code>models/session.rs</code> – session summaries returned by <code>/api/auth/*</code></li>
+</ul>
+<p>All types derive <code>Serialize</code>, <code>Deserialize</code>, and when relevant <code>utoipa::ToSchema</code> so the OpenAPI generator stays in sync.</p>
+<h2 id="llm-abstractions"><a class="header" href="#llm-abstractions">LLM abstractions</a></h2>
+<p><code>src/llms</code> exposes traits (<code>LLMProvider</code>, <code>LLMModel</code>) and helpers for llama.cpp integration. The server’s
+<code>AssistantService</code> uses these traits to stream responses and emit metrics (<code>llm_model_cache_hits_total</code>, <code>llm_model_load_seconds</code>).
+When you add a new provider, implement the traits here and update the configuration schema.</p>
+<h2 id="why-it-matters"><a class="header" href="#why-it-matters">Why it matters</a></h2>
+<ul>
+<li><strong>Type safety</strong> – clients compile against the same structs the server uses, catching breaking changes early.</li>
+<li><strong>Single-source documentation</strong> – OpenAPI docs and mdBook pages pull names directly from these types.</li>
+<li><strong>Testing</strong> – shared fixtures in <code>shared::models</code> make it easier to write integration tests that cover both server handlers and
+CLI commands.</li>
+</ul>
+<p>Whenever you extend the API, add or update the relevant struct in <code>rustygpt-shared</code> first, then regenerate the OpenAPI spec with
+<code>cargo run -p rustygpt-cli -- spec</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="architecture-overview"><a class="header" href="#architecture-overview">Architecture Overview</a></h1>
+<p>These chapters document the runtime architecture of RustyGPT: how the Axum server is composed, how the SSE stream hub works,
+and how rate limiting integrates with PostgreSQL. Use them alongside the <a href="architecture/../concepts/index.html">concepts</a> and
+<a href="architecture/../reference/index.html">reference</a> sections when exploring the code.</p>
+<ul>
+<li><a href="architecture/service-topology.html">Service topology</a></li>
+<li><a href="architecture/streaming.html">Streaming delivery</a></li>
+<li><a href="architecture/rate-limits.html">Rate-limit architecture</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="streaming-delivery"><a class="header" href="#streaming-delivery">Streaming delivery</a></h1>
+<p>RustyGPT streams conversation activity to authenticated clients over Server-Sent Events (SSE). The implementation lives in
+<code>rustygpt-server/src/handlers/streaming.rs</code> and is gated by <code>features.sse_v1</code>.</p>
+<h2 id="flow"><a class="header" href="#flow">Flow</a></h2>
+<pre class="mermaid">sequenceDiagram
+  participant Client
+  participant API as Axum /api
+  participant Hub as StreamHub
+  participant DB as rustygpt.sse_event_log
+
+  Client-&gt;&gt;API: POST /api/threads/{conversation}/root
+  API-&gt;&gt;Hub: publish ConversationStreamEvent
+  Hub-&gt;&gt;Client: SSE event (thread.new)
+  Note over Hub,DB: if persistence enabled
+  Hub-&gt;&gt;DB: sp_record_sse_event
+  Client-&gt;&gt;API: reconnect with Last-Event-ID
+  API-&gt;&gt;Hub: subscribe(after)
+  Hub-&gt;&gt;DB: fn_load_recent_sse_events
+  DB--&gt;&gt;Hub: persisted events
+  Hub--&gt;&gt;Client: replay then live stream
+</pre>
+<p>Clients subscribe to <code>/api/stream/conversations/:conversation_id</code>. The route is protected by the auth middleware when
+<code>features.auth_v1</code> is enabled, so callers must present a valid session cookie (the CLI handles this automatically).</p>
+<h2 id="event-payloads"><a class="header" href="#event-payloads">Event payloads</a></h2>
+<p>Events are instances of <code>shared::models::ConversationStreamEvent</code> and are encoded as JSON envelopes with <code>type</code> and <code>payload</code>
+fields. See <a href="architecture/../concepts/reasoning-dag.html">Threaded conversations</a> for the full list of variants.</p>
+<p>The SSE handler assigns monotonically increasing sequence numbers per conversation. When persistence is enabled the sequence is
+also stored in <code>rustygpt.sse_event_log</code>, allowing reconnecting clients to pass <code>Last-Event-ID</code> and receive any missed events
+before resuming the live stream.</p>
+<h2 id="persistence-and-retention"><a class="header" href="#persistence-and-retention">Persistence and retention</a></h2>
+<p>Configure persistence via <code>[sse.persistence]</code> in <code>config.toml</code>:</p>
+<pre><code class="language-toml">[sse.persistence]
+enabled = true
+max_events_per_user = 500
+prune_batch_size = 100
+retention_hours = 48
+</code></pre>
+<p><code>services::sse_persistence</code> stores events using the stored procedures in <code>scripts/pg/schema/050_sse_persistence.sql</code>. The pruning
+logic runs after each insert to keep the table bounded.</p>
+<h2 id="backpressure-handling"><a class="header" href="#backpressure-handling">Backpressure handling</a></h2>
+<p>The in-memory queue for each conversation defaults to <code>channel_capacity = 128</code>. Configure behaviour under <code>[sse.backpressure]</code>:</p>
+<ul>
+<li><code>drop_strategy = "drop_tokens"</code> drops assistant token events first</li>
+<li><code>drop_strategy = "drop_tokens_and_system"</code> also discards system events once the queue fills</li>
+<li><code>warn_queue_ratio</code> controls when a warning is logged about queue pressure</li>
+</ul>
+<p>These settings keep hot conversations from exhausting memory while still delivering key state changes (presence, membership,
+unread counters).</p>
+<h2 id="client-responsibilities"><a class="header" href="#client-responsibilities">Client responsibilities</a></h2>
+<ul>
+<li>Reconnect with <code>Last-Event-ID</code> so the server can replay persisted events when available</li>
+<li>Handle <code>401</code> responses by re-running the session refresh flow (<code>/api/auth/refresh</code>); the CLI and web client do this
+automatically</li>
+<li>Clear typing state on <code>typing.update</code> and update unread counters when <code>unread.update</code> arrives</li>
+</ul>
+<p>Use <a href="architecture/../reference/api.html">REST API</a> endpoints to backfill state when the requested <code>Last-Event-ID</code> falls outside the retention
+window.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="service-topology"><a class="header" href="#service-topology">Service topology</a></h1>
+<p>RustyGPT is composed of a single Axum process backed by PostgreSQL. The web client and CLI talk to the same REST + SSE surface.</p>
 <h2 id="components"><a class="header" href="#components">Components</a></h2>
 <ul>
-<li><strong>API Gateway</strong> – <code>rustygpt-server</code> exposes REST, SSE, and WebSocket endpoints. It authenticates requests, orchestrates reasoning DAG execution, and streams results via <a href="architecture/streaming.html">Streaming Delivery</a>.</li>
-<li><strong>Workers</strong> – Background jobs handle embedding refresh, summarisation, and rate-limit enforcement using <code>tokio</code> tasks driven by Postgres notifications.</li>
-<li><strong>Shared Library</strong> – <code>rustygpt-shared</code> provides DTOs, telemetry, and dimensioned entity traits consumed by server, CLI, and web crates.</li>
-<li><strong>Clients</strong> – The Yew SPA and CLI share the same API surface described in <a href="architecture/../reference/api.html">REST API</a>.</li>
+<li><strong>Axum API (<code>rustygpt-server</code>)</strong> – exposes <code>/api/*</code> endpoints, authentication middleware, rate limiting, SSE, OpenAPI docs,
+health probes, metrics, and static file hosting.</li>
+<li><strong>PostgreSQL</strong> – stores users, sessions, conversations, threads, SSE history, and rate-limit configuration. Schema and stored
+procedures live in <code>scripts/pg</code> and are applied automatically during bootstrap.</li>
+<li><strong>SSE StreamHub</strong> – in-memory fan-out implemented in <code>handlers/streaming.rs</code>, optionally persisting events through
+<code>services::sse_persistence</code>.</li>
+<li><strong>Yew SPA (<code>rustygpt-web</code>)</strong> – compiled to WebAssembly with Trunk. <code>src/api.rs</code> handles authentication, CSRF, SSE reconnection,
+and REST calls for conversations/threads.</li>
+<li><strong>CLI (<code>rustygpt-cli</code>)</strong> – shares configuration and models with the server. Provides helper commands for session management,
+SSE following, and OpenAPI/config generation.</li>
 </ul>
-<h2 id="data-flow"><a class="header" href="#data-flow">Data Flow</a></h2>
+<h2 id="data-flow"><a class="header" href="#data-flow">Data flow</a></h2>
 <pre class="mermaid">flowchart LR
-  user[User]
-  web[Yew Web]
-  cli[CLI]
-  api[Axum API]
-  hub[SSE StreamHub]
-  db[(Postgres)]
-  mq[(Notifications)]
+  subgraph Clients
+    web[Yew web app]
+    cli[CLI]
+  end
+  api[Axum /api]
+  stream[StreamHub]
+  db[(PostgreSQL)]
 
-  user --&gt; web
-  user --&gt; cli
   web --&gt; api
   cli --&gt; api
   api --&gt; db
-  api --&gt; hub
-  hub --&gt; web
-  hub --&gt; cli
-  db --&gt; mq
-  mq --&gt; api
+  api --&gt; stream
+  stream --&gt; web
+  stream --&gt; cli
 </pre>
-<p><em>Caption: Requests traverse the API, persist to Postgres, and fan out through StreamHub to connected clients.</em></p>
-<h2 id="operational-notes"><a class="header" href="#operational-notes">Operational Notes</a></h2>
+<p><em>Requests hit the Axum router, which talks to PostgreSQL via SQLx and fans out live events via StreamHub. Clients subscribe to
+<code>/api/stream/conversations/:conversation_id</code> to receive updates.</em></p>
+<h2 id="feature-flags"><a class="header" href="#feature-flags">Feature flags</a></h2>
+<p>Many subsystems are gated by <code>[features]</code> in configuration:</p>
 <ul>
-<li>All components share observability through <code>tracing</code> and Prometheus exporters. Dashboards are stored under <code>deploy/grafana</code>.</li>
-<li>Config values are centralised; see <a href="architecture/../reference/config.html">Configuration</a> for environment variable mapping.</li>
-<li>Secrets rotate in place using the workflow documented in <a href="architecture/../howto/rotate-secrets.html">Rotate Secrets</a>.</li>
+<li><code>auth_v1</code> – enables session middleware, <code>/api/auth/*</code>, protected routes, and the rate-limit admin API</li>
+<li><code>sse_v1</code> – enables the SSE route and persistence options</li>
+<li><code>well_known</code> – serves <code>.well-known/*</code> entries from the config</li>
 </ul>
-<h2 id="scaling"><a class="header" href="#scaling">Scaling</a></h2>
-<p>Scale horizontally by running multiple API pods behind a load balancer. Sticky sessions are not required because StreamHub tracks subscription state via durable IDs. Worker concurrency scales with <code>RUSTYGPT_WORKER_CONCURRENCY</code>, documented in <a href="architecture/../howto/docker-deploy.html">Docker Deploy</a>.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="rate-limit-architecture"><a class="header" href="#rate-limit-architecture">Rate-Limit Architecture</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT enforces per-route throttling through Postgres-backed profiles cached in memory, exposing admin APIs for live tuning.</p>
-</blockquote>
-<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
+<p>Toggle these flags without recompiling the binaries.</p>
+<h2 id="scaling-notes"><a class="header" href="#scaling-notes">Scaling notes</a></h2>
+<p>The server is stateless apart from in-memory SSE buffers. For horizontal scaling you must either:</p>
 <ul>
-<li><code>rustygpt.rate_limit_profiles</code> – GCRA parameters (<code>algorithm</code>, <code>params</code> JSON, optional description).</li>
-<li><code>rustygpt.rate_limit_assignments</code> – Maps <code>{method, path_pattern}</code> pairs to profiles.</li>
-<li><code>rustygpt.message_rate_limits</code> – Conversation-scoped throttling reused by the chat service.</li>
+<li>Disable persistence and tolerate best-effort delivery, or</li>
+<li>Configure <code>[sse.persistence]</code> so each instance replays from PostgreSQL on reconnect</li>
 </ul>
-<p>Stored procedures (<code>sp_limits_*</code>) manage CRUD operations. After each change, call <code>RateLimitState::reload_from_db</code> to refresh the cache.</p>
-<h2 id="admin-api"><a class="header" href="#admin-api">Admin API</a></h2>
-<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
-<tr><td>GET</td><td><code>/api/admin/limits/profiles</code></td><td>List profiles</td></tr>
-<tr><td>POST</td><td><code>/api/admin/limits/profiles</code></td><td>Create a profile</td></tr>
-<tr><td>PUT</td><td><code>/api/admin/limits/profiles/:id</code></td><td>Update a profile</td></tr>
-<tr><td>DELETE</td><td><code>/api/admin/limits/profiles/:id</code></td><td>Delete a profile</td></tr>
-<tr><td>GET</td><td><code>/api/admin/limits/assignments</code></td><td>List assignments</td></tr>
-<tr><td>POST</td><td><code>/api/admin/limits/assignments</code></td><td>Assign profile to a route</td></tr>
-<tr><td>DELETE</td><td><code>/api/admin/limits/assignments/:id</code></td><td>Remove an assignment</td></tr>
-</tbody></table>
-</div>
-<p>Payloads align with DTOs in <code>rustygpt-shared/src/models/limits.rs</code> and are documented in <a href="architecture/../reference/api.html">REST API</a>.</p>
-<h3 id="create-a-profile"><a class="header" href="#create-a-profile">Create a Profile</a></h3>
-<pre><code class="language-http">POST /api/admin/limits/profiles
-Content-Type: application/json
-
-{
-  "name": "messages.fast-track",
-  "algorithm": "gcra",
-  "params": { "requests_per_second": 20, "burst": 40 },
-  "description": "Lenient burst bucket for trusted integrations"
-}
-</code></pre>
-<h3 id="assign-to-a-route"><a class="header" href="#assign-to-a-route">Assign to a Route</a></h3>
-<pre><code class="language-http">POST /api/admin/limits/assignments
-Content-Type: application/json
-
-{
-  "profile_id": "f26d1c7c-621c-4e9a-815c-21ed6f63c1db",
-  "method": "POST",
-  "path": "/api/messages/:id/reply"
-}
-</code></pre>
-<h2 id="runtime-matching"><a class="header" href="#runtime-matching">Runtime Matching</a></h2>
+<p>Rate limiting already supports multi-instance deployments because configuration is stored in the database and periodically
+reloaded (<code>RateLimitState::reload_from_db</code>).</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="rate-limit-architecture"><a class="header" href="#rate-limit-architecture">Rate-limit architecture</a></h1>
+<p>RustyGPT enforces per-route throttling using a leaky-bucket strategy implemented in <code>middleware::rate_limit</code>. Configuration
+comes from two tables managed by stored procedures in <code>scripts/pg/procs/034_limits.sql</code>.</p>
+<h2 id="data-model"><a class="header" href="#data-model">Data model</a></h2>
 <ul>
-<li>Keys normalise to uppercase method + path pattern (<code>POST /api/messages/:id/reply</code>).</li>
-<li>Patterns support <code>*</code> suffix (<code>/api/admin/*</code>) and colon parameters (<code>:id</code>).</li>
-<li>Auth endpoints fallback to <code>auth_strategy</code> so login traffic cannot exhaust the global bucket.</li>
-<li>Defaults use <code>[default_rps, default_burst]</code> from configuration.</li>
+<li><code>rustygpt.rate_limit_profiles</code> – named profiles containing algorithm + JSON parameters (currently <code>gcra</code> style with
+<code>requests_per_second</code> / <code>burst</code> options).</li>
+<li><code>rustygpt.rate_limit_assignments</code> – maps HTTP method + path pattern to a profile.</li>
+<li><code>rustygpt.message_rate_limits</code> – per-user, per-conversation state used by <code>sp_user_can_post</code> to throttle message posting.</li>
 </ul>
-<p>Denials return:</p>
-<pre><code class="language-json">{
-  "code": "rate_limit_exceeded",
-  "message": "...",
-  "details": { "retry_after_seconds": 3 }
-}
-</code></pre>
-<p>Headers include <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code>, <code>RateLimit-Reset</code>, and <code>X-RateLimit-Profile</code>.</p>
-<h2 id="observability"><a class="header" href="#observability">Observability</a></h2>
-<p>Prometheus metrics:</p>
+<p><code>RateLimitState::reload_from_db</code> loads profiles and assignments into memory. The admin API under <code>/api/admin/limits/*</code> can
+create, update, or delete records at runtime; after each change the state refreshes automatically.</p>
+<h2 id="matching-logic"><a class="header" href="#matching-logic">Matching logic</a></h2>
+<p><code>enforce_rate_limits</code> computes a cache key as <code>"{METHOD} {path}"</code> and finds the first matching pattern. Supported patterns:</p>
 <ul>
-<li><code>rustygpt_limits_profiles{count}</code></li>
-<li><code>rustygpt_limits_assignments{count}</code></li>
-<li><code>rustygpt_rate_limit_denials_total</code></li>
+<li>Exact path matches (<code>/api/messages/{id}/reply</code> becomes <code>/api/messages/:id/reply</code> in the database)</li>
+<li><code>*</code> suffix for prefixes (e.g. <code>/api/admin/*</code>)</li>
 </ul>
-<p>Dashboards live in <code>deploy/grafana/limits.json</code>. Roll out configuration changes using <a href="architecture/../howto/docker-deploy.html">Docker Deploy</a> for production and validate with <code>lychee</code> or smoke tests in <a href="architecture/../guide/local-dev.html">Local Development</a>.</p>
+<p>If no assignment matches, the middleware falls back to the default strategy derived from <code>[rate_limits.default_rps]</code> and
+<code>[rate_limits.burst]</code>. Login routes (<code>/api/auth/login</code>) use the dedicated <code>auth_login_per_ip_per_min</code> limiter.</p>
+<h2 id="metrics-and-headers"><a class="header" href="#metrics-and-headers">Metrics and headers</a></h2>
+<p>When a request is evaluated the middleware records:</p>
+<ul>
+<li><code>http_rate_limit_requests_total{profile,result}</code> – allowed vs denied counts</li>
+<li><code>http_rate_limit_remaining{profile}</code> – remaining tokens after the decision</li>
+<li><code>http_rate_limit_reset_seconds{profile}</code> – seconds until the bucket refills</li>
+<li><code>rustygpt_limits_profiles</code> / <code>rustygpt_limits_assignments</code> – gauges updated on reload</li>
+</ul>
+<p>Responses include the standard headers <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code>, <code>RateLimit-Reset</code>, and
+<code>X-RateLimit-Profile</code> so clients can react accordingly.</p>
+<h2 id="admin-api-payloads"><a class="header" href="#admin-api-payloads">Admin API payloads</a></h2>
+<p>All admin payloads live in <code>shared::models::limits</code>:</p>
+<ul>
+<li><code>CreateRateLimitProfileRequest</code></li>
+<li><code>UpdateRateLimitProfileRequest</code></li>
+<li><code>AssignRateLimitRequest</code></li>
+<li><code>RateLimitProfile</code> / <code>RateLimitAssignment</code></li>
+</ul>
+<p>These endpoints require an authenticated session with the <code>admin</code> role (<code>handlers/admin_limits.rs</code>).</p>
+<h2 id="conversation-posting-limits"><a class="header" href="#conversation-posting-limits">Conversation posting limits</a></h2>
+<p><code>ChatService::post_root_message</code> and <code>ChatService::reply_message</code> call <code>sp_user_can_post</code>, which enforces a GCRA window per
+<code>(user_id, conversation_id)</code> using <code>rustygpt.message_rate_limits</code>. Tweak the <code>conversation.post</code> profile via SQL or the admin
+API to adjust posting cadence.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="reference-overview"><a class="header" href="#reference-overview">Reference Overview</a></h1>
-<blockquote>
-<p>TL;DR – Authoritative details for RustyGPT’s public surfaces: authentication, REST endpoints, and configuration keys.</p>
-</blockquote>
-<h2 id="quick-navigation"><a class="header" href="#quick-navigation">Quick Navigation</a></h2>
+<p>Authoritative details for RustyGPT’s public surfaces:</p>
 <ul>
-<li><a href="reference/authentication.html">Authentication</a> – session lifecycle, CSRF, and metrics.</li>
-<li><a href="reference/api.html">REST API</a> – endpoint catalogue for clients and tools.</li>
-<li><a href="reference/config.html">Configuration</a> – environment variables and TOML structure.</li>
+<li><a href="reference/authentication.html">Authentication</a> – session cookies, setup flow, and rotation behaviour</li>
+<li><a href="reference/api.html">REST API</a> – endpoint catalogue grouped by feature area</li>
+<li><a href="reference/config.html">Configuration</a> – <code>config.toml</code> structure and environment overrides</li>
 </ul>
-<p>Reference pages favour precision over storytelling. For workflows that combine these primitives, consult the <a href="reference/../howto/index.html">How-to</a> section. When architecture informs an interface contract, the relevant page links back to <a href="reference/../architecture/index.html">Architecture</a>.</p>
+<p>For operational workflows see <a href="reference/../howto/index.html">How-to</a>; for high-level design context visit the
+<a href="reference/../architecture/index.html">Architecture</a> section.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="authentication"><a class="header" href="#authentication">Authentication</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT authenticates with HttpOnly cookie sessions backed by Postgres, providing rotation, CSRF protection, and admin observability.</p>
-</blockquote>
-<h2 id="session-endpoints"><a class="header" href="#session-endpoints">Session Endpoints</a></h2>
-<p>All session APIs live under <code>/api/auth</code> and return JSON with the authenticated user and timestamps (<code>issued_at</code>, <code>expires_at</code>, <code>absolute_expires_at</code>).</p>
-<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
-<tr><td>POST</td><td><code>/api/auth/login</code></td><td>Verifies credentials and issues session</td></tr>
-<tr><td>POST</td><td><code>/api/auth/refresh</code></td><td>Rotates session inside idle window</td></tr>
-<tr><td>GET</td><td><code>/api/auth/me</code></td><td>Returns the current session summary</td></tr>
-<tr><td>POST</td><td><code>/api/auth/logout</code></td><td>Revokes the active session</td></tr>
-</tbody></table>
-</div>
-<p>Successful responses include:</p>
+<p>RustyGPT uses cookie-based sessions backed by PostgreSQL. Session management lives in <code>rustygpt-server/src/auth/session.rs</code> and
+is exposed through <code>/api/auth/*</code> handlers when <code>features.auth_v1 = true</code>.</p>
+<h2 id="session-lifecycle"><a class="header" href="#session-lifecycle">Session lifecycle</a></h2>
+<ol>
+<li><strong>Setup</strong> – <code>POST /api/setup</code> hashes the supplied password and inserts the first user (admin + member roles). Further calls
+are rejected.</li>
+<li><strong>Login</strong> – <code>POST /api/auth/login</code> verifies credentials via <code>sp_auth_login</code>. Successful responses include:
 <ul>
-<li><code>Set-Cookie: sid=...; HttpOnly; Secure; SameSite=Lax</code></li>
+<li><code>Set-Cookie: SESSION_ID=...; HttpOnly; Secure?; SameSite=Lax</code></li>
 <li><code>Set-Cookie: CSRF-TOKEN=...; SameSite=Strict</code></li>
-<li><code>X-Session-Rotated: 1</code> when rotation occurs</li>
+<li><code>X-Session-Rotated: 1</code></li>
 </ul>
-<p>Unauthorized responses set <code>WWW-Authenticate: session</code> so clients can attempt a silent refresh. See <a href="reference/api.html">REST API</a> for the broader surface area.</p>
-<h2 id="session-lifecycle"><a class="header" href="#session-lifecycle">Session Lifecycle</a></h2>
-<p>Configuration lives in <code>[session]</code> (see <a href="reference/config.html">Configuration</a>):</p>
+</li>
+<li><strong>Authenticated requests</strong> – non-GET operations must include the CSRF header <code>X-CSRF-TOKEN</code> with the cookie value. The web
+client (<code>rustygpt-web/src/api.rs</code>) and CLI handle this automatically.</li>
+<li><strong>Refresh</strong> – <code>POST /api/auth/refresh</code> rotates cookies inside the idle window (default 8 hours). If either idle or absolute
+expiry is exceeded, the call returns <code>401 session_expired</code>.</li>
+<li><strong>Logout</strong> – <code>POST /api/auth/logout</code> clears the session and CSRF cookies.</li>
+</ol>
+<p>Sessions are stored in <code>rustygpt.user_sessions</code>. The idle and absolute windows come from <code>[session]</code> in configuration. When
+<code>max_sessions_per_user</code> is set the newest session evicts the oldest via <code>sp_auth_login</code>.</p>
+<h2 id="cookie-configuration"><a class="header" href="#cookie-configuration">Cookie configuration</a></h2>
+<p><code>config.toml</code> controls cookie behaviour:</p>
 <pre><code class="language-toml">[session]
 idle_seconds = 28800
 absolute_seconds = 604800
-session_cookie_name = "sid"
+session_cookie_name = "SESSION_ID"
 csrf_cookie_name = "CSRF-TOKEN"
 max_sessions_per_user = 5
+
+[security.cookie]
+domain = ""
+secure = false
+same_site = "lax"
+
+[security.csrf]
+cookie_name = "CSRF-TOKEN"
+header_name = "X-CSRF-TOKEN"
+enabled = true
 </code></pre>
-<ul>
-<li><strong>Sliding rotation</strong> – any authenticated request inside the idle window extends the session and may rotate cookies.</li>
-<li><strong>Absolute lifetime</strong> – once <code>absolute_seconds</code> elapse, <code>/api/auth/refresh</code> returns <code>401 session_expired</code>.</li>
-<li><strong>Privilege changes</strong> – stored procedures mark rows with <code>requires_rotation = TRUE</code>, forcing cookie refresh.</li>
-<li><strong>Max concurrent sessions</strong> – newest sessions evict the oldest when the cap is exceeded.</li>
-</ul>
-<p>Stored procedures <code>rustygpt.sp_auth_login</code> and <code>sp_auth_refresh</code> encapsulate Argon2id verification and rotation logic.</p>
-<h2 id="csrf-enforcement"><a class="header" href="#csrf-enforcement">CSRF Enforcement</a></h2>
-<p>Non-GET requests outside <code>/api/auth/*</code> must include:</p>
-<ul>
-<li><code>X-CSRF-Token</code> header</li>
-<li><code>CSRF-TOKEN</code> cookie</li>
-</ul>
-<p>Failures return <code>403 Forbidden</code>. Exemptions: GET/HEAD/OPTIONS, SSE streaming endpoints, and <code>/api/auth/*</code>.</p>
-<h2 id="client-guidance"><a class="header" href="#client-guidance">Client Guidance</a></h2>
-<ul>
-<li>Persist both cookies; the session id stays HttpOnly while the CSRF token is user-accessible.</li>
-<li>On <code>401</code> with <code>WWW-Authenticate: session</code>, call <code>/api/auth/refresh</code> once before retrying.</li>
-<li>On logout, delete cookies and redirect to <code>/login</code>.</li>
-</ul>
-<p>CLI smoke tests:</p>
-<pre><code class="language-bash">cargo run -p rustygpt-cli -- auth login
-cargo run -p rustygpt-cli -- auth me
+<p>Adjust <code>security.cookie.secure</code> and <code>security.cookie.domain</code> for production deployments. When <code>security.csrf.enabled = false</code>
+the middleware skips header validation (useful for service-to-service calls but not recommended for browsers).</p>
+<h2 id="cli-workflow"><a class="header" href="#cli-workflow">CLI workflow</a></h2>
+<p>The CLI wraps the same endpoints:</p>
+<pre><code class="language-bash">cargo run -p rustygpt-cli -- login
+cargo run -p rustygpt-cli -- me
+cargo run -p rustygpt-cli -- logout
 </code></pre>
-<h2 id="observability-1"><a class="header" href="#observability-1">Observability</a></h2>
-<p>Prometheus metrics:</p>
-<ul>
-<li><code>rustygpt_auth_logins_total{result=...}</code></li>
-<li><code>rustygpt_auth_session_rotations_total{reason=...}</code></li>
-<li><code>rustygpt_auth_active_sessions{user_role}</code></li>
-</ul>
-<p>Dashboards live in <code>deploy/grafana/auth.json</code>. Integrate rotation procedures with <a href="reference/../howto/rotate-secrets.html">Rotate Secrets</a> when updating signing keys.</p>
-<h2 id="cutover-runbook"><a class="header" href="#cutover-runbook">Cutover Runbook</a></h2>
-<ol>
-<li>Apply migrations (<code>010_auth.sql</code>, <code>034_limits.sql</code>, <code>040_rate_limits.sql</code>, <code>050_sse_persistence.sql</code>).</li>
-<li>Deploy backend, then web + CLI to pick up DTO changes.</li>
-<li>Force rotations with <code>SELECT rustygpt.sp_auth_mark_rotation(id, 'cutover') FROM rustygpt.users;</code>.</li>
-<li>Smoke test via CLI and web UI.</li>
-</ol>
-<p>If issues arise, follow the incident response guidance in <a href="reference/../howto/docker-deploy.html">Docker Deploy</a>.</p>
+<p>Cookies are stored at <code>~/.config/rustygpt/session.cookies</code> by default (see <code>[cli.session_store]</code>). The <code>follow</code> and <code>chat</code>
+commands automatically attach the CSRF header when present.</p>
+<h2 id="observability"><a class="header" href="#observability">Observability</a></h2>
+<p>Authentication currently relies on logs for troubleshooting. Set <code>RUST_LOG=rustygpt_server=debug</code> to trace session decisions
+(<code>SessionService::authenticate</code>, <code>SessionService::refresh_session</code>). Prometheus metrics for auth flows are not yet implemented.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="rest-api"><a class="header" href="#rest-api">REST API</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT exposes authenticated REST and SSE endpoints for conversations, admin tooling, and health checks; prefer relative URLs from the web or CLI clients.</p>
-</blockquote>
-<h2 id="authentication-1"><a class="header" href="#authentication-1">Authentication</a></h2>
-<p>All endpoints require session cookies issued by <code>/api/auth/login</code>. See <a href="reference/config.html">Configuration</a> for cookie settings and rotation windows. Clients must include <code>X-CSRF-Token</code> for non-GET requests outside <code>/api/auth/*</code>.</p>
-<h2 id="core-endpoints"><a class="header" href="#core-endpoints">Core Endpoints</a></h2>
-<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody>
-<tr><td>GET</td><td><code>/api/health</code></td><td>Liveness probe</td></tr>
-<tr><td>GET</td><td><code>/api/chat/stream</code></td><td>SSE stream for live token output</td></tr>
-<tr><td>POST</td><td><code>/api/chat</code></td><td>Submit a prompt to the reasoning engine</td></tr>
-<tr><td>GET</td><td><code>/api/conversations/:id</code></td><td>Fetch conversation messages and metadata</td></tr>
-<tr><td>POST</td><td><code>/api/conversations/:id/reply</code></td><td>Continue a conversation</td></tr>
-<tr><td>GET</td><td><code>/api/tools</code></td><td>List available deterministic tools</td></tr>
-</tbody></table>
-</div>
-<h3 id="authentication-service"><a class="header" href="#authentication-service">Authentication Service</a></h3>
+<p>All endpoints are served under <code>/api</code> unless noted otherwise. Session cookies and CSRF headers are required for non-authenticated
+GET requests when <code>features.auth_v1</code> is enabled. The OpenAPI schema is generated from <code>rustygpt-server/src/openapi.rs</code> and can
+be exported with <code>cargo run -p rustygpt-cli -- spec</code>.</p>
+<h2 id="setup"><a class="header" href="#setup">Setup</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
-<tr><td>POST</td><td><code>/api/auth/login</code></td><td>Verify credentials and issue session</td></tr>
-<tr><td>POST</td><td><code>/api/auth/refresh</code></td><td>Rotate cookies within the idle window</td></tr>
-<tr><td>GET</td><td><code>/api/auth/me</code></td><td>Return authenticated profile</td></tr>
-<tr><td>POST</td><td><code>/api/auth/logout</code></td><td>Revoke the current session</td></tr>
+<tr><td>GET</td><td><code>/api/setup</code></td><td>Returns <code>{ "is_setup": bool }</code> by calling <code>is_setup()</code> in PostgreSQL.</td></tr>
+<tr><td>POST</td><td><code>/api/setup</code></td><td>Creates the first administrator account (see <code>scripts/pg/procs/010_auth.sql::init_setup</code>). Subsequent calls return <code>400</code>.</td></tr>
 </tbody></table>
 </div>
-<p>Extended flows are documented in <a href="reference/../howto/rotate-secrets.html">Rotate Secrets</a>.</p>
-<h2 id="admin--operations"><a class="header" href="#admin--operations">Admin &amp; Operations</a></h2>
-<p>Rate-limit endpoints are guarded by the <code>admin</code> role and <code>config.rate_limits.admin_api_enabled = true</code>.</p>
-<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody>
-<tr><td>GET</td><td><code>/api/admin/limits/profiles</code></td><td>List rate-limit profiles</td></tr>
-<tr><td>POST</td><td><code>/api/admin/limits/profiles</code></td><td>Create a profile</td></tr>
-<tr><td>PUT</td><td><code>/api/admin/limits/profiles/:id</code></td><td>Update a profile</td></tr>
-<tr><td>DELETE</td><td><code>/api/admin/limits/profiles/:id</code></td><td>Delete a profile</td></tr>
-<tr><td>GET</td><td><code>/api/admin/limits/assignments</code></td><td>List route assignments</td></tr>
-<tr><td>POST</td><td><code>/api/admin/limits/assignments</code></td><td>Assign profile to route</td></tr>
-<tr><td>DELETE</td><td><code>/api/admin/limits/assignments/:id</code></td><td>Remove an assignment</td></tr>
+<h2 id="authentication-1"><a class="header" href="#authentication-1">Authentication</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>POST</td><td><code>/api/auth/login</code></td><td>Email/password login. Returns <code>LoginResponse</code> with session + CSRF cookies.</td></tr>
+<tr><td>POST</td><td><code>/api/auth/logout</code></td><td>Revokes the current session. Requires CSRF header.</td></tr>
+<tr><td>POST</td><td><code>/api/auth/refresh</code></td><td>Rotates session cookies inside the idle window.</td></tr>
+<tr><td>GET</td><td><code>/api/auth/me</code></td><td>Returns <code>MeResponse</code> (requires authenticated session).</td></tr>
 </tbody></table>
 </div>
-<p>Refer to <a href="reference/../architecture/streaming.html">Streaming Delivery</a> for SSE message structure that accompanies these endpoints.</p>
-<h2 id="error-model"><a class="header" href="#error-model">Error Model</a></h2>
-<p>Errors follow the envelope:</p>
-<pre><code class="language-json">{
-  "code": "rate_limit_exceeded",
-  "message": "Human readable explanation",
-  "details": {
-    "retry_after_seconds": 3
-  }
-}
-</code></pre>
-<p>Each response sets <code>trace_id</code> headers for correlation with logs. Retries should respect <code>Retry-After</code> where present.</p>
-<h2 id="openapi"><a class="header" href="#openapi">OpenAPI</a></h2>
-<p><code>rustygpt-server</code> exposes OpenAPI JSON/YAML via <code>/api/openapi.json</code> and <code>/api/openapi.yaml</code>. Import the schema into clients to generate strongly typed SDKs. Keep the spec in sync with code changes and surface changelog entries in <a href="reference/../changelog/index.html">Release Notes</a>.</p>
+<h3 id="oauth-helpers"><a class="header" href="#oauth-helpers">OAuth helpers</a></h3>
+<p>Handlers in <code>handlers/github_auth.rs</code> and <code>handlers/apple_auth.rs</code> expose optional OAuth flows when credentials are present:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Notes</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/api/oauth/github</code></td><td>Returns an authorization URL based on <code>GITHUB_*</code> environment variables.</td></tr>
+<tr><td>GET</td><td><code>/api/oauth/github/callback</code></td><td>Exchanges the code for a session via <code>ProductionOAuthService</code>.</td></tr>
+<tr><td>POST</td><td><code>/api/oauth/github/manual</code></td><td>Developer helper that accepts a raw auth code.</td></tr>
+<tr><td>GET</td><td><code>/api/oauth/apple</code></td><td>Same as GitHub but for Apple.</td></tr>
+<tr><td>GET</td><td><code>/api/oauth/apple/callback</code></td><td>Callback handler.</td></tr>
+<tr><td>POST</td><td><code>/api/oauth/apple/manual</code></td><td>Manual exchange helper.</td></tr>
+</tbody></table>
+</div>
+<h2 id="conversations--membership"><a class="header" href="#conversations--membership">Conversations &amp; membership</a></h2>
+<p>Routes implemented in <code>handlers/conversations.rs</code>:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>POST</td><td><code>/api/conversations</code></td><td>Create a new conversation.</td></tr>
+<tr><td>POST</td><td><code>/api/conversations/{conversation_id}/participants</code></td><td>Invite/add a participant. Emits membership + presence SSE events.</td></tr>
+<tr><td>DELETE</td><td><code>/api/conversations/{conversation_id}/participants/{user_id}</code></td><td>Remove a participant.</td></tr>
+<tr><td>POST</td><td><code>/api/conversations/{conversation_id}/invites</code></td><td>Create an invite token.</td></tr>
+<tr><td>POST</td><td><code>/api/invites/accept</code></td><td>Accept an invite token.</td></tr>
+<tr><td>POST</td><td><code>/api/invites/{token}/revoke</code></td><td>Revoke an invite token.</td></tr>
+<tr><td>GET</td><td><code>/api/conversations/{conversation_id}/threads</code></td><td>List thread summaries (supports <code>after</code> + <code>limit</code> query params).</td></tr>
+<tr><td>GET</td><td><code>/api/conversations/{conversation_id}/unread</code></td><td>Return unread counts per thread.</td></tr>
+</tbody></table>
+</div>
+<h2 id="threads--messages"><a class="header" href="#threads--messages">Threads &amp; messages</a></h2>
+<p>Routes from <code>handlers/threads.rs</code>:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/api/threads/{root_id}/tree</code></td><td>Depth-first thread slice (<code>cursor_path</code> + <code>limit</code> optional).</td></tr>
+<tr><td>POST</td><td><code>/api/threads/{conversation_id}/root</code></td><td>Create a new thread root. Triggers assistant streaming when role = <code>assistant</code>.</td></tr>
+<tr><td>POST</td><td><code>/api/messages/{parent_id}/reply</code></td><td>Reply to an existing message.</td></tr>
+<tr><td>GET</td><td><code>/api/messages/{message_id}/chunks</code></td><td>Retrieve persisted assistant chunks.</td></tr>
+<tr><td>POST</td><td><code>/api/threads/{root_id}/read</code></td><td>Mark thread as read (<code>MarkThreadReadRequest</code>).</td></tr>
+<tr><td>POST</td><td><code>/api/messages/{message_id}/delete</code></td><td>Soft-delete a message.</td></tr>
+<tr><td>POST</td><td><code>/api/messages/{message_id}/restore</code></td><td>Restore a previously deleted message.</td></tr>
+<tr><td>POST</td><td><code>/api/messages/{message_id}/edit</code></td><td>Replace message content.</td></tr>
+<tr><td>POST</td><td><code>/api/typing</code></td><td>Set typing state (<code>TypingRequest</code>).</td></tr>
+<tr><td>POST</td><td><code>/api/presence/heartbeat</code></td><td>Update presence heartbeat.</td></tr>
+</tbody></table>
+</div>
+<h2 id="streaming"><a class="header" href="#streaming">Streaming</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/api/stream/conversations/{conversation_id}</code></td><td>SSE endpoint producing <code>ConversationStreamEvent</code> values. Requires session cookie and (optionally) <code>Last-Event-ID</code>.</td></tr>
+</tbody></table>
+</div>
+<h2 id="copilot-compatible-endpoints"><a class="header" href="#copilot-compatible-endpoints">Copilot-compatible endpoints</a></h2>
+<p>These helpers live in <code>handlers/copilot.rs</code> and provide simple echo responses for integration tests:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/v1/models</code></td><td>Returns <code>ModelsResponse</code> with two static models (<code>gpt-4</code>, <code>gpt-3.5</code>).</td></tr>
+<tr><td>POST</td><td><code>/v1/chat/completions</code></td><td>Echoes provided messages as assistant responses (<code>ChatCompletionResponse</code>).</td></tr>
+</tbody></table>
+</div>
+<h2 id="admin-rate-limit-api"><a class="header" href="#admin-rate-limit-api">Admin rate limit API</a></h2>
+<p>Available when <code>features.auth_v1 = true</code> and <code>rate_limits.admin_api_enabled = true</code> (<code>handlers/admin_limits.rs</code>):</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/api/admin/limits/profiles</code></td><td>List profiles.</td></tr>
+<tr><td>POST</td><td><code>/api/admin/limits/profiles</code></td><td>Create a profile.</td></tr>
+<tr><td>PUT</td><td><code>/api/admin/limits/profiles/{id}</code></td><td>Update profile parameters/description.</td></tr>
+<tr><td>DELETE</td><td><code>/api/admin/limits/profiles/{id}</code></td><td>Delete a profile (fails if still assigned).</td></tr>
+<tr><td>GET</td><td><code>/api/admin/limits/assignments</code></td><td>List route assignments.</td></tr>
+<tr><td>POST</td><td><code>/api/admin/limits/assignments</code></td><td>Assign a profile to a route.</td></tr>
+<tr><td>DELETE</td><td><code>/api/admin/limits/assignments/{id}</code></td><td>Remove an assignment.</td></tr>
+</tbody></table>
+</div>
+<h2 id="health-and-observability"><a class="header" href="#health-and-observability">Health and observability</a></h2>
+<p>Outside of the <code>/api</code> prefix, the server exposes:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/healthz</code></td><td>Liveness probe.</td></tr>
+<tr><td>GET</td><td><code>/readyz</code></td><td>Readiness probe (verifies PostgreSQL bootstrap).</td></tr>
+<tr><td>GET</td><td><code>/metrics</code></td><td>Prometheus metrics via <code>metrics-exporter-prometheus</code>.</td></tr>
+<tr><td>GET</td><td><code>/.well-known/{path}</code></td><td>Served when <code>features.well_known = true</code>; entries configured via <code>[well_known.entries]</code>.</td></tr>
+<tr><td>GET</td><td><code>/openapi.json</code> / <code>/openapi.yaml</code></td><td>Generated OpenAPI spec.</td></tr>
+</tbody></table>
+</div>
+<p>Refer to <a href="reference/authentication.html">Authentication</a> for cookie details and <a href="reference/config.html">Configuration</a> for the relevant keys.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
-<blockquote>
-<p>TL;DR – All RustyGPT services share a TOML configuration merged with environment variables; this page maps each key to runtime behaviour.</p>
-</blockquote>
-<h2 id="loading-order"><a class="header" href="#loading-order">Loading Order</a></h2>
+<p>RustyGPT uses a layered configuration loader (<code>rustygpt-shared::config::server::Config</code>). Defaults are determined by the active
+profile (Dev/Test/Prod), then merged with an optional file and environment overrides. CLI flags can override specific values
+(e.g. <code>--port</code>).</p>
+<h2 id="loading-order"><a class="header" href="#loading-order">Loading order</a></h2>
 <ol>
-<li><code>config.example.toml</code> documents defaults.</li>
-<li><code>config.toml</code> (optional) overrides per environment.</li>
-<li>Environment variables (e.g., <code>RUSTYGPT__SERVER__PORT</code>) take precedence.</li>
+<li>Profile defaults (<code>Config::default_for_profile(Profile::Dev)</code>)</li>
+<li>Optional config file (<code>config.toml</code>, <code>config.yaml</code>, or <code>config.json</code>)</li>
+<li>Environment variables using double underscores (e.g. <code>RUSTYGPT__SERVER__PORT=9000</code>)</li>
+<li>CLI overrides (currently the server/CLI <code>--port</code> flag)</li>
 </ol>
-<p>The loader lives in <code>rustygpt-shared::config</code>. Combine these steps with the env setup in <a href="reference/../guide/local-dev.html">Local Development</a>.</p>
-<h2 id="server-block"><a class="header" href="#server-block">Server Block</a></h2>
-<pre><code class="language-toml">[server]
-port = 8080
-bind_address = "0.0.0.0"
-sse_keepalive_seconds = 15
+<p><code>Config::load_config(path, override_port)</code> performs this merge and validates required fields.</p>
+<h2 id="key-sections"><a class="header" href="#key-sections">Key sections</a></h2>
+<h3 id="logging"><a class="header" href="#logging"><code>[logging]</code></a></h3>
+<pre><code class="language-toml">[logging]
+level = "info"        # tracing level passed to tracing-subscriber
+format = "text"        # "text" or "json"
 </code></pre>
-<ul>
-<li><code>port</code> – HTTP port.</li>
-<li><code>bind_address</code> – interface binding.</li>
-<li><code>sse_keepalive_seconds</code> – interval for no-op SSE frames (see <a href="reference/../architecture/streaming.html">Streaming Delivery</a>).</li>
-</ul>
-<h2 id="session-block"><a class="header" href="#session-block">Session Block</a></h2>
+<h3 id="server"><a class="header" href="#server"><code>[server]</code></a></h3>
+<pre><code class="language-toml">[server]
+host = "127.0.0.1"
+port = 8080
+public_base_url = "http://localhost:8080"
+request_id_header = "x-request-id"
+
+[server.cors]
+allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+allow_credentials = false
+max_age_seconds = 600
+</code></pre>
+<p><code>public_base_url</code> is derived automatically when not supplied (scheme depends on profile). <code>request_id_header</code> controls which
+header the middleware reads when assigning request IDs.</p>
+<h3 id="security"><a class="header" href="#security"><code>[security]</code></a></h3>
+<pre><code class="language-toml">[security.hsts]
+enabled = false
+max_age_seconds = 63072000
+include_subdomains = true
+preload = false
+
+[security.cookie]
+domain = ""
+secure = false
+same_site = "lax"
+
+[security.csrf]
+cookie_name = "CSRF-TOKEN"
+header_name = "X-CSRF-TOKEN"
+enabled = true
+</code></pre>
+<h3 id="rate_limits"><a class="header" href="#rate_limits"><code>[rate_limits]</code></a></h3>
+<pre><code class="language-toml">[rate_limits]
+auth_login_per_ip_per_min = 10
+default_rps = 50.0
+burst = 100
+admin_api_enabled = false
+</code></pre>
+<p>When <code>admin_api_enabled = true</code> the <code>/api/admin/limits/*</code> routes become available.</p>
+<h3 id="session"><a class="header" href="#session"><code>[session]</code></a></h3>
 <pre><code class="language-toml">[session]
 idle_seconds = 28800
 absolute_seconds = 604800
-session_cookie_name = "sid"
+session_cookie_name = "SESSION_ID"
 csrf_cookie_name = "CSRF-TOKEN"
 max_sessions_per_user = 5
 </code></pre>
-<p>These values govern cookie lifetime and rotation; align with the practices in <a href="reference/../howto/rotate-secrets.html">Rotate Secrets</a>.</p>
-<h2 id="database-block"><a class="header" href="#database-block">Database Block</a></h2>
-<pre><code class="language-toml">[database]
-url = "postgres://postgres:postgres@localhost:5432/rustygpt"
-pool_max_connections = 10
-statement_timeout_ms = 10000
+<p>Set <code>max_sessions_per_user = 0</code> (or <code>null</code>) to disable automatic eviction.</p>
+<h3 id="oauth"><a class="header" href="#oauth"><code>[oauth]</code></a></h3>
+<pre><code class="language-toml">[oauth]
+redirect_base = "http://localhost:8080/api/auth/github/callback"
+
+[oauth.github]
+client_id = "..."
+client_secret = "..."
 </code></pre>
+<p>If <code>oauth.github</code> is omitted the GitHub endpoints still respond but return empty URLs. Apple support reads <code>APPLE_*</code>
+environment variables directly in the handler.</p>
+<h3 id="db"><a class="header" href="#db"><code>[db]</code></a></h3>
+<pre><code class="language-toml">[db]
+url = "postgres://tinroof:rusty@localhost/rustygpt_dev"
+statement_timeout_ms = 5000
+max_connections = 10
+bootstrap_path = "../scripts/pg"
+</code></pre>
+<p><code>bootstrap_path</code> points to the directory containing <code>schema/</code>, <code>procedures/</code>, <code>indexes/</code>, and <code>seed/</code> folders.</p>
+<h3 id="sse"><a class="header" href="#sse"><code>[sse]</code></a></h3>
+<pre><code class="language-toml">[sse]
+heartbeat_seconds = 20
+channel_capacity = 128
+id_prefix = "evt_"
+
+[sse.persistence]
+enabled = false
+max_events_per_user = 500
+prune_batch_size = 100
+retention_hours = 48
+
+[sse.backpressure]
+drop_strategy = "drop_tokens"
+warn_queue_ratio = 0.75
+</code></pre>
+<h3 id="features"><a class="header" href="#features"><code>[features]</code></a></h3>
+<pre><code class="language-toml">[features]
+auth_v1 = true
+sse_v1 = true
+well_known = true
+</code></pre>
+<p>Flags gate optional subsystems without recompiling the binary.</p>
+<h3 id="cli-and-web"><a class="header" href="#cli-and-web"><code>[cli]</code> and <code>[web]</code></a></h3>
+<pre><code class="language-toml">[cli]
+session_store = "~/.config/rustygpt/session.cookies"
+
+[web]
+static_dir = "../rustygpt-web/dist"
+spa_index = "../rustygpt-web/dist/index.html"
+</code></pre>
+<h3 id="llm"><a class="header" href="#llm"><code>[llm]</code></a></h3>
+<p><code>Config</code> embeds <code>LLMConfiguration</code> from <code>rustygpt-shared::config::llm</code>. Use it to describe llama.cpp models/providers:</p>
+<pre><code class="language-toml">[llm.global_settings]
+persist_stream_chunks = true
+
+[llm.providers.default]
+provider_type = "llama_cpp"
+model_path = "./models/your-model.gguf"
+</code></pre>
+<p>See <code>rustygpt-shared/src/config/llm.rs</code> for the full schema.</p>
+<h2 id="environment-variable-syntax"><a class="header" href="#environment-variable-syntax">Environment variable syntax</a></h2>
+<p>Nested keys map to uppercase names with double underscores. Examples:</p>
 <ul>
-<li><code>url</code> – connection string; honour TLS requirements in production.</li>
-<li><code>statement_timeout_ms</code> – prevents long-running queries from stalling the pool.</li>
+<li><code>RUSTYGPT__SERVER__PORT=9001</code></li>
+<li><code>RUSTYGPT__SECURITY__COOKIE__SECURE=true</code></li>
+<li><code>RUSTYGPT__FEATURES__SSE_V1=true</code></li>
 </ul>
-<h2 id="rate-limit-block"><a class="header" href="#rate-limit-block">Rate-Limit Block</a></h2>
-<pre><code class="language-toml">[rate_limits]
-admin_api_enabled = true
-default_rps = 10
-default_burst = 20
-</code></pre>
-<ul>
-<li><code>admin_api_enabled</code> – toggles the admin endpoints described in <a href="reference/api.html">REST API</a>.</li>
-<li><code>default_rps</code> / <code>default_burst</code> – fallback strategy for unassigned routes.</li>
-</ul>
-<h2 id="observability-block"><a class="header" href="#observability-block">Observability Block</a></h2>
-<pre><code class="language-toml">[telemetry]
-log_level = "info"
-metrics_endpoint = "/metrics"
-</code></pre>
-<p>Expose <code>/metrics</code> and feed it into your Prometheus deployment. Dashboards shipped in <code>deploy/grafana</code> expect this path.</p>
-<h2 id="secrets"><a class="header" href="#secrets">Secrets</a></h2>
-<p>Environment variables prefixed with <code>RUSTYGPT__SECRETS__</code> override sensitive values (API keys, signing secrets). Rotate them via the workflow in <a href="reference/../howto/rotate-secrets.html">Rotate Secrets</a> to avoid service interruption.</p>
+<p>Booleans and numbers follow standard Rust parsing rules. Paths can be relative or absolute.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="how-to-overview"><a class="header" href="#how-to-overview">How-to Overview</a></h1>
-<blockquote>
-<p>TL;DR – Task-oriented instructions for operating, deploying, and maintaining RustyGPT.</p>
-</blockquote>
-<h2 id="available-playbooks"><a class="header" href="#available-playbooks">Available Playbooks</a></h2>
+<p>Task-focused guides for operating RustyGPT. These assume you already understand the system from the <a href="howto/../guide/index.html">Guides</a>
+and <a href="howto/../reference/index.html">Reference</a> sections.</p>
 <ul>
-<li><a href="howto/docker-deploy.html">Docker Deploy</a> – build images, wire dependencies, and validate rollout.</li>
-<li><a href="howto/rotate-secrets.html">Rotate Secrets</a> – refresh credentials without downtime.</li>
+<li><a href="howto/docker-deploy.html">Docker Deploy</a> – build/publish images and run Compose.</li>
+<li><a href="howto/rotate-secrets.html">Rotate Secrets</a> – refresh credentials and validate sessions.</li>
 </ul>
-<p>Each how-to references underlying concepts and interfaces so you can trace decisions back to <a href="howto/../reference/index.html">Reference</a> and <a href="howto/../architecture/index.html">Architecture</a> as needed. Contribute additional playbooks when new operational workflows emerge.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="docker-deploy"><a class="header" href="#docker-deploy">Docker Deploy</a></h1>
-<blockquote>
-<p>TL;DR – Build RustyGPT images with Cargo, push to your registry, and deploy via Docker Compose or Kubernetes with environment-specific configuration.</p>
-</blockquote>
-<h2 id="build-containers"><a class="header" href="#build-containers">Build Containers</a></h2>
-<p>Use the provided multi-stage Dockerfile:</p>
-<pre><code class="language-bash">docker build -t registry.example.com/rustygpt/server:latest -f Dockerfile .
+<div style="break-before: page; page-break-before: always;"></div><h1 id="docker-deploy"><a class="header" href="#docker-deploy">Docker deploy</a></h1>
+<p>This guide covers building the RustyGPT container image and running it alongside PostgreSQL with Docker Compose.</p>
+<h2 id="build-the-image"><a class="header" href="#build-the-image">Build the image</a></h2>
+<p>The repository ships a multi-stage <a href="howto/../../Dockerfile"><code>Dockerfile</code></a> that builds the workspace and bundles the server binary plus
+static assets:</p>
+<pre><code class="language-bash">docker build -t rustygpt/server:latest -f Dockerfile .
 </code></pre>
-<p>Set <code>BUILD_PROFILE=release</code> for production builds. Verify the binary boots by running <code>docker run --rm -p 8080:8080 registry.example.com/rustygpt/server:latest</code>.</p>
-<h2 id="provision-dependencies"><a class="header" href="#provision-dependencies">Provision Dependencies</a></h2>
-<p>RustyGPT requires:</p>
+<p>Set <code>BUILD_PROFILE=release</code> to compile with optimisations. The final image exposes the server on port <code>8080</code>.</p>
+<h2 id="compose-stack"><a class="header" href="#compose-stack">Compose stack</a></h2>
+<p><a href="howto/../../docker-compose.yaml"><code>docker-compose.yaml</code></a> defines two services:</p>
 <ul>
-<li>PostgreSQL 15+ with the schema in <code>deploy/postgres/migrations</code>.</li>
-<li>Optional Redis for caching (if enabled in config).</li>
-<li>HTTPS termination (e.g., Traefik or Nginx) that forwards SSE headers transparently.</li>
+<li><code>backend</code> – builds from the Dockerfile (target <code>runtime</code>). Environment variables include <code>DATABASE_URL</code>, OAuth credentials, and
+feature toggles. Update them to match your deployment.</li>
+<li><code>postgres</code> – <code>postgres:17-alpine</code> with credentials matching <code>config.example.toml</code>.</li>
 </ul>
-<p>Align credentials with the secrets workflow in <a href="howto/rotate-secrets.html">Rotate Secrets</a>.</p>
-<h2 id="compose-deployment"><a class="header" href="#compose-deployment">Compose Deployment</a></h2>
-<pre><code class="language-bash">docker compose -f docker-compose.yaml up -d
+<p>Bring the stack up:</p>
+<pre><code class="language-bash">docker compose up --build
 </code></pre>
-<p>Review <code>docker-compose.yaml</code> for service names and volume mounts. Override environment settings via <code>.env</code> or Compose overrides when promoting to staging or production.</p>
-<h2 id="post-deployment-checks"><a class="header" href="#post-deployment-checks">Post-Deployment Checks</a></h2>
+<p>The compose file mounts <code>./.data/postgres</code> for database storage and <code>./.data/postgres-init</code> for init scripts. To reuse the
+workspace schema, copy the contents of <code>scripts/pg</code> into that directory before the first run:</p>
+<pre><code class="language-bash">mkdir -p .data/postgres-init
+cp -r scripts/pg/* .data/postgres-init/
+</code></pre>
+<p>Alternatively, rely on the server’s bootstrap runner by exposing the same directory inside the backend container and pointing
+<code>[db].bootstrap_path</code> at it.</p>
+<h2 id="configuration-and-secrets"><a class="header" href="#configuration-and-secrets">Configuration and secrets</a></h2>
+<ul>
+<li>Copy <code>config.example.toml</code> to a volume or bake it into the image and set <code>RUSTYGPT__CONFIG</code> variables as needed.</li>
+<li>Provide OAuth credentials (<code>GITHUB_*</code>, <code>APPLE_*</code>) if you plan to use those flows; otherwise the endpoints return placeholder
+URLs.</li>
+<li>Set <code>features.auth_v1</code>, <code>features.sse_v1</code>, and <code>features.well_known</code> to <code>true</code> via environment variables or the config file.</li>
+<li>If running behind TLS terminate HTTPS at the reverse proxy and set <code>server.public_base_url</code> to the external URL.</li>
+</ul>
+<h2 id="post-deployment-checks"><a class="header" href="#post-deployment-checks">Post-deployment checks</a></h2>
 <ol>
-<li>Hit <code>/api/health</code> until it returns <code>200</code>.</li>
-<li>Tail logs for <code>rustygpt_server</code> and ensure migrations succeeded.</li>
-<li>Exercise SSE streaming with <code>curl -N</code> as described in <a href="howto/../architecture/streaming.html">Streaming Delivery</a>.</li>
-<li>Inspect Prometheus metrics at <code>/metrics</code>.</li>
+<li>Hit <code>http://HOST:8080/healthz</code> and <code>http://HOST:8080/readyz</code> until both return <code>200</code>.</li>
+<li>POST to <code>/api/setup</code> to create the initial admin account.</li>
+<li>Use the CLI container (or a local build) to log in: <code>docker compose exec backend rustygpt login</code>.</li>
+<li>Visit <code>/metrics</code> and confirm counters increment when making requests.</li>
+<li>If using the web UI, serve the <code>rustygpt-web</code> build either from the same container (set <code>[web.static_dir]</code>) or via a separate
+static host.</li>
 </ol>
 <h2 id="rollback"><a class="header" href="#rollback">Rollback</a></h2>
-<ul>
-<li>Keep the previous tag available in your registry.</li>
-<li>Downgrade via <code>docker compose pull</code> and <code>docker compose up -d</code>.</li>
-<li>Validate user sessions remain valid by following <a href="howto/../guide/local-dev.html">Local Development</a> steps to test login flows in a sandbox environment first.</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="rotate-secrets"><a class="header" href="#rotate-secrets">Rotate Secrets</a></h1>
-<blockquote>
-<p>TL;DR – Rotate API keys and credentials without downtime by staging new values, triggering config reloads, and confirming session continuity.</p>
-</blockquote>
+<p>Tag each release in your registry. To roll back:</p>
+<pre><code class="language-bash">docker compose pull backend:previous-tag
+docker compose up -d backend
+</code></pre>
+<p>The PostgreSQL data directory is persisted on disk so sessions and conversations remain intact.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="rotate-secrets"><a class="header" href="#rotate-secrets">Rotate secrets</a></h1>
+<p>Use this runbook to update credentials (database passwords, OAuth secrets, session keys) while keeping RustyGPT online.</p>
 <h2 id="preparation"><a class="header" href="#preparation">Preparation</a></h2>
 <ol>
-<li>Inventory secrets stored in Vault or your secret manager.</li>
-<li>Update <code>config.toml</code> placeholders and export new values as environment variables.</li>
-<li>Schedule a rotation window and notify stakeholders.</li>
+<li>Inventory the secrets in use (e.g. <code>DATABASE_URL</code>, <code>GITHUB_CLIENT_SECRET</code>, config entries under <code>[security.cookie]</code>).</li>
+<li>Update your secret manager or environment files with new values, but do not apply them yet.</li>
+<li>Coordinate a maintenance window if session cookie rotation is expected to log users out.</li>
 </ol>
-<p>Document default keys in <a href="howto/../reference/config.html">Configuration</a> for posterity, but never commit actual secrets.</p>
-<h2 id="rotation-steps"><a class="header" href="#rotation-steps">Rotation Steps</a></h2>
+<h2 id="rotation-steps"><a class="header" href="#rotation-steps">Rotation steps</a></h2>
 <ol>
-<li><strong>Stage</strong> – Write the new secret to your secret manager and ensure the deployment pipeline can read it.</li>
-<li><strong>Deploy</strong> – Redeploy the service with refreshed environment variables. For Kubernetes, restart pods with <code>kubectl rollout restart deployment/rustygpt-server</code>.</li>
-<li><strong>Verify</strong> – Run smoke tests:</li>
-</ol>
-<pre><code class="language-bash">cargo run -p rustygpt-cli -- auth me
-curl -sSf http://localhost:8080/api/health
+<li><strong>Stage</strong> – write new values to your secret store or <code>.env</code> file.</li>
+<li><strong>Deploy</strong> – restart the server with updated environment variables/config (<code>docker compose restart backend</code> or rolling
+restart in your orchestrator). The bootstrap runner is idempotent, so restarting is safe.</li>
+<li><strong>Verify</strong> – run smoke tests:
+<pre><code class="language-bash">cargo run -p rustygpt-cli -- login
+cargo run -p rustygpt-cli -- me
+curl -sSf http://HOST:8080/readyz
 </code></pre>
-<p>Sessions should remain valid because cookies are independent of backend secrets. If rotating session signing keys, drain sessions gracefully using the guidance in <a href="howto/../reference/api.html">REST API</a>.</p>
-<h2 id="observability-2"><a class="header" href="#observability-2">Observability</a></h2>
+</li>
+<li><strong>Cleanup</strong> – remove old secrets from the manager and audit logs for unexpected errors.</li>
+</ol>
+<p>Session cookies are independent of database passwords or OAuth secrets. If you change <code>[security.cookie]</code> settings (e.g. enable
+<code>secure</code> or change <code>session_cookie_name</code>), expect users to sign in again.</p>
+<h2 id="observability-1"><a class="header" href="#observability-1">Observability</a></h2>
 <ul>
-<li>Monitor <code>rustygpt_auth_session_rotations_total</code>.</li>
-<li>Check error logs for failed decryptions or outbound integration issues.</li>
-<li>Confirm SSE streams reconnect cleanly as described in <a href="howto/../architecture/streaming.html">Streaming Delivery</a>.</li>
+<li>Watch application logs for <code>SessionService</code> warnings.</li>
+<li>Confirm <code>http_rate_limit_requests_total</code> continues to increment after the restart.</li>
+<li>Verify the CLI can still access streaming endpoints (<code>cargo run -p rustygpt-cli -- follow --root &lt;id&gt;</code>).</li>
 </ul>
-<h2 id="incident-response"><a class="header" href="#incident-response">Incident Response</a></h2>
+<h2 id="incident-response"><a class="header" href="#incident-response">Incident response</a></h2>
 <p>If a rotation fails:</p>
 <ol>
-<li>Roll back to the previous secret value.</li>
-<li>Capture logs and metrics for the incident timeline.</li>
-<li>File an ADR per the template if process changes are needed.</li>
+<li>Roll back to the previous secret values and restart the server.</li>
+<li>Capture logs around the failure (authentication errors, database connection failures, etc.).</li>
+<li>File an issue or ADR documenting the change and follow-up actions.</li>
 </ol>
-<h2 id="automation-ideas"><a class="header" href="#automation-ideas">Automation Ideas</a></h2>
-<ol>
-<li>Integrate with <code>just docs-index</code> to ensure documentation references stay current.</li>
-<li>Add alerts when secrets near expiry windows to prompt proactive rotations.</li>
-</ol>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="release-notes"><a class="header" href="#release-notes">Release Notes</a></h1>
-<blockquote>
-<p>TL;DR – Highlights of RustyGPT releases with links to tags and the canonical changelog.</p>
-</blockquote>
-<h2 id="latest"><a class="header" href="#latest">Latest</a></h2>
-<ul>
-<li><strong>Unreleased (<code>main</code>)</strong> – Tracks active development. Review upcoming changes in <a href="changelog/../reference/config.html">Configuration</a> and <a href="changelog/../architecture/streaming.html">Streaming Delivery</a>.</li>
-</ul>
-<h2 id="stable-releases"><a class="header" href="#stable-releases">Stable Releases</a></h2>
-<p>Refer to <code>CHANGELOG.md</code> in the repository root for detailed entries. Each release is tagged <code>vMAJOR.MINOR.PATCH</code> and published to GitHub Pages via the docs workflow.</p>
-<div class="table-wrapper"><table><thead><tr><th>Version</th><th>Highlights</th><th>Links</th></tr></thead><tbody>
-<tr><td>v0.3.0</td><td>Introduced reasoning DAG telemetry, new SSE replay contract.</td><td><a href="https://github.com/vanna/rusty_gpt/releases/tag/v0.3.0">Tag</a></td></tr>
-<tr><td>v0.2.0</td><td>Added rate-limit admin API and Docker Compose baseline.</td><td><a href="https://github.com/vanna/rusty_gpt/releases/tag/v0.2.0">Tag</a></td></tr>
-<tr><td>v0.1.0</td><td>Initial public release with CLI, server, and web UI.</td><td><a href="https://github.com/vanna/rusty_gpt/releases/tag/v0.1.0">Tag</a></td></tr>
-</tbody></table>
-</div>
-<p>Looking for migration help? Visit the <a href="changelog/../howto/docker-deploy.html">Docker Deploy</a> guide for operational steps.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="release-notes"><a class="header" href="#release-notes">Release notes</a></h1>
+<p>The authoritative changelog lives in <a href="changelog/../../CHANGELOG.html"><code>CHANGELOG.md</code></a>. No tagged releases have been published yet; the
+<code>[Unreleased]</code> section tracks ongoing development across the workspace crates.</p>
+<p>When a release is tagged (<code>vMAJOR.MINOR.PATCH</code>) update the changelog and, if applicable, regenerate the docs index with
+<code>just docs-index</code> so the summaries reflect the new features.</p>
 
                     </main>
 

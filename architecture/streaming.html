@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Streaming Delivery - RustyGPT Documentation</title>
+        <title>Streaming delivery - RustyGPT Documentation</title>
 
 
         <!-- Custom HTML head -->
@@ -178,76 +178,63 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="streaming-delivery"><a class="header" href="#streaming-delivery">Streaming Delivery</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT streams conversation updates over Server-Sent Events (SSE) with persisted replay, ensuring reconnecting clients rebuild state without losing tokens.</p>
-</blockquote>
-<h2 id="diagram"><a class="header" href="#diagram">Diagram</a></h2>
+                        <h1 id="streaming-delivery"><a class="header" href="#streaming-delivery">Streaming delivery</a></h1>
+<p>RustyGPT streams conversation activity to authenticated clients over Server-Sent Events (SSE). The implementation lives in
+<code>rustygpt-server/src/handlers/streaming.rs</code> and is gated by <code>features.sse_v1</code>.</p>
+<h2 id="flow"><a class="header" href="#flow">Flow</a></h2>
 <pre class="mermaid">sequenceDiagram
-  participant C as Client
-  participant GW as Gateway
-  participant HUB as StreamHub
-  participant DB as Event Log
-  C-&gt;&gt;GW: POST /api/chat
-  GW-&gt;&gt;HUB: enqueue request
-  HUB-&gt;&gt;DB: persist event
-  HUB--&gt;&gt;C: SSE message
-  C-&gt;&gt;GW: Last-Event-ID
-  GW-&gt;&gt;HUB: replay request
-  HUB-&gt;&gt;DB: load window
-  DB--&gt;&gt;HUB: persisted events
-  HUB--&gt;&gt;C: replay + live stream
+  participant Client
+  participant API as Axum /api
+  participant Hub as StreamHub
+  participant DB as rustygpt.sse_event_log
+
+  Client-&gt;&gt;API: POST /api/threads/{conversation}/root
+  API-&gt;&gt;Hub: publish ConversationStreamEvent
+  Hub-&gt;&gt;Client: SSE event (thread.new)
+  Note over Hub,DB: if persistence enabled
+  Hub-&gt;&gt;DB: sp_record_sse_event
+  Client-&gt;&gt;API: reconnect with Last-Event-ID
+  API-&gt;&gt;Hub: subscribe(after)
+  Hub-&gt;&gt;DB: fn_load_recent_sse_events
+  DB--&gt;&gt;Hub: persisted events
+  Hub--&gt;&gt;Client: replay then live stream
 </pre>
-<p><em>Caption: SSE requests flow through the gateway, persist to the event log, and replay before live streaming.</em></p>
-<p>See <a href="service-topology.html">Service Topology</a> for broader context on how StreamHub integrates with other components.</p>
-<h2 id="event-model"><a class="header" href="#event-model">Event Model</a></h2>
-<p>All SSE messages share the shape <code>{ "type": "...", "payload": { ... } }</code> defined in <code>shared::models::ConversationStreamEvent</code>.</p>
-<div class="table-wrapper"><table><thead><tr><th>Event name</th><th>Description</th></tr></thead><tbody>
-<tr><td><code>thread.new</code></td><td>New thread summary</td></tr>
-<tr><td><code>thread.activity</code></td><td>Updated activity timestamp for a thread</td></tr>
-<tr><td><code>message.delta</code></td><td>Streaming chunk for an in-flight assistant reply</td></tr>
-<tr><td><code>message.done</code></td><td>Completion marker plus usage stats</td></tr>
-<tr><td><code>presence.update</code></td><td>User presence status update</td></tr>
-<tr><td><code>typing.update</code></td><td>Typing indicator with expiry timestamp</td></tr>
-<tr><td><code>unread.update</code></td><td>Unread count snapshot for a thread</td></tr>
-<tr><td><code>membership.changed</code></td><td>Conversation membership mutation</td></tr>
-<tr><td><code>error</code></td><td>Terminal errors propagated to the client</td></tr>
-</tbody></table>
-</div>
-<p>The <code>root_id</code> field keeps replay ordering stable for thread-scoped events.</p>
-<h2 id="persistence-window"><a class="header" href="#persistence-window">Persistence Window</a></h2>
-<p><code>rustygpt.sse_event_log</code> stores a rolling window controlled by:</p>
+<p>Clients subscribe to <code>/api/stream/conversations/:conversation_id</code>. The route is protected by the auth middleware when
+<code>features.auth_v1</code> is enabled, so callers must present a valid session cookie (the CLI handles this automatically).</p>
+<h2 id="event-payloads"><a class="header" href="#event-payloads">Event payloads</a></h2>
+<p>Events are instances of <code>shared::models::ConversationStreamEvent</code> and are encoded as JSON envelopes with <code>type</code> and <code>payload</code>
+fields. See <a href="../concepts/reasoning-dag.html">Threaded conversations</a> for the full list of variants.</p>
+<p>The SSE handler assigns monotonically increasing sequence numbers per conversation. When persistence is enabled the sequence is
+also stored in <code>rustygpt.sse_event_log</code>, allowing reconnecting clients to pass <code>Last-Event-ID</code> and receive any missed events
+before resuming the live stream.</p>
+<h2 id="persistence-and-retention"><a class="header" href="#persistence-and-retention">Persistence and retention</a></h2>
+<p>Configure persistence via <code>[sse.persistence]</code> in <code>config.toml</code>:</p>
+<pre><code class="language-toml">[sse.persistence]
+enabled = true
+max_events_per_user = 500
+prune_batch_size = 100
+retention_hours = 48
+</code></pre>
+<p><code>services::sse_persistence</code> stores events using the stored procedures in <code>scripts/pg/schema/050_sse_persistence.sql</code>. The pruning
+logic runs after each insert to keep the table bounded.</p>
+<h2 id="backpressure-handling"><a class="header" href="#backpressure-handling">Backpressure handling</a></h2>
+<p>The in-memory queue for each conversation defaults to <code>channel_capacity = 128</code>. Configure behaviour under <code>[sse.backpressure]</code>:</p>
 <ul>
-<li><code>sse.persistence.retention_hours</code> (clamped 24–72h)</li>
-<li><code>sse.persistence.max_events_per_user</code> (replay batch size)</li>
+<li><code>drop_strategy = "drop_tokens"</code> drops assistant token events first</li>
+<li><code>drop_strategy = "drop_tokens_and_system"</code> also discards system events once the queue fills</li>
+<li><code>warn_queue_ratio</code> controls when a warning is logged about queue pressure</li>
 </ul>
-<p>Key stored procedures in <code>services::sse_persistence</code>:</p>
+<p>These settings keep hot conversations from exhausting memory while still delivering key state changes (presence, membership,
+unread counters).</p>
+<h2 id="client-responsibilities"><a class="header" href="#client-responsibilities">Client responsibilities</a></h2>
 <ul>
-<li><code>record_event(conversation_id, record)</code> – invoked alongside live fan-out</li>
-<li><code>load_recent_events(conversation_id, limit)</code> – fetches the most recent persisted window</li>
-<li><code>load_events_after(conversation_id, last_sequence, limit)</code> – used when clients send <code>Last-Event-ID</code></li>
+<li>Reconnect with <code>Last-Event-ID</code> so the server can replay persisted events when available</li>
+<li>Handle <code>401</code> responses by re-running the session refresh flow (<code>/api/auth/refresh</code>); the CLI and web client do this
+automatically</li>
+<li>Clear typing state on <code>typing.update</code> and update unread counters when <code>unread.update</code> arrives</li>
 </ul>
-<p><code>StreamHub::subscribe</code> merges persisted and live events by sequence before emitting to SSE clients.</p>
-<h2 id="replay-contract"><a class="header" href="#replay-contract">Replay Contract</a></h2>
-<ol>
-<li>Clients send <code>Last-Event-ID</code> (or <code>since=</code> query param) when reconnecting.</li>
-<li>The server replays persisted rows newer than the recorded sequence before live events resume.</li>
-<li>Responses include <code>event.id</code> fields combining <code>root_id</code>, <code>message_id</code>, and sequence (<code>rowid:messageid:sequence</code> for deltas).</li>
-<li>When the window no longer covers a requested sequence, clients re-sync via REST APIs using <a href="../reference/api.html">REST API</a>.</li>
-</ol>
-<p>Metrics emitted during replay:</p>
-<ul>
-<li><code>rustygpt_sse_replay_events_total{type=...}</code></li>
-<li><code>rustygpt_sse_replay_duration_ms</code></li>
-</ul>
-<p>Dashboards live in <code>deploy/grafana/sse.json</code>; see <a href="../howto/docker-deploy.html">Docker Deploy</a> for production rollouts.</p>
-<h2 id="client-responsibilities"><a class="header" href="#client-responsibilities">Client Responsibilities</a></h2>
-<ul>
-<li>React to <code>X-Session-Rotated</code> headers and retry the SSE connection if a <code>401</code> with <code>WWW-Authenticate: session</code> arrives.</li>
-<li>Accept persisted events interleaved with live ones.</li>
-<li>Honour CSRF tokens for any POST/DELETE calls triggered by replayed events.</li>
-</ul>
-<p>For end-to-end reliability, combine this guidance with <a href="../howto/rotate-secrets.html">Rotate Secrets</a> to avoid invalidating sessions mid-stream.</p>
+<p>Use <a href="../reference/api.html">REST API</a> endpoints to backfill state when the requested <code>Last-Event-ID</code> falls outside the retention
+window.</p>
 
                     </main>
 

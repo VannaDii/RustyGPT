@@ -179,56 +179,97 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="rest-api"><a class="header" href="#rest-api">REST API</a></h1>
-<blockquote>
-<p>TL;DR – RustyGPT exposes authenticated REST and SSE endpoints for conversations, admin tooling, and health checks; prefer relative URLs from the web or CLI clients.</p>
-</blockquote>
-<h2 id="authentication"><a class="header" href="#authentication">Authentication</a></h2>
-<p>All endpoints require session cookies issued by <code>/api/auth/login</code>. See <a href="config.html">Configuration</a> for cookie settings and rotation windows. Clients must include <code>X-CSRF-Token</code> for non-GET requests outside <code>/api/auth/*</code>.</p>
-<h2 id="core-endpoints"><a class="header" href="#core-endpoints">Core Endpoints</a></h2>
-<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody>
-<tr><td>GET</td><td><code>/api/health</code></td><td>Liveness probe</td></tr>
-<tr><td>GET</td><td><code>/api/chat/stream</code></td><td>SSE stream for live token output</td></tr>
-<tr><td>POST</td><td><code>/api/chat</code></td><td>Submit a prompt to the reasoning engine</td></tr>
-<tr><td>GET</td><td><code>/api/conversations/:id</code></td><td>Fetch conversation messages and metadata</td></tr>
-<tr><td>POST</td><td><code>/api/conversations/:id/reply</code></td><td>Continue a conversation</td></tr>
-<tr><td>GET</td><td><code>/api/tools</code></td><td>List available deterministic tools</td></tr>
-</tbody></table>
-</div>
-<h3 id="authentication-service"><a class="header" href="#authentication-service">Authentication Service</a></h3>
+<p>All endpoints are served under <code>/api</code> unless noted otherwise. Session cookies and CSRF headers are required for non-authenticated
+GET requests when <code>features.auth_v1</code> is enabled. The OpenAPI schema is generated from <code>rustygpt-server/src/openapi.rs</code> and can
+be exported with <code>cargo run -p rustygpt-cli -- spec</code>.</p>
+<h2 id="setup"><a class="header" href="#setup">Setup</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
-<tr><td>POST</td><td><code>/api/auth/login</code></td><td>Verify credentials and issue session</td></tr>
-<tr><td>POST</td><td><code>/api/auth/refresh</code></td><td>Rotate cookies within the idle window</td></tr>
-<tr><td>GET</td><td><code>/api/auth/me</code></td><td>Return authenticated profile</td></tr>
-<tr><td>POST</td><td><code>/api/auth/logout</code></td><td>Revoke the current session</td></tr>
+<tr><td>GET</td><td><code>/api/setup</code></td><td>Returns <code>{ "is_setup": bool }</code> by calling <code>is_setup()</code> in PostgreSQL.</td></tr>
+<tr><td>POST</td><td><code>/api/setup</code></td><td>Creates the first administrator account (see <code>scripts/pg/procs/010_auth.sql::init_setup</code>). Subsequent calls return <code>400</code>.</td></tr>
 </tbody></table>
 </div>
-<p>Extended flows are documented in <a href="../howto/rotate-secrets.html">Rotate Secrets</a>.</p>
-<h2 id="admin--operations"><a class="header" href="#admin--operations">Admin &amp; Operations</a></h2>
-<p>Rate-limit endpoints are guarded by the <code>admin</code> role and <code>config.rate_limits.admin_api_enabled = true</code>.</p>
-<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead><tbody>
-<tr><td>GET</td><td><code>/api/admin/limits/profiles</code></td><td>List rate-limit profiles</td></tr>
-<tr><td>POST</td><td><code>/api/admin/limits/profiles</code></td><td>Create a profile</td></tr>
-<tr><td>PUT</td><td><code>/api/admin/limits/profiles/:id</code></td><td>Update a profile</td></tr>
-<tr><td>DELETE</td><td><code>/api/admin/limits/profiles/:id</code></td><td>Delete a profile</td></tr>
-<tr><td>GET</td><td><code>/api/admin/limits/assignments</code></td><td>List route assignments</td></tr>
-<tr><td>POST</td><td><code>/api/admin/limits/assignments</code></td><td>Assign profile to route</td></tr>
-<tr><td>DELETE</td><td><code>/api/admin/limits/assignments/:id</code></td><td>Remove an assignment</td></tr>
+<h2 id="authentication"><a class="header" href="#authentication">Authentication</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>POST</td><td><code>/api/auth/login</code></td><td>Email/password login. Returns <code>LoginResponse</code> with session + CSRF cookies.</td></tr>
+<tr><td>POST</td><td><code>/api/auth/logout</code></td><td>Revokes the current session. Requires CSRF header.</td></tr>
+<tr><td>POST</td><td><code>/api/auth/refresh</code></td><td>Rotates session cookies inside the idle window.</td></tr>
+<tr><td>GET</td><td><code>/api/auth/me</code></td><td>Returns <code>MeResponse</code> (requires authenticated session).</td></tr>
 </tbody></table>
 </div>
-<p>Refer to <a href="../architecture/streaming.html">Streaming Delivery</a> for SSE message structure that accompanies these endpoints.</p>
-<h2 id="error-model"><a class="header" href="#error-model">Error Model</a></h2>
-<p>Errors follow the envelope:</p>
-<pre><code class="language-json">{
-  "code": "rate_limit_exceeded",
-  "message": "Human readable explanation",
-  "details": {
-    "retry_after_seconds": 3
-  }
-}
-</code></pre>
-<p>Each response sets <code>trace_id</code> headers for correlation with logs. Retries should respect <code>Retry-After</code> where present.</p>
-<h2 id="openapi"><a class="header" href="#openapi">OpenAPI</a></h2>
-<p><code>rustygpt-server</code> exposes OpenAPI JSON/YAML via <code>/api/openapi.json</code> and <code>/api/openapi.yaml</code>. Import the schema into clients to generate strongly typed SDKs. Keep the spec in sync with code changes and surface changelog entries in <a href="../changelog/index.html">Release Notes</a>.</p>
+<h3 id="oauth-helpers"><a class="header" href="#oauth-helpers">OAuth helpers</a></h3>
+<p>Handlers in <code>handlers/github_auth.rs</code> and <code>handlers/apple_auth.rs</code> expose optional OAuth flows when credentials are present:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Notes</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/api/oauth/github</code></td><td>Returns an authorization URL based on <code>GITHUB_*</code> environment variables.</td></tr>
+<tr><td>GET</td><td><code>/api/oauth/github/callback</code></td><td>Exchanges the code for a session via <code>ProductionOAuthService</code>.</td></tr>
+<tr><td>POST</td><td><code>/api/oauth/github/manual</code></td><td>Developer helper that accepts a raw auth code.</td></tr>
+<tr><td>GET</td><td><code>/api/oauth/apple</code></td><td>Same as GitHub but for Apple.</td></tr>
+<tr><td>GET</td><td><code>/api/oauth/apple/callback</code></td><td>Callback handler.</td></tr>
+<tr><td>POST</td><td><code>/api/oauth/apple/manual</code></td><td>Manual exchange helper.</td></tr>
+</tbody></table>
+</div>
+<h2 id="conversations--membership"><a class="header" href="#conversations--membership">Conversations &amp; membership</a></h2>
+<p>Routes implemented in <code>handlers/conversations.rs</code>:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>POST</td><td><code>/api/conversations</code></td><td>Create a new conversation.</td></tr>
+<tr><td>POST</td><td><code>/api/conversations/{conversation_id}/participants</code></td><td>Invite/add a participant. Emits membership + presence SSE events.</td></tr>
+<tr><td>DELETE</td><td><code>/api/conversations/{conversation_id}/participants/{user_id}</code></td><td>Remove a participant.</td></tr>
+<tr><td>POST</td><td><code>/api/conversations/{conversation_id}/invites</code></td><td>Create an invite token.</td></tr>
+<tr><td>POST</td><td><code>/api/invites/accept</code></td><td>Accept an invite token.</td></tr>
+<tr><td>POST</td><td><code>/api/invites/{token}/revoke</code></td><td>Revoke an invite token.</td></tr>
+<tr><td>GET</td><td><code>/api/conversations/{conversation_id}/threads</code></td><td>List thread summaries (supports <code>after</code> + <code>limit</code> query params).</td></tr>
+<tr><td>GET</td><td><code>/api/conversations/{conversation_id}/unread</code></td><td>Return unread counts per thread.</td></tr>
+</tbody></table>
+</div>
+<h2 id="threads--messages"><a class="header" href="#threads--messages">Threads &amp; messages</a></h2>
+<p>Routes from <code>handlers/threads.rs</code>:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/api/threads/{root_id}/tree</code></td><td>Depth-first thread slice (<code>cursor_path</code> + <code>limit</code> optional).</td></tr>
+<tr><td>POST</td><td><code>/api/threads/{conversation_id}/root</code></td><td>Create a new thread root. Triggers assistant streaming when role = <code>assistant</code>.</td></tr>
+<tr><td>POST</td><td><code>/api/messages/{parent_id}/reply</code></td><td>Reply to an existing message.</td></tr>
+<tr><td>GET</td><td><code>/api/messages/{message_id}/chunks</code></td><td>Retrieve persisted assistant chunks.</td></tr>
+<tr><td>POST</td><td><code>/api/threads/{root_id}/read</code></td><td>Mark thread as read (<code>MarkThreadReadRequest</code>).</td></tr>
+<tr><td>POST</td><td><code>/api/messages/{message_id}/delete</code></td><td>Soft-delete a message.</td></tr>
+<tr><td>POST</td><td><code>/api/messages/{message_id}/restore</code></td><td>Restore a previously deleted message.</td></tr>
+<tr><td>POST</td><td><code>/api/messages/{message_id}/edit</code></td><td>Replace message content.</td></tr>
+<tr><td>POST</td><td><code>/api/typing</code></td><td>Set typing state (<code>TypingRequest</code>).</td></tr>
+<tr><td>POST</td><td><code>/api/presence/heartbeat</code></td><td>Update presence heartbeat.</td></tr>
+</tbody></table>
+</div>
+<h2 id="streaming"><a class="header" href="#streaming">Streaming</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/api/stream/conversations/{conversation_id}</code></td><td>SSE endpoint producing <code>ConversationStreamEvent</code> values. Requires session cookie and (optionally) <code>Last-Event-ID</code>.</td></tr>
+</tbody></table>
+</div>
+<h2 id="copilot-compatible-endpoints"><a class="header" href="#copilot-compatible-endpoints">Copilot-compatible endpoints</a></h2>
+<p>These helpers live in <code>handlers/copilot.rs</code> and provide simple echo responses for integration tests:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/v1/models</code></td><td>Returns <code>ModelsResponse</code> with two static models (<code>gpt-4</code>, <code>gpt-3.5</code>).</td></tr>
+<tr><td>POST</td><td><code>/v1/chat/completions</code></td><td>Echoes provided messages as assistant responses (<code>ChatCompletionResponse</code>).</td></tr>
+</tbody></table>
+</div>
+<h2 id="admin-rate-limit-api"><a class="header" href="#admin-rate-limit-api">Admin rate limit API</a></h2>
+<p>Available when <code>features.auth_v1 = true</code> and <code>rate_limits.admin_api_enabled = true</code> (<code>handlers/admin_limits.rs</code>):</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/api/admin/limits/profiles</code></td><td>List profiles.</td></tr>
+<tr><td>POST</td><td><code>/api/admin/limits/profiles</code></td><td>Create a profile.</td></tr>
+<tr><td>PUT</td><td><code>/api/admin/limits/profiles/{id}</code></td><td>Update profile parameters/description.</td></tr>
+<tr><td>DELETE</td><td><code>/api/admin/limits/profiles/{id}</code></td><td>Delete a profile (fails if still assigned).</td></tr>
+<tr><td>GET</td><td><code>/api/admin/limits/assignments</code></td><td>List route assignments.</td></tr>
+<tr><td>POST</td><td><code>/api/admin/limits/assignments</code></td><td>Assign a profile to a route.</td></tr>
+<tr><td>DELETE</td><td><code>/api/admin/limits/assignments/{id}</code></td><td>Remove an assignment.</td></tr>
+</tbody></table>
+</div>
+<h2 id="health-and-observability"><a class="header" href="#health-and-observability">Health and observability</a></h2>
+<p>Outside of the <code>/api</code> prefix, the server exposes:</p>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>
+<tr><td>GET</td><td><code>/healthz</code></td><td>Liveness probe.</td></tr>
+<tr><td>GET</td><td><code>/readyz</code></td><td>Readiness probe (verifies PostgreSQL bootstrap).</td></tr>
+<tr><td>GET</td><td><code>/metrics</code></td><td>Prometheus metrics via <code>metrics-exporter-prometheus</code>.</td></tr>
+<tr><td>GET</td><td><code>/.well-known/{path}</code></td><td>Served when <code>features.well_known = true</code>; entries configured via <code>[well_known.entries]</code>.</td></tr>
+<tr><td>GET</td><td><code>/openapi.json</code> / <code>/openapi.yaml</code></td><td>Generated OpenAPI spec.</td></tr>
+</tbody></table>
+</div>
+<p>Refer to <a href="authentication.html">Authentication</a> for cookie details and <a href="config.html">Configuration</a> for the relevant keys.</p>
 
                     </main>
 
