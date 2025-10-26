@@ -1,81 +1,53 @@
-# Rate-Limit Architecture
+# Rate-limit architecture
 
-> TL;DR – RustyGPT enforces per-route throttling through Postgres-backed profiles cached in memory, exposing admin APIs for live tuning.
+RustyGPT enforces per-route throttling using a leaky-bucket strategy implemented in `middleware::rate_limit`. Configuration
+comes from two tables managed by stored procedures in `scripts/pg/procs/034_limits.sql`.
 
-## Data Model
+## Data model
 
-- `rustygpt.rate_limit_profiles` – GCRA parameters (`algorithm`, `params` JSON, optional description).
-- `rustygpt.rate_limit_assignments` – Maps `{method, path_pattern}` pairs to profiles.
-- `rustygpt.message_rate_limits` – Conversation-scoped throttling reused by the chat service.
+- `rustygpt.rate_limit_profiles` – named profiles containing algorithm + JSON parameters (currently `gcra` style with
+  `requests_per_second` / `burst` options).
+- `rustygpt.rate_limit_assignments` – maps HTTP method + path pattern to a profile.
+- `rustygpt.message_rate_limits` – per-user, per-conversation state used by `sp_user_can_post` to throttle message posting.
 
-Stored procedures (`sp_limits_*`) manage CRUD operations. After each change, call `RateLimitState::reload_from_db` to refresh the cache.
+`RateLimitState::reload_from_db` loads profiles and assignments into memory. The admin API under `/api/admin/limits/*` can
+create, update, or delete records at runtime; after each change the state refreshes automatically.
 
-## Admin API
+## Matching logic
 
-| Method | Path                                   | Description                    |
-|--------|----------------------------------------|--------------------------------|
-| GET    | `/api/admin/limits/profiles`           | List profiles                  |
-| POST   | `/api/admin/limits/profiles`           | Create a profile               |
-| PUT    | `/api/admin/limits/profiles/:id`       | Update a profile               |
-| DELETE | `/api/admin/limits/profiles/:id`       | Delete a profile               |
-| GET    | `/api/admin/limits/assignments`        | List assignments               |
-| POST   | `/api/admin/limits/assignments`        | Assign profile to a route      |
-| DELETE | `/api/admin/limits/assignments/:id`    | Remove an assignment           |
+`enforce_rate_limits` computes a cache key as `"{METHOD} {path}"` and finds the first matching pattern. Supported patterns:
 
-Payloads align with DTOs in `rustygpt-shared/src/models/limits.rs` and are documented in [REST API](../reference/api.md).
+- Exact path matches (`/api/messages/{id}/reply` becomes `/api/messages/:id/reply` in the database)
+- `*` suffix for prefixes (e.g. `/api/admin/*`)
 
-### Create a Profile
+If no assignment matches, the middleware falls back to the default strategy derived from `[rate_limits.default_rps]` and
+`[rate_limits.burst]`. Login routes (`/api/auth/login`) use the dedicated `auth_login_per_ip_per_min` limiter.
 
-```http
-POST /api/admin/limits/profiles
-Content-Type: application/json
+## Metrics and headers
 
-{
-  "name": "messages.fast-track",
-  "algorithm": "gcra",
-  "params": { "requests_per_second": 20, "burst": 40 },
-  "description": "Lenient burst bucket for trusted integrations"
-}
-```
+When a request is evaluated the middleware records:
 
-### Assign to a Route
+- `http_rate_limit_requests_total{profile,result}` – allowed vs denied counts
+- `http_rate_limit_remaining{profile}` – remaining tokens after the decision
+- `http_rate_limit_reset_seconds{profile}` – seconds until the bucket refills
+- `rustygpt_limits_profiles` / `rustygpt_limits_assignments` – gauges updated on reload
 
-```http
-POST /api/admin/limits/assignments
-Content-Type: application/json
+Responses include the standard headers `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, and
+`X-RateLimit-Profile` so clients can react accordingly.
 
-{
-  "profile_id": "f26d1c7c-621c-4e9a-815c-21ed6f63c1db",
-  "method": "POST",
-  "path": "/api/messages/:id/reply"
-}
-```
+## Admin API payloads
 
-## Runtime Matching
+All admin payloads live in `shared::models::limits`:
 
-- Keys normalise to uppercase method + path pattern (`POST /api/messages/:id/reply`).
-- Patterns support `*` suffix (`/api/admin/*`) and colon parameters (`:id`).
-- Auth endpoints fallback to `auth_strategy` so login traffic cannot exhaust the global bucket.
-- Defaults use `[default_rps, default_burst]` from configuration.
+- `CreateRateLimitProfileRequest`
+- `UpdateRateLimitProfileRequest`
+- `AssignRateLimitRequest`
+- `RateLimitProfile` / `RateLimitAssignment`
 
-Denials return:
+These endpoints require an authenticated session with the `admin` role (`handlers/admin_limits.rs`).
 
-```json
-{
-  "code": "rate_limit_exceeded",
-  "message": "...",
-  "details": { "retry_after_seconds": 3 }
-}
-```
+## Conversation posting limits
 
-Headers include `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, and `X-RateLimit-Profile`.
-
-## Observability
-
-Prometheus metrics:
-
-- `rustygpt_limits_profiles{count}`
-- `rustygpt_limits_assignments{count}`
-- `rustygpt_rate_limit_denials_total`
-
-Dashboards live in `deploy/grafana/limits.json`. Roll out configuration changes using [Docker Deploy](../howto/docker-deploy.md) for production and validate with `lychee` or smoke tests in [Local Development](../guide/local-dev.md).
+`ChatService::post_root_message` and `ChatService::reply_message` call `sp_user_can_post`, which enforces a GCRA window per
+`(user_id, conversation_id)` using `rustygpt.message_rate_limits`. Tweak the `conversation.post` profile via SQL or the admin
+API to adjust posting cadence.

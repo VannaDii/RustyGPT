@@ -1,83 +1,65 @@
 # Authentication
 
-> TL;DR – RustyGPT authenticates with HttpOnly cookie sessions backed by Postgres, providing rotation, CSRF protection, and admin observability.
+RustyGPT uses cookie-based sessions backed by PostgreSQL. Session management lives in `rustygpt-server/src/auth/session.rs` and
+is exposed through `/api/auth/*` handlers when `features.auth_v1 = true`.
 
-## Session Endpoints
+## Session lifecycle
 
-All session APIs live under `/api/auth` and return JSON with the authenticated user and timestamps (`issued_at`, `expires_at`, `absolute_expires_at`).
+1. **Setup** – `POST /api/setup` hashes the supplied password and inserts the first user (admin + member roles). Further calls
+   are rejected.
+2. **Login** – `POST /api/auth/login` verifies credentials via `sp_auth_login`. Successful responses include:
+   - `Set-Cookie: SESSION_ID=...; HttpOnly; Secure?; SameSite=Lax`
+   - `Set-Cookie: CSRF-TOKEN=...; SameSite=Strict`
+   - `X-Session-Rotated: 1`
+3. **Authenticated requests** – non-GET operations must include the CSRF header `X-CSRF-TOKEN` with the cookie value. The web
+   client (`rustygpt-web/src/api.rs`) and CLI handle this automatically.
+4. **Refresh** – `POST /api/auth/refresh` rotates cookies inside the idle window (default 8 hours). If either idle or absolute
+   expiry is exceeded, the call returns `401 session_expired`.
+5. **Logout** – `POST /api/auth/logout` clears the session and CSRF cookies.
 
-| Method | Path                  | Description                               |
-|--------|-----------------------|-------------------------------------------|
-| POST   | `/api/auth/login`     | Verifies credentials and issues session   |
-| POST   | `/api/auth/refresh`   | Rotates session inside idle window        |
-| GET    | `/api/auth/me`        | Returns the current session summary       |
-| POST   | `/api/auth/logout`    | Revokes the active session                |
+Sessions are stored in `rustygpt.user_sessions`. The idle and absolute windows come from `[session]` in configuration. When
+`max_sessions_per_user` is set the newest session evicts the oldest via `sp_auth_login`.
 
-Successful responses include:
+## Cookie configuration
 
-- `Set-Cookie: sid=...; HttpOnly; Secure; SameSite=Lax`
-- `Set-Cookie: CSRF-TOKEN=...; SameSite=Strict`
-- `X-Session-Rotated: 1` when rotation occurs
-
-Unauthorized responses set `WWW-Authenticate: session` so clients can attempt a silent refresh. See [REST API](api.md) for the broader surface area.
-
-## Session Lifecycle
-
-Configuration lives in `[session]` (see [Configuration](config.md)):
+`config.toml` controls cookie behaviour:
 
 ```toml
 [session]
 idle_seconds = 28800
 absolute_seconds = 604800
-session_cookie_name = "sid"
+session_cookie_name = "SESSION_ID"
 csrf_cookie_name = "CSRF-TOKEN"
 max_sessions_per_user = 5
+
+[security.cookie]
+domain = ""
+secure = false
+same_site = "lax"
+
+[security.csrf]
+cookie_name = "CSRF-TOKEN"
+header_name = "X-CSRF-TOKEN"
+enabled = true
 ```
 
-- **Sliding rotation** – any authenticated request inside the idle window extends the session and may rotate cookies.
-- **Absolute lifetime** – once `absolute_seconds` elapse, `/api/auth/refresh` returns `401 session_expired`.
-- **Privilege changes** – stored procedures mark rows with `requires_rotation = TRUE`, forcing cookie refresh.
-- **Max concurrent sessions** – newest sessions evict the oldest when the cap is exceeded.
+Adjust `security.cookie.secure` and `security.cookie.domain` for production deployments. When `security.csrf.enabled = false`
+the middleware skips header validation (useful for service-to-service calls but not recommended for browsers).
 
-Stored procedures `rustygpt.sp_auth_login` and `sp_auth_refresh` encapsulate Argon2id verification and rotation logic.
+## CLI workflow
 
-## CSRF Enforcement
-
-Non-GET requests outside `/api/auth/*` must include:
-
-- `X-CSRF-Token` header
-- `CSRF-TOKEN` cookie
-
-Failures return `403 Forbidden`. Exemptions: GET/HEAD/OPTIONS, SSE streaming endpoints, and `/api/auth/*`.
-
-## Client Guidance
-
-- Persist both cookies; the session id stays HttpOnly while the CSRF token is user-accessible.
-- On `401` with `WWW-Authenticate: session`, call `/api/auth/refresh` once before retrying.
-- On logout, delete cookies and redirect to `/login`.
-
-CLI smoke tests:
+The CLI wraps the same endpoints:
 
 ```bash
-cargo run -p rustygpt-cli -- auth login
-cargo run -p rustygpt-cli -- auth me
+cargo run -p rustygpt-cli -- login
+cargo run -p rustygpt-cli -- me
+cargo run -p rustygpt-cli -- logout
 ```
+
+Cookies are stored at `~/.config/rustygpt/session.cookies` by default (see `[cli.session_store]`). The `follow` and `chat`
+commands automatically attach the CSRF header when present.
 
 ## Observability
 
-Prometheus metrics:
-
-- `rustygpt_auth_logins_total{result=...}`
-- `rustygpt_auth_session_rotations_total{reason=...}`
-- `rustygpt_auth_active_sessions{user_role}`
-
-Dashboards live in `deploy/grafana/auth.json`. Integrate rotation procedures with [Rotate Secrets](../howto/rotate-secrets.md) when updating signing keys.
-
-## Cutover Runbook
-
-1. Apply migrations (`010_auth.sql`, `034_limits.sql`, `040_rate_limits.sql`, `050_sse_persistence.sql`).
-2. Deploy backend, then web + CLI to pick up DTO changes.
-3. Force rotations with `SELECT rustygpt.sp_auth_mark_rotation(id, 'cutover') FROM rustygpt.users;`.
-4. Smoke test via CLI and web UI.
-
-If issues arise, follow the incident response guidance in [Docker Deploy](../howto/docker-deploy.md).
+Authentication currently relies on logs for troubleshooting. Set `RUST_LOG=rustygpt_server=debug` to trace session decisions
+(`SessionService::authenticate`, `SessionService::refresh_session`). Prometheus metrics for auth flows are not yet implemented.

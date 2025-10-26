@@ -1,10 +1,7 @@
 # How-to Overview
 
-> TL;DR – Task-oriented instructions for operating, deploying, and maintaining RustyGPT.
+Task-focused guides for operating RustyGPT. These assume you already understand the system from the [Guides](../guide/index.md)
+and [Reference](../reference/index.md) sections.
 
-## Available Playbooks
-
-- [Docker Deploy](docker-deploy.md) – build images, wire dependencies, and validate rollout.
-- [Rotate Secrets](rotate-secrets.md) – refresh credentials without downtime.
-
-Each how-to references underlying concepts and interfaces so you can trace decisions back to [Reference](../reference/index.md) and [Architecture](../architecture/index.md) as needed. Contribute additional playbooks when new operational workflows emerge.
+- [Docker Deploy](docker-deploy.md) – build/publish images and run Compose.
+- [Rotate Secrets](rotate-secrets.md) – refresh credentials and validate sessions.

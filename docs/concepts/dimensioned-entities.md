@@ -1,33 +1,38 @@
-# Dimensioned Entities
+# Shared models
 
-> TL;DR – Dimensioned entities annotate RustyGPT data structures with semantic and temporal dimensions so downstream systems can reason about provenance and lifecycle.
+`rustygpt-shared` centralises the data structures consumed by the server, web client, and CLI. Keeping these DTOs in one crate
+prevents drift between components and allows `serde` + `utoipa` derives to stay consistent.
 
-## Motivation
+## Configuration loader
 
-Conversation transcripts, tool inputs, and generated artifacts need contextual metadata to remain auditable. Dimensioned entities encode:
+`src/config/server.rs` defines the `Config` struct and associated sub-structures (`ServerConfig`, `RateLimitConfig`,
+`SseConfig`, etc.). Every binary loads configuration through `Config::load_config`, which merges defaults, optional files, and
+environment overrides. Feature flags such as `features.auth_v1` gate server subsystems without requiring code changes.
 
-- **Subject** – the domain object (`conversation`, `agent`, `session`).
-- **Scope** – user, tenant, or system ownership.
-- **Temporal dimension** – creation time, last mutation, retention deadline.
-- **Sensitivity** – policy hints for redaction and export.
+## API payloads
 
-These attributes ride along with each payload in `rustygpt-shared`, ensuring services apply the right policies without duplicating logic.
+The `src/models` directory contains strongly typed request/response structs:
 
-## Implementation
+- `models/chat.rs` – conversations, threads, message payloads, and streaming events
+- `models/oauth.rs` – GitHub/Apple OAuth exchanges
+- `models/setup.rs` – first-time setup contract (`SetupRequest`, `SetupResponse`)
+- `models/limits.rs` – rate limit admin DTOs (`CreateRateLimitProfileRequest`, `RateLimitAssignment`, ...)
+- `models/session.rs` – session summaries returned by `/api/auth/*`
 
-- Structs derive `Dimensioned` via a procedural macro that injects helpers for tagging and serialisation.
-- `rustygpt-server` enforces scope isolation using the dimension metadata during database queries.
-- Export pipelines honour retention windows by consulting the temporal dimensions before emitting records.
+All types derive `Serialize`, `Deserialize`, and when relevant `utoipa::ToSchema` so the OpenAPI generator stays in sync.
 
-Refer to [Reasoning DAG](reasoning-dag.md) for how dimensions propagate across reasoning nodes.
+## LLM abstractions
 
-## Usage Guidelines
+`src/llms` exposes traits (`LLMProvider`, `LLMModel`) and helpers for llama.cpp integration. The server’s
+`AssistantService` uses these traits to stream responses and emit metrics (`llm_model_cache_hits_total`, `llm_model_load_seconds`).
+When you add a new provider, implement the traits here and update the configuration schema.
 
-- Prefer explicit dimensions over ad-hoc metadata fields.
-- When introducing a new entity, document its semantics under [Configuration](../reference/config.md) if tunable.
-- Include dimension checks in integration tests to catch accidental policy regressions.
+## Why it matters
 
-## Further Reading
+- **Type safety** – clients compile against the same structs the server uses, catching breaking changes early.
+- **Single-source documentation** – OpenAPI docs and mdBook pages pull names directly from these types.
+- **Testing** – shared fixtures in `shared::models` make it easier to write integration tests that cover both server handlers and
+  CLI commands.
 
-- [Service Topology](../architecture/service-topology.md) shows where dimension enforcement lives in the runtime.
-- [Rotate Secrets](../howto/rotate-secrets.md) demonstrates applying dimension metadata during credential refresh workflows.
+Whenever you extend the API, add or update the relevant struct in `rustygpt-shared` first, then regenerate the OpenAPI spec with
+`cargo run -p rustygpt-cli -- spec`.

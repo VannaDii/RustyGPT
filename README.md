@@ -1,345 +1,136 @@
 # RustyGPT
 
-[![CI](https://github.com/VannaDii/RustyGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/VannaDii/RustyGPT/actions/workflows/ci.yml) [![Lint](https://github.com/VannaDii/RustyGPT/actions/workflows/lint.yml/badge.svg)](https://github.com/VannaDii/RustyGPT/actions/workflows/lint.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/VannaDii/RustyGPT/blob/main/CONTRIBUTING.md) [![Rust Version](https://img.shields.io/badge/rust-stable-blue.svg)](https://www.rust-lang.org/)
-
-## Overview
-
-**RustyGPT** is a learning-driven Rust project focused on mastering Rust for building efficient, scalable backend systems with a modern frontend. The project explores **Axum** for API development, **PostgreSQL** for database management, and **AI model integration** in Rust.
-
-## Project Structure
-
-The project follows a clean architecture with clear separation of concerns:
-
-- **Backend**: Rust-based Axum server providing authentication and conversation APIs
-  - **Handlers**: Handle HTTP requests and responses
-  - **Routes**: Define API endpoints and group related routes
-  - **Services**: Implement business logic
-- **Frontend**: Rust-based web frontend using Yew
-  - **Components**: Reusable UI elements following atomic design principles
-  - **State Management**: Yewdux for global state with optimized performance
-  - **Layout**: DaisyUI admin dashboard with responsive design
-  - **Accessibility**: WCAG 2.2 AA compliant components
-- **Shared**: Common models and utilities used by both frontend and backend
-  - **Models**: Data structures for conversations, messages, users, and streaming functionality
-
-## Features
-
-- **RESTful API** using **Axum** for high-performance web services
-- **Modern Admin Dashboard** using DaisyUI and Yew with responsive design
-- **Component-driven UI** following atomic design principles
-- **Optimized WebAssembly** with sub-1MB initial payload
-- **Real-time streaming** with Server-Sent Events (SSE) for message delivery
-- **Interactive interface** with real-time updates
-- **PostgreSQL integration** with stored procedures for secure, efficient database access
-- **OAuth authentication** via GitHub (with Apple support planned)
-- **AI model integration** using local inference engines
-- **Docker Compose setup** for seamless environment management
-- **Unit-tested architecture** ensuring reliability and maintainability
-- **Accessibility compliance** with WCAG 2.2 AA standards
-- **Configuration-based URLs** for flexible deployment across environments
-- **Built-in observability** with Prometheus metrics, JSON/text logging, and health probes
-- **Durable SSE streams** with optional persistent cursors and backpressure metrics
-
-## Chat & Streaming Functionality
-
-The application features a real-time chat system with streaming message delivery:
-
-1. **Message Sending**: Users can send messages to conversations via the API
-2. **Server-Sent Events**: The backend uses SSE to stream message chunks to connected clients
-3. **Real-time Updates**: The frontend receives and displays message chunks as they arrive
-4. **Streaming UI**: Messages are displayed with typing indicators while streaming
-5. **Conversation Management**: Users can view and interact with multiple conversations
-
-## CLI Interface
-
-The RustyGPT CLI provides a command-line interface for interacting with AI models locally:
-
-### Chat Command
-
-Start an interactive chat session with a local AI model:
-
-```sh
-# Basic chat with default settings
-cargo run --bin cli chat
-
-# Chat with custom model
-cargo run --bin cli chat --model /path/to/your/model.gguf
-
-# Chat with custom parameters
-cargo run --bin cli chat \
-  --model /path/to/model.gguf \
-  --temperature 0.7 \
-  --max-tokens 512 \
-  --system "You are a helpful coding assistant."
-```
-
-### Available Options
-
-- `--model, -m`: Path to the GGUF model file (auto-detects hardware optimization)
-- `--temperature, -t`: Response creativity (0.0-1.0, lower = more focused)
-- `--max-tokens`: Maximum tokens per response (model-dependent default)
-- `--system, -s`: System message to set AI behavior
-
-### Features
-
-- **Hardware Optimization**: Automatically detects CPU/GPU capabilities and optimizes model parameters
-- **Interactive Session**: Type messages and receive AI responses in real-time
-- **Exit Commands**: Type `exit`, `quit`, or `q` to end the session
-- **Token Usage**: Shows token statistics for each response
-- **Error Handling**: Graceful handling of model loading and generation errors
-
-### Other CLI Commands
-
-```sh
-# Generate OpenAPI specification
-cargo run --bin cli spec
-
-# Generate shell completions
-cargo run --bin cli completion bash
-
-# Generate configuration file
-cargo run --bin cli config
-
-# Start the backend server
-cargo run --bin cli serve --port 8080
-```
-
-## Observability
-
-RustyGPT exposes production-ready telemetry out of the box:
-
-| Signal            | Endpoint / Location           | Notes                                                                              |
-| ----------------- | ----------------------------- | ---------------------------------------------------------------------------------- |
-| **Metrics**       | `GET /metrics`                | Prometheus exposition including HTTP, SSE, DB bootstrap, and health counters/gauges |
-| **Liveness**      | `GET /healthz`                | Returns `200` when the API process is running                                      |
-| **Readiness**     | `GET /readyz`                 | Verifies database connectivity and stored procedure availability                   |
-| **Structured logs** | stdout / stderr             | `logging.format = "json"` enables machine-readable JSON logs for aggregation       |
-
-### Metrics Quick Start
-
-Add the following scrape config to your Prometheus deployment:
-
-```yaml
-scrape_configs:
-  - job_name: rustygpt
-    metrics_path: /metrics
-    static_configs:
-      - targets:
-          - rustygpt.example.com:8080
-```
-
-Key metric families include:
-
-- `http_requests_total` / `http_request_duration_seconds` for inbound API traffic
-- `sse_events_sent_total`, `sse_events_dropped_total`, and `sse_queue_depth` for streaming health
-- `db_bootstrap_*` and `db_{liveness,readiness}_checks_total` covering database lifecycle
-
-### Structured Logging
-
-Configure JSON logs in `config.toml`:
-
-```toml
-[logging]
-level = "info"
-format = "json"
-```
-
-With this enabled, each log line includes request identifiers, matched routes, status codes, and latencies to simplify ingestion into log pipelines such as Loki, CloudWatch, or ELK.
-
-## SSE Durability & Backpressure
-
-The SSE coordinator supports optional on-disk persistence and queue instrumentation:
-
-- Enable durable cursors by setting `sse.persistence.enabled = true`; the coordinator stores events in PostgreSQL via stored procedures.
-- Configure SSE retention with `sse.persistence.retention_hours` (clamped to 24–72h) and tune replay bounds with `sse.persistence.max_events_per_user` / `sse.persistence.prune_batch_size`.
-- Control congestion handling with `sse.backpressure.drop_strategy` (`drop_tokens` or `drop_tokens_and_system`) and monitor queue pressure through `sse_queue_depth`/`sse_queue_occupancy_ratio`.
-
-These knobs allow operators to tune RustyGPT for multi-tenant workloads while maintaining delivery guarantees for critical events.
-
-## Observability
-
-- Export Prometheus metrics via `/metrics`; new counters for auth, rate limits, and SSE replay are documented in `docs/operations/auth.md` and `docs/operations/rate_limits.md`.
-- Import the dashboards in `deploy/grafana/*.json` using Grafana's **Import Dashboard** workflow and point them at the RustyGPT Prometheus data source. The JSON files are kept as single-source-of-truth for CI and can be versioned alongside infrastructure changes.
-- Cross-check metric availability with `promtool` or by querying Prometheus (e.g., `sum by (result) (rustygpt_auth_logins_total)`); the dashboards expect the metric names emitted by the latest server build.
-
-## CLI Authentication Workflow
-
-The CLI stores session cookies locally to reuse browser-compatible auth flows:
-
-1. Run `rustygpt session login` and enter email/password when prompted. Cookies are persisted to the path displayed after login.
-2. Inspect the active session with `rustygpt session me`, which calls `/api/auth/me` and prints the stored profile and expiry timestamps.
-3. Revoke local credentials with `rustygpt session logout`; the command clears the cookie jar and notifies the backend.
-
-Most interactive subcommands (e.g., `chat`, `reply`) now reuse the shared cookie jar and automatically attach CSRF headers when posting data.
-
-## Authentication Flow
-
-The application supports OAuth authentication with both GitHub and Apple:
-
-1. **Initiate OAuth**: User visits `/api/oauth/github` or `/api/oauth/apple` to start the authentication flow
-2. **Provider Redirect**: User is redirected to the OAuth provider (GitHub or Apple)
-3. **Callback**: Provider redirects back to our callback endpoint with an authorization code
-4. **Token Exchange**: Backend exchanges the code for an access token
-5. **User Creation/Login**: Backend creates or retrieves a user account based on the OAuth provider ID
-6. **Success Page**: User is redirected to the success page with their user ID
-
-## API Endpoints
-
-### Authentication
-
-- `GET /api/oauth/github`: Initiate GitHub OAuth flow
-- `GET /api/oauth/github/callback`: Handle GitHub OAuth callback
-- `POST /api/oauth/github/manual`: Manual GitHub OAuth (for testing)
-- `GET /api/oauth/apple`: Initiate Apple OAuth flow
-- `GET /api/oauth/apple/callback`: Handle Apple OAuth callback
-- `POST /api/oauth/apple/manual`: Manual Apple OAuth (for testing)
-
-### Protected Routes
-
-- `GET /api/conversations`: Get all conversations for the authenticated user
-- `POST /api/conversations/{conversation_id}/messages`: Send a message to a conversation
-- `GET /api/stream/{user_id}`: Connect to the SSE stream for real-time message updates
-
-## Tech Stack
-
-- **Programming Language:** Rust
-- **Backend Framework:** Axum
-- **Frontend Framework:** Yew
-- **UI Components:** DaisyUI and Tailwind CSS
-- **State Management:** Yewdux
-- **Data Visualization:** plotters-canvas
-- **Real-time Communication:** Server-Sent Events (SSE)
-- **Database:** PostgreSQL
-- **Authentication:** OAuth (GitHub, future Apple support)
-- **Containerization:** Docker Compose
-- **Testing:** Unit tests for both backend and frontend
-- **Bundler:** Trunk with wasm-opt
-- **AI Models:** Local inference, no external API dependencies
-
-## Environment Variables
-
-The application requires the following environment variables:
-
-```
-# Database connection
-DATABASE_URL=postgres://postgres:postgres@localhost/rusty_gpt
-
-# OAuth credentials
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
-GITHUB_REDIRECT_URI=http://localhost:8080/api/oauth/github/callback
-GITHUB_AUTH_URL=https://github.com/login/oauth/authorize
-GITHUB_TOKEN_URL=https://github.com/login/oauth/access_token
-
-APPLE_CLIENT_ID=your_apple_client_id
-APPLE_REDIRECT_URI=http://localhost:8080/api/oauth/apple/callback
-APPLE_AUTH_URL=https://appleid.apple.com/auth/authorize
-APPLE_TOKEN_URL=https://appleid.apple.com/auth/token
-```
-
-## Setup & Installation
-
-1. **Clone the Repository**
-
-   ```sh
-   git clone https://github.com/VannaDii/RustyGPT.git rusty_gpt
-   cd rusty_gpt
+[![CI](https://github.com/VannaDii/RustyGPT/actions/workflows/ci.yml/badge.svg)](https://github.com/VannaDii/RustyGPT/actions/workflows/ci.yml)
+[![Lint](https://github.com/VannaDii/RustyGPT/actions/workflows/lint.yml/badge.svg)](https://github.com/VannaDii/RustyGPT/actions/workflows/lint.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
+RustyGPT is a workspace of Rust crates that together provide a chat assistant server, a Yew web UI, and a command line interface.
+The project focuses on end-to-end Rust implementations for authentication, threaded conversations, Server-Sent Event (SSE)
+streaming, and local LLM execution through a pluggable llama.cpp provider.
+
+## Workspace layout
+
+| Crate | Purpose |
+| ----- | ------- |
+| [`rustygpt-server`](rustygpt-server) | Axum HTTP server with authentication, rate limiting, SSE streaming, and OpenAPI documentation. |
+| [`rustygpt-web`](rustygpt-web) | Yew single-page application that consumes the server APIs and renders threaded conversations. |
+| [`rustygpt-cli`](rustygpt-cli) | Command line client for logging in, inspecting conversations, following SSE streams, and running the server locally. |
+| [`rustygpt-shared`](rustygpt-shared) | Shared models, configuration loader, and llama.cpp integration code reused by all binaries. |
+| [`rustygpt-doc-indexer`](rustygpt-doc-indexer) | Helper used by the docs build to generate the machine-readable index. |
+| [`rustygpt-tools`](rustygpt-tools)`/confuse` | Development helper that runs frontend/backend watchers via the [`just dev`](Justfile) recipe. |
+
+Other notable directories include [`scripts/pg`](scripts/pg) for schema/procedure SQL, [`deploy/grafana`](deploy/grafana) for
+metrics dashboards, and [`docs`](docs) for the mdBook documentation.
+
+## Capabilities
+
+* **Threaded conversations** – `/api/conversations` and `/api/threads` endpoints manage conversation membership, invites, roots,
+  and replies (`rustygpt-server/src/handlers/{conversations,threads}.rs`).
+* **Streaming updates** – `conversation_stream` in `handlers/streaming.rs` broadcasts `ConversationStreamEvent` values over SSE at
+  `/api/stream/conversations/:conversation_id`, with optional PostgreSQL persistence configured through `[sse.persistence]`.
+* **Authentication** – cookie-backed sessions, refresh, and logout flows (see `handlers/auth.rs`) plus optional GitHub or Apple
+  OAuth handlers when the relevant environment variables are present. First-time setup uses `/api/setup` to create the initial
+  administrator (`handlers/setup.rs`).
+* **Rate limiting** – `middleware::rate_limit` enforces per-route buckets populated from the database using stored procedures in
+  `scripts/pg/procs/034_limits.sql`. Admin APIs under `/api/admin/limits/*` allow live updates when `rate_limits.admin_api_enabled`
+  and `features.auth_v1` are enabled.
+* **Local LLM inference** – `AssistantService` streams replies via llama.cpp models configured under `[llm]` in `config.toml`,
+  with metrics such as `llm_model_cache_hits_total` and `llm_model_load_seconds`.
+* **Observability** – Prometheus counters and gauges for health checks, bootstrap progress, rate limiting, and LLM usage, plus
+  `/metrics`, `/healthz`, and `/readyz` endpoints. Grafana dashboards live in `deploy/grafana/`.
+* **Typed configuration** – `rustygpt-shared::config::server::Config` loads layered TOML/YAML/JSON files with environment
+  overrides (e.g. `RUSTYGPT__SERVER__PORT`). The template [`config.example.toml`](config.example.toml) documents all sections.
+
+## Quick start
+
+1. **Install prerequisites**
+   * Rust 1.81+ (`rustup default stable`)
+   * `just`, `cargo-watch`, and `trunk`
+   * PostgreSQL 15+ (local install or Docker)
+   * Optional: llama.cpp-compatible model files for streaming replies
+
+2. **Create a configuration file**
+   ```bash
+   cp config.example.toml config.toml
+   ```
+   Adjust values as needed. For a full local experience set:
+   ```toml
+   [features]
+   auth_v1 = true
+   sse_v1 = true
+   well_known = true
+   ```
+   Ensure `[db].url` points to your PostgreSQL instance and that the database already exists.
+
+3. **Start PostgreSQL**
+   You can use the provided Compose service:
+   ```bash
+   docker compose up postgres -d
+   ```
+   The server automatically runs the bootstrap SQL in `scripts/pg` on startup.
+
+4. **Run the backend**
+   ```bash
+   just run-server
+   ```
+   or
+   ```bash
+   cargo run -p rustygpt-server -- serve --port 8080
+   ```
+   The process listens on `http://127.0.0.1:8080` by default.
+
+5. **Perform first-time setup**
+   POST to `/api/setup` once to create the initial admin account:
+   ```bash
+   curl -X POST http://127.0.0.1:8080/api/setup \
+     -H 'Content-Type: application/json' \
+     -d '{"username":"admin","email":"admin@example.com","password":"change-me"}'
    ```
 
-2. **Install Dependencies**
-
-   - Ensure you have [Rust installed](https://rustup.rs)
-   - Ensure you have [Just installed](https://just.systems)
-   - Install [Docker and Docker Compose](https://docs.docker.com/compose/install/)
-   - Configure environment variables (create a `.env` file based on `.env.template`)
-     - `cp .env.template .env`
-
-3. **Install Tools**
-
-   ```sh
-   just install
-   ```
-
-4. **Run with Live Reloading**
-
-   ```sh
-   just dev
-   ```
-
-5. **Run with Docker Compose**
-
-   ```sh
-   docker-compose up --build
-   ```
-
-6. **Run Backend Only**
-
-   ```sh
-   cd backend
-   cargo run
-   ```
-
-   The server will start on `http://localhost:8080`
-
-7. **Run Frontend Only**
-
-   ```sh
-   cd frontend
+6. **Run the web client**
+   ```bash
+   cd rustygpt-web
    trunk serve
    ```
+   The SPA proxies API requests to the backend and renders conversations, presence, and streaming updates.
 
-8. **Run Tests**
-   ```sh
-   just test
+7. **Use the CLI**
+   ```bash
+   cargo run -p rustygpt-cli -- login
+   cargo run -p rustygpt-cli -- chat --conversation <uuid>
+   cargo run -p rustygpt-cli -- follow --root <thread-uuid>
    ```
+   Commands reuse the same configuration loader and session cookies as the server. See [`rustygpt-cli/src/main.rs`](rustygpt-cli/src/main.rs)
+   for the full list of subcommands (`serve`, `chat`, `reply`, `follow`, `spec`, `completion`, `config`, `login`, `me`, `logout`).
 
-## Contributing
+## Observability
 
-We welcome contributions from the community! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on how to get started, coding standards, and our development process.
+Metrics are exposed at `/metrics` after calling `server::metrics_handle()`. Key instruments include:
 
-Before contributing, please review our:
+| Metric | Description |
+| ------ | ----------- |
+| `health_checks_total{endpoint,status}` | Count of `/healthz` and `/readyz` responses. |
+| `db_bootstrap_batches_total{stage,status}` / `db_bootstrap_script_duration_seconds{stage,status}` | Bootstrap progress per SQL stage (`schema`, `procedures`, `indexes`, `seed`). |
+| `db_liveness_checks_total{status}` / `db_readiness_checks_total{status}` | Database readiness probes. |
+| `db_pool_max_connections`, `db_statement_timeout_ms` | Gauges reflecting the active configuration. |
+| `http_rate_limit_requests_total{profile,result}` | Requests allowed or denied by the rate limit middleware. |
+| `http_rate_limit_remaining{profile}` / `http_rate_limit_reset_seconds{profile}` | Current token state per bucket. |
+| `rustygpt_limits_profiles`, `rustygpt_limits_assignments` | Gauges updated when admin routes reload configuration. |
+| `llm_model_cache_hits_total{provider,model}` / `llm_model_load_seconds{provider,model}` | llama.cpp model cache activity. |
 
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Security Policy](SECURITY.md)
-- [Roadmap](ROADMAP.md) for planned features
-
-### Getting Started as a Contributor
-
-1. Fork the repository
-2. Create a new branch for your feature or bugfix
-3. Make your changes
-4. Run tests to ensure they pass
-5. Submit a pull request
+Import the Grafana dashboards in `deploy/grafana/*.json` to visualise these metrics.
 
 ## Documentation
 
-The project documentation is available on our [GitHub Pages site](https://vannadii.github.io/RustyGPT/).
+The mdBook at [`docs/`](docs) covers architecture, API reference, configuration keys, and operational guides. Run
+`just docs-serve` to preview it locally or browse the published version via GitHub Pages.
 
-We provide detailed documentation for the frontend rewrite:
+## Contributing
 
-- [Frontend Architecture](docs/frontend-architecture.md) - Overview of the frontend architecture and implementation plan
-- [Component Guidelines](docs/component-guidelines.md) - Standards for component development
-- [State Management](docs/state-management.md) - Details of the Yewdux implementation
-- [Frontend Development Guide](docs/frontend-development.md) - Guide for developers working on the frontend
-
-## Community
-
-- **Issues**: Use GitHub issues to report bugs or request features
-- **Discussions**: Join our GitHub discussions for questions and ideas
-- **Pull Requests**: Submit PRs for bug fixes or features aligned with our roadmap
-
-## Roadmap
-
-See our [Roadmap](ROADMAP.md) for planned features and improvements, including:
-
-- Workflow and task management
-- Image generation capabilities
-- And more!
-
-## Changelog
-
-See the [Changelog](CHANGELOG.md) for a history of changes and releases.
+Contributions are welcome! Please review [`CONTRIBUTING.md`](CONTRIBUTING.md) and the code of conduct before opening a pull
+request. Run `just check` and `just test` prior to submitting changes. Security concerns should be reported via the
+[`SECURITY.md`](SECURITY.md) process.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+RustyGPT is available under the Apache 2.0 license. See [`LICENSE`](LICENSE) for details.

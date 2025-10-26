@@ -1,14 +1,11 @@
 # Concepts Overview
 
-> TL;DR – Core principles that underpin RustyGPT’s reasoning, data model, and invariants.
+This section explains the core ideas that appear across the server, web client, and CLI. Use it to understand the vocabulary
+used in API responses and stream payloads before diving into the reference material.
 
-## Scope
+- [Threaded conversations](reasoning-dag.md) describes how messages, threads, and `ConversationStreamEvent` values relate to each
+  other.
+- [Shared models](dimensioned-entities.md) covers the `rustygpt-shared` crate, focusing on how typed DTOs and enums keep clients
+  in sync with the server.
 
-Concept pages explain *why* the system behaves the way it does. They define vocabulary, invariants, and trade-offs that appear across codebases and operational guides.
-
-## Featured Concepts
-
-- [Reasoning DAG](reasoning-dag.md) describes branching and joins in the orchestrator.
-- [Dimensioned Entities](dimensioned-entities.md) shows how metadata travels through services.
-
-Use these pages alongside [Architecture](../architecture/index.md) to connect ideas with concrete components.
+Pair these concepts with the [Architecture](../architecture/index.md) diagrams to see where each part lives at runtime.

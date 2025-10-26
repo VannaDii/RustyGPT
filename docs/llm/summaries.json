@@ -1,224 +1,135 @@
 [
   {
-    "id": "architecture/index",
-    "title": "Architecture Overview",
-    "summary": "TL;DR – System-level views of RustyGPT services, data flows, and cross-cutting behaviours such as streaming and rate limiting.",
-    "tags": [
-      "whats-inside"
-    ],
-    "href": "/architecture/index/"
-  },
-  {
-    "id": "architecture/rate-limits",
-    "title": "Rate-Limit Architecture",
-    "summary": "TL;DR – RustyGPT enforces per-route throttling through Postgres-backed profiles cached in memory, exposing admin APIs for live tuning.",
-    "tags": [
-      "admin-api",
-      "data-model",
-      "observability",
-      "runtime-matching"
-    ],
-    "href": "/architecture/rate-limits/"
-  },
-  {
-    "id": "architecture/service-topology",
-    "title": "Service Topology",
-    "summary": "TL;DR – The RustyGPT platform pairs an Axum-based API, background workers, and a Yew web client connected through message queues and SSE streams.",
-    "tags": [
-      "components",
-      "data-flow",
-      "operational-notes",
-      "scaling"
-    ],
-    "href": "/architecture/service-topology/"
-  },
-  {
-    "id": "architecture/streaming",
-    "title": "Streaming Delivery",
-    "summary": "TL;DR – RustyGPT streams conversation updates over Server-Sent Events (SSE) with persisted replay, ensuring reconnecting clients rebuild state without losing tokens.",
-    "tags": [
-      "client-responsibilities",
-      "diagram",
-      "event-model",
-      "persistence-window",
-      "replay-contract"
-    ],
-    "href": "/architecture/streaming/"
-  },
-  {
-    "id": "changelog/index",
-    "title": "Release Notes",
-    "summary": "TL;DR – Highlights of RustyGPT releases with links to tags and the canonical changelog.",
-    "tags": [
-      "latest",
-      "stable-releases"
-    ],
-    "href": "/changelog/index/"
-  },
-  {
-    "id": "concepts/dimensioned-entities",
-    "title": "Dimensioned Entities",
-    "summary": "TL;DR – Dimensioned entities annotate RustyGPT data structures with semantic and temporal dimensions so downstream systems can reason about provenance and lifecycle.",
-    "tags": [
-      "further-reading",
-      "implementation",
-      "motivation",
-      "usage-guidelines"
-    ],
-    "href": "/concepts/dimensioned-entities/"
-  },
-  {
-    "id": "concepts/index",
-    "title": "Concepts Overview",
-    "summary": "TL;DR – Core principles that underpin RustyGPT’s reasoning, data model, and invariants.",
-    "tags": [
-      "featured-concepts",
-      "scope"
-    ],
-    "href": "/concepts/index/"
-  },
-  {
-    "id": "concepts/reasoning-dag",
-    "title": "Reasoning DAG",
-    "summary": "TL;DR – RustyGPT models agent reasoning as a directed acyclic graph so parallel branches can explore hypotheses while preserving deterministic joins.",
-    "tags": [
-      "benefits",
-      "extending-the-graph",
-      "node-types",
-      "overview",
-      "related-concepts"
-    ],
-    "href": "/concepts/reasoning-dag/"
+    "id": "index",
+    "title": "RustyGPT Documentation",
+    "summary": "Landing page with quick links to guides, reference material, and architecture notes for the Rust workspace.",
+    "tags": ["overview", "navigation"],
+    "href": "/index/"
   },
   {
     "id": "guide/index",
     "title": "Guide Overview",
-    "summary": "TL;DR – Step-by-step walkthroughs for installing, running, and validating RustyGPT locally and in shared environments.",
-    "tags": [
-      "featured-walkthroughs",
-      "when-to-use-guides"
-    ],
+    "summary": "Explains how the quickstart and local development guides help configure the server, web client, and CLI.",
+    "tags": ["guides", "intro"],
     "href": "/guide/index/"
-  },
-  {
-    "id": "guide/local-dev",
-    "title": "Local Development",
-    "summary": "TL;DR – Configure environment variables, run the server, CLI, and web client together, and tighten the feedback loop with watch commands.",
-    "tags": [
-      "cli-tooling",
-      "debugging",
-      "environment-setup",
-      "run-watchers"
-    ],
-    "href": "/guide/local-dev/"
   },
   {
     "id": "guide/quickstart",
     "title": "Quickstart",
-    "summary": "TL;DR – Install the Rust 2024 toolchain, run the RustyGPT server and web UI locally, and verify streaming chat flows with seeded demo data.",
-    "tags": [
-      "build-the-web-client",
-      "prerequisites",
-      "seed-demo-data",
-      "start-the-backend"
-    ],
+    "summary": "Step-by-step instructions for configuring config.toml, starting PostgreSQL, running the server, completing setup, and using the web UI + CLI.",
+    "tags": ["setup", "postgres", "cli", "sse"],
     "href": "/guide/quickstart/"
   },
   {
-    "id": "howto/docker-deploy",
-    "title": "Docker Deploy",
-    "summary": "TL;DR – Build RustyGPT images with Cargo, push to your registry, and deploy via Docker Compose or Kubernetes with environment-specific configuration.",
-    "tags": [
-      "build-containers",
-      "compose-deployment",
-      "post-deployment-checks",
-      "provision-dependencies",
-      "rollback"
-    ],
-    "href": "/howto/docker-deploy/"
+    "id": "guide/local-dev",
+    "title": "Local Development",
+    "summary": "Describes configuration layering, just-based watcher workflows, CLI smoke tests, and debugging techniques for SSE and tracing.",
+    "tags": ["watchers", "cli", "debugging"],
+    "href": "/guide/local-dev/"
   },
   {
-    "id": "howto/index",
-    "title": "How-to Overview",
-    "summary": "TL;DR – Task-oriented instructions for operating, deploying, and maintaining RustyGPT.",
-    "tags": [
-      "available-playbooks"
-    ],
-    "href": "/howto/index/"
+    "id": "concepts/index",
+    "title": "Concepts Overview",
+    "summary": "Lists the core ideas—threaded conversations and shared models—that underpin the server and clients.",
+    "tags": ["concepts", "overview"],
+    "href": "/concepts/index/"
   },
   {
-    "id": "howto/rotate-secrets",
-    "title": "Rotate Secrets",
-    "summary": "TL;DR – Rotate API keys and credentials without downtime by staging new values, triggering config reloads, and confirming session continuity.",
-    "tags": [
-      "automation-ideas",
-      "incident-response",
-      "observability",
-      "preparation",
-      "rotation-steps"
-    ],
-    "href": "/howto/rotate-secrets/"
+    "id": "concepts/reasoning-dag",
+    "title": "Threaded conversations",
+    "summary": "Explains how conversations, threads, message events, and SSE payloads are structured and enforced in the backend.",
+    "tags": ["threads", "sse", "data-model"],
+    "href": "/concepts/reasoning-dag/"
   },
   {
-    "id": "index",
-    "title": "RustyGPT Documentation",
-    "summary": "TL;DR – Everything you need to build, run, and extend RustyGPT with a pure Rust toolchain. Start with Quickstart, then dive into Concepts and Architecture for deeper system insight.",
-    "tags": [
-      "about-rustygpt",
-      "fast-links",
-      "governance-support"
-    ],
-    "href": "/index/"
+    "id": "concepts/dimensioned-entities",
+    "title": "Shared models",
+    "summary": "Covers the rustygpt-shared crate: configuration structs, request/response DTOs, and llama.cpp abstractions.",
+    "tags": ["shared", "dto", "llm"],
+    "href": "/concepts/dimensioned-entities/"
   },
   {
-    "id": "reference/api",
-    "title": "REST API",
-    "summary": "TL;DR – RustyGPT exposes authenticated REST and SSE endpoints for conversations, admin tooling, and health checks; prefer relative URLs from the web or CLI clients.",
-    "tags": [
-      "admin-operations",
-      "authentication",
-      "core-endpoints",
-      "error-model",
-      "openapi"
-    ],
-    "href": "/reference/api/"
+    "id": "architecture/index",
+    "title": "Architecture Overview",
+    "summary": "Highlights the available architecture chapters covering topology, streaming, and rate limiting.",
+    "tags": ["architecture", "index"],
+    "href": "/architecture/index/"
   },
   {
-    "id": "reference/authentication",
-    "title": "Authentication",
-    "summary": "TL;DR – RustyGPT authenticates with HttpOnly cookie sessions backed by Postgres, providing rotation, CSRF protection, and admin observability.",
-    "tags": [
-      "client-guidance",
-      "csrf-enforcement",
-      "cutover-runbook",
-      "observability",
-      "session-endpoints",
-      "session-lifecycle"
-    ],
-    "href": "/reference/authentication/"
+    "id": "architecture/service-topology",
+    "title": "Service topology",
+    "summary": "Shows how the Axum server, StreamHub, PostgreSQL, Yew SPA, and CLI interact along with feature flags and scaling notes.",
+    "tags": ["components", "data-flow", "scaling"],
+    "href": "/architecture/service-topology/"
   },
   {
-    "id": "reference/config",
-    "title": "Configuration",
-    "summary": "TL;DR – All RustyGPT services share a TOML configuration merged with environment variables; this page maps each key to runtime behaviour.",
-    "tags": [
-      "database-block",
-      "loading-order",
-      "observability-block",
-      "rate-limit-block",
-      "secrets",
-      "server-block",
-      "session-block"
-    ],
-    "href": "/reference/config/"
+    "id": "architecture/streaming",
+    "title": "Streaming delivery",
+    "summary": "Details the SSE flow, event payloads, persistence options, backpressure controls, and client responsibilities.",
+    "tags": ["sse", "persistence", "backpressure"],
+    "href": "/architecture/streaming/"
+  },
+  {
+    "id": "architecture/rate-limits",
+    "title": "Rate-limit architecture",
+    "summary": "Describes the PostgreSQL-backed rate-limit profiles, matching logic, metrics, and admin APIs.",
+    "tags": ["rate-limits", "admin", "metrics"],
+    "href": "/architecture/rate-limits/"
   },
   {
     "id": "reference/index",
     "title": "Reference Overview",
-    "summary": "TL;DR – Authoritative details for RustyGPT’s public surfaces: authentication, REST endpoints, and configuration keys.",
-    "tags": [
-      "quick-navigation"
-    ],
+    "summary": "Points to the detailed authentication, REST API, and configuration reference pages.",
+    "tags": ["reference", "navigation"],
     "href": "/reference/index/"
+  },
+  {
+    "id": "reference/authentication",
+    "title": "Authentication",
+    "summary": "Documents the session lifecycle, cookie names, configuration knobs, CLI helpers, and logging guidance.",
+    "tags": ["auth", "cookies", "sessions"],
+    "href": "/reference/authentication/"
+  },
+  {
+    "id": "reference/api",
+    "title": "REST API",
+    "summary": "Table of every REST and SSE endpoint grouped by setup, auth, conversations, streaming, admin, and health.",
+    "tags": ["api", "endpoints", "sse"],
+    "href": "/reference/api/"
+  },
+  {
+    "id": "reference/config",
+    "title": "Configuration",
+    "summary": "Explains the layered loader, environment override syntax, and the structure of logging, server, security, rate-limit, session, db, sse, feature, CLI, web, and LLM blocks.",
+    "tags": ["config", "environment", "profiles"],
+    "href": "/reference/config/"
+  },
+  {
+    "id": "howto/index",
+    "title": "How-to Overview",
+    "summary": "Introduces the operational playbooks for Docker deployment and secret rotation.",
+    "tags": ["howto", "overview"],
+    "href": "/howto/index/"
+  },
+  {
+    "id": "howto/docker-deploy",
+    "title": "Docker deploy",
+    "summary": "Instructions for building the Docker image, running the Compose stack, copying bootstrap SQL, configuring secrets, and validating the rollout.",
+    "tags": ["docker", "compose", "deployment"],
+    "href": "/howto/docker-deploy/"
+  },
+  {
+    "id": "howto/rotate-secrets",
+    "title": "Rotate secrets",
+    "summary": "Runbook for staging, deploying, verifying, and rolling back secret changes while keeping the service available.",
+    "tags": ["operations", "secrets", "runbook"],
+    "href": "/howto/rotate-secrets/"
+  },
+  {
+    "id": "changelog/index",
+    "title": "Release notes",
+    "summary": "Notes that CHANGELOG.md tracks development and that no tagged releases exist yet.",
+    "tags": ["changelog", "releases"],
+    "href": "/changelog/index/"
   }
 ]

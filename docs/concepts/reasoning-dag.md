@@ -1,36 +1,45 @@
-# Reasoning DAG
+# Threaded conversations
 
-> TL;DR – RustyGPT models agent reasoning as a directed acyclic graph so parallel branches can explore hypotheses while preserving deterministic joins.
+RustyGPT models chat history as **threaded conversations** stored in PostgreSQL. Each conversation has participants, invites,
+thread roots, and replies. The server exposes this structure through the DTOs in `rustygpt-shared/src/models/chat.rs`.
 
-## Overview
+## Core data types
 
-RustyGPT splits complex prompts into nodes that represent specialised reasoning steps—retrieval, tool execution, synthesis, and user messaging. Nodes execute concurrently when dependencies permit, then merge downstream results. The orchestrator’s scheduler lives in `rustygpt-server/src/reasoning`.
+| Type | Purpose | Defined in |
+| ---- | ------- | ---------- |
+| `ConversationCreateRequest` | Payload for creating a new conversation. | `shared::models::chat` |
+| `ThreadTreeResponse` | Depth-first snapshot of a thread including metadata for each node. | `shared::models::chat` |
+| `MessageChunk` | Persisted assistant output chunk (used when streaming replies). | `shared::models::chat` |
+| `ConversationStreamEvent` | Enum describing SSE events (`thread.new`, `message.delta`, etc.). | `shared::models::chat` |
 
-## Node Types
+Each thread is anchored by a root message (`POST /api/threads/{conversation_id}/root`). Replies hang off the tree using parent
+IDs (`POST /api/messages/{message_id}/reply`). The `ThreadTreeResponse` payload includes ancestry hints so clients can render the
+structure without additional queries.
 
-| Node            | Purpose                            |
-|-----------------|------------------------------------|
-| `Prompt`        | Emits the initial LLM prompt       |
-| `Retriever`     | Executes vector or keyword search  |
-| `Tool`          | Calls out to deterministic actions |
-| `Reducer`       | Merges branch outputs              |
-| `Responder`     | Streams user-facing tokens         |
+## Streaming lifecycle
 
-Each node publishes structured telemetry through `rustygpt-shared::telemetry`, enabling downstream analytics and reliability alerts.
+When `features.sse_v1 = true`, the server emits `ConversationStreamEvent` variants via `StreamHub` (`handlers/streaming.rs`). The
+naming mirrors the enum variants:
 
-## Benefits
+- `thread.new` – new thread summary created
+- `thread.activity` – updated `last_activity_at`
+- `message.delta` – incremental assistant tokens (`ChatDeltaChunk`)
+- `message.done` – completion marker with usage stats
+- `presence.update` – user presence heartbeat
+- `typing.update` – typing indicator state
+- `unread.update` – unread count per thread root
+- `membership.changed` – conversation membership change
+- `error` – terminal failure while streaming
 
-- **Determinism** – Branch IDs are deterministic, enabling reproducible transcripts.
-- **Parallelism** – Low-latency branches (e.g., caching, fast lookups) unblock slower tool invocations.
-- **Observability** – Joins track input provenance, aiding postmortems and safety audits.
+Events carry both the `conversation_id` and (when applicable) `root_id` so clients can scope updates precisely. SSE persistence is
+optional: enable `[sse.persistence]` in configuration to record events in `rustygpt.sse_event_log` via
+`services::sse_persistence` and replay them on reconnect.
 
-See [Streaming Delivery](../architecture/streaming.md) for how reducer output flows to SSE clients.
+## Access control
 
-## Extending the Graph
+The chat service (`services::chat_service.rs`) enforces membership checks and rate limits before mutating data. Rate limit
+profiles are backed by tables in `scripts/pg/schema/040_rate_limits.sql` and can be tuned via the admin API. Presence updates
+mark the acting user online and emit events so all subscribers stay consistent.
 
-New node types implement the `ReasoningNode` trait. Add integration tests under `rustygpt-server/tests/reasoning.rs` to validate invariants. Captured node metadata propagates to the [REST API](../reference/api.md) for clients that reconstruct reasoning trails.
-
-## Related Concepts
-
-- [Dimensioned Entities](dimensioned-entities.md) define the typed payloads that move through each edge.
-- [Service Topology](../architecture/service-topology.md) explains where reasoning orchestration runs relative to other services.
+For endpoint details see [REST API](../reference/api.md); for the transport-level diagram visit
+[Streaming Delivery](../architecture/streaming.md).
