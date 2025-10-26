@@ -61,6 +61,10 @@ jobs:
           set -e
           git config user.name "ci"
           git config user.email "ci@users.noreply.github.com"
+          
+          # Stash any changes from docs generation to avoid conflicts
+          git stash push -m "Stash docs generation changes" || true
+          
           git fetch origin gh-pages || true
           if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
             git checkout gh-pages
