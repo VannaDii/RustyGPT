@@ -1,4 +1,4 @@
-use std::{net::IpAddr, str::FromStr, sync::Arc};
+use std::{collections::HashMap, fmt, net::IpAddr, str::FromStr, sync::Arc};
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use argon2::{
@@ -8,9 +8,10 @@ use argon2::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 use cookie::{Cookie, SameSite};
+use serde_json::Value as JsonValue;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Postgres, pool::PoolConnection, types::Json};
+use sqlx::{PgPool, Postgres, Row, pool::PoolConnection, types::Json};
 use thiserror::Error;
 use time::{Duration as TimeDuration, OffsetDateTime};
 use tracing::{debug, instrument, warn};
@@ -20,6 +21,11 @@ use shared::{
     config::server::{Config, CookieSameSite},
     models::UserRole,
 };
+
+const LOGIN_METRIC_NAME: &str = "rustygpt_auth_logins_total";
+const ROTATION_METRIC_NAME: &str = "rustygpt_auth_session_rotations_total";
+const ACTIVE_SESSIONS_METRIC_NAME: &str = "rustygpt_auth_active_sessions";
+const ALL_ROLES: &[UserRole] = &[UserRole::Admin, UserRole::Member, UserRole::ReadOnly];
 
 /// Errors produced by the session subsystem.
 #[derive(Debug, Error)]
@@ -36,6 +42,8 @@ pub enum SessionError {
     AbsoluteExpired,
     #[error("session rotation required")]
     RotationRequired,
+    #[error("suspicious session activity")]
+    SuspiciousActivity,
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("time conversion error: {0}")]
@@ -57,7 +65,6 @@ impl SessionMetadata {
         self
     }
 
-    #[allow(dead_code)]
     #[must_use]
     pub fn with_ip(mut self, value: Option<IpAddr>) -> Self {
         self.ip = value.map(|addr| addr.to_string());
@@ -84,10 +91,45 @@ impl SessionMetadata {
             "fingerprint": self.fingerprint,
         })
     }
+
+    #[must_use]
+    pub fn from_stored(
+        user_agent: Option<String>,
+        ip: Option<String>,
+        client_meta: Option<&JsonValue>,
+    ) -> Self {
+        let fingerprint = client_meta
+            .and_then(|meta| meta.get("fingerprint"))
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string());
+
+        Self::default()
+            .with_user_agent(user_agent)
+            .with_ip_str(ip)
+            .with_fingerprint(fingerprint)
+    }
+
+    #[must_use]
+    pub fn suspicious_mismatch(&self, current: &Self) -> bool {
+        fn changed<F>(stored: &Option<String>, current: &Option<String>, cmp: F) -> bool
+        where
+            F: Fn(&str, &str) -> bool,
+        {
+            match (stored.as_ref(), current.as_ref()) {
+                (Some(stored), Some(now)) => cmp(stored, now),
+                _ => false,
+            }
+        }
+
+        let ua_changed = changed(&self.user_agent, &current.user_agent, |a, b| a != b);
+        let ip_changed = changed(&self.ip, &current.ip, |a, b| a != b);
+        let fingerprint_changed = changed(&self.fingerprint, &current.fingerprint, |a, b| a != b);
+
+        ua_changed || ip_changed || fingerprint_changed
+    }
 }
 
 /// Authenticated user details attached to the request context.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SessionUser {
     pub id: Uuid,
@@ -102,10 +144,8 @@ pub struct SessionUser {
 }
 
 /// Session issuance output containing the raw token and encoded cookie.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SessionBundle {
-    pub token: String,
     pub session_cookie: Cookie<'static>,
     pub csrf_token: String,
     pub csrf_cookie: Cookie<'static>,
@@ -243,7 +283,14 @@ impl SessionService {
         password: &str,
         metadata: &SessionMetadata,
     ) -> Result<(SessionUser, SessionBundle), SessionError> {
-        let mut conn = self.acquire_connection().await?;
+        let mut conn = match self.acquire_connection().await {
+            Ok(conn) => conn,
+            Err(err) => {
+                record_login_metric("error");
+                return Err(err);
+            }
+        };
+
         let record = sqlx::query_as::<_, CredentialRow>(
             "SELECT id,
                     email::TEXT AS email,
@@ -256,23 +303,53 @@ impl SessionService {
         )
         .bind(identifier)
         .fetch_optional(conn.as_mut())
-        .await?;
+        .await
+        .map_err(|err| {
+            record_login_metric("error");
+            err
+        })?;
 
         let row = match record {
             Some(row) => row,
-            None => return Err(SessionError::InvalidCredentials),
+            None => {
+                record_login_metric("invalid_credentials");
+                return Err(SessionError::InvalidCredentials);
+            }
         };
 
         if row.disabled_at.is_some() {
+            record_login_metric("disabled");
             return Err(SessionError::DisabledUser);
         }
 
-        verify_password(&row.password_hash, password)?;
+        if let Err(err) = verify_password(&row.password_hash, password) {
+            record_login_metric("invalid_credentials");
+            return Err(err);
+        }
 
-        let roles = self.load_roles(&mut conn, row.id).await?;
-        let bundle = self
+        let roles = match self.load_roles(&mut conn, row.id).await {
+            Ok(roles) => roles,
+            Err(err) => {
+                record_login_metric("error");
+                return Err(err);
+            }
+        };
+
+        let bundle = match self
             .issue_session(&mut conn, row.id, &roles, metadata)
-            .await?;
+            .await
+        {
+            Ok(bundle) => bundle,
+            Err(err) => {
+                record_login_metric("error");
+                return Err(err);
+            }
+        };
+
+        record_login_metric("success");
+        if let Err(err) = self.refresh_active_session_metrics(&mut conn).await {
+            warn!(error = %err, "failed to refresh active session metrics after login");
+        }
 
         let user = SessionUser {
             id: row.id,
@@ -310,6 +387,9 @@ impl SessionService {
                     s.absolute_expires_at,
                     s.requires_rotation,
                     s.roles_snapshot,
+                    s.user_agent,
+                    s.ip::TEXT AS ip,
+                    s.client_meta,
                     u.email::TEXT AS email,
                     u.username::TEXT AS username,
                     u.display_name,
@@ -347,24 +427,44 @@ impl SessionService {
             return Err(SessionError::AbsoluteExpired);
         }
 
+        if self.config.auth.suspicious_check {
+            let stored_metadata = SessionMetadata::from_stored(
+                row.user_agent.clone(),
+                row.ip.clone(),
+                row.client_meta.as_ref().map(|meta| &meta.0),
+            );
+
+            if stored_metadata.suspicious_mismatch(metadata) {
+                self.flag_session_rotation(&mut conn, row.session_id)
+                    .await?;
+                return Err(SessionError::SuspiciousActivity);
+            }
+        }
+
         let roles = self.load_roles(&mut conn, row.user_id).await?;
-        let snapshot_mismatch = row
-            .roles_snapshot
-            .as_ref()
-            .map(|snapshot| {
-                let current: Vec<String> =
-                    roles.iter().map(|role| role.as_str().to_string()).collect();
-                &current != snapshot
-            })
-            .unwrap_or(false);
+        let snapshot_mismatch = roles_snapshot_changed(&roles, &row.roles_snapshot);
 
         let threshold = self.rotation_threshold();
-        let needs_rotation =
-            row.requires_rotation || snapshot_mismatch || (row.expires_at - now) <= threshold;
+        let rotation_cause = if row.requires_rotation {
+            Some(RotationCause::RequiresRotation)
+        } else if snapshot_mismatch {
+            Some(RotationCause::RoleChange)
+        } else if (row.expires_at - now) <= threshold {
+            Some(RotationCause::IdleRefresh)
+        } else {
+            None
+        };
 
-        let (rotated, bundle) = if needs_rotation {
+        let (rotated, bundle) = if let Some(cause) = rotation_cause {
             let rotated_bundle = self
-                .rotate_session(&mut conn, row.session_id, row.user_id, &roles, metadata)
+                .rotate_session(
+                    &mut conn,
+                    row.session_id,
+                    row.user_id,
+                    &roles,
+                    metadata,
+                    cause,
+                )
                 .await?;
 
             row.session_id = rotated_bundle.session_id;
@@ -422,7 +522,14 @@ impl SessionService {
 
         let mut conn = self.acquire_connection().await?;
         let rotated_bundle = self
-            .rotate_session(&mut conn, user.session_id, user.id, &user.roles, metadata)
+            .rotate_session(
+                &mut conn,
+                user.session_id,
+                user.id,
+                &user.roles,
+                metadata,
+                RotationCause::ExplicitRefresh,
+            )
             .await?;
         drop(conn);
 
@@ -513,7 +620,6 @@ impl SessionService {
         let csrf_cookie = self.build_csrf_cookie(&csrf_token, record.expires_at)?;
 
         Ok(SessionBundle {
-            token,
             session_cookie,
             csrf_token,
             csrf_cookie,
@@ -532,6 +638,7 @@ impl SessionService {
         user_id: Uuid,
         roles: &[UserRole],
         metadata: &SessionMetadata,
+        cause: RotationCause,
     ) -> Result<SessionBundle, SessionError> {
         let (token, hash) = Self::new_token()?;
         let csrf_token = Self::new_csrf_token();
@@ -572,14 +679,23 @@ impl SessionService {
         debug!(
             old_session_id = %session_id,
             new_session_id = %record.next_session_id,
+            reason = %cause,
             "rotated session"
         );
+
+        record_rotation_metric(cause);
+        if let Err(err) = self.refresh_active_session_metrics(conn).await {
+            warn!(
+                error = %err,
+                session_id = %record.next_session_id,
+                "failed to refresh active session metrics after rotation"
+            );
+        }
 
         let session_cookie = self.build_cookie(&token, record.expires_at)?;
         let csrf_cookie = self.build_csrf_cookie(&csrf_token, record.expires_at)?;
 
         Ok(SessionBundle {
-            token,
             session_cookie,
             csrf_token,
             csrf_cookie,
@@ -614,6 +730,18 @@ impl SessionService {
         Ok(())
     }
 
+    async fn flag_session_rotation(
+        &self,
+        conn: &mut PoolConnection<Postgres>,
+        session_id: Uuid,
+    ) -> Result<(), SessionError> {
+        sqlx::query("UPDATE rustygpt.user_sessions SET requires_rotation = TRUE WHERE id = $1")
+            .bind(session_id)
+            .execute(conn.as_mut())
+            .await?;
+        Ok(())
+    }
+
     async fn logout_session(
         &self,
         conn: &mut PoolConnection<Postgres>,
@@ -625,6 +753,59 @@ impl SessionService {
             .bind(reason.unwrap_or("logout"))
             .execute(conn.as_mut())
             .await?;
+        if let Err(err) = self.refresh_active_session_metrics(conn).await {
+            warn!(
+                error = %err,
+                session_id = %session_id,
+                "failed to refresh active session metrics after logout"
+            );
+        }
+        Ok(())
+    }
+
+    async fn refresh_active_session_metrics(
+        &self,
+        conn: &mut PoolConnection<Postgres>,
+    ) -> Result<(), SessionError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT role, COUNT(*)::BIGINT AS count
+            FROM (
+                SELECT COALESCE(role_text, 'member') AS role
+                FROM rustygpt.user_sessions s
+                CROSS JOIN LATERAL unnest(
+                    CASE
+                        WHEN array_length(s.roles_snapshot, 1) > 0 THEN s.roles_snapshot
+                        ELSE ARRAY['member']
+                    END
+                ) AS role(role_text)
+                WHERE s.revoked_at IS NULL
+            ) stats
+            GROUP BY role
+            "#,
+        )
+        .fetch_all(conn.as_mut())
+        .await
+        .map_err(SessionError::Database)?;
+
+        let mut counts: HashMap<String, i64> = rows
+            .into_iter()
+            .filter_map(|row| {
+                let role: Option<String> = row.try_get("role").ok();
+                let count: Option<i64> = row.try_get("count").ok();
+                role.zip(count)
+            })
+            .collect();
+
+        for role in ALL_ROLES {
+            let value = counts.remove(role.as_str()).unwrap_or(0);
+            metrics::gauge!(
+                ACTIVE_SESSIONS_METRIC_NAME,
+                "role" => role.as_str().to_string()
+            )
+            .set(value as f64);
+        }
+
         Ok(())
     }
 
@@ -656,6 +837,57 @@ impl SessionService {
     }
 }
 
+fn roles_snapshot_changed(roles: &[UserRole], snapshot: &Option<Vec<String>>) -> bool {
+    snapshot
+        .as_ref()
+        .map(|stored| {
+            let current: Vec<String> = roles.iter().map(|role| role.as_str().to_string()).collect();
+            &current != stored
+        })
+        .unwrap_or(false)
+}
+
+fn record_login_metric(result: &'static str) {
+    metrics::counter!(
+        LOGIN_METRIC_NAME,
+        "result" => result.to_string()
+    )
+    .increment(1);
+}
+
+fn record_rotation_metric(cause: RotationCause) {
+    metrics::counter!(
+        ROTATION_METRIC_NAME,
+        "reason" => cause.as_str().to_string()
+    )
+    .increment(1);
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RotationCause {
+    RequiresRotation,
+    RoleChange,
+    IdleRefresh,
+    ExplicitRefresh,
+}
+
+impl RotationCause {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::RequiresRotation => "requires_rotation",
+            Self::RoleChange => "role_change",
+            Self::IdleRefresh => "idle_refresh",
+            Self::ExplicitRefresh => "explicit_refresh",
+        }
+    }
+}
+
+impl fmt::Display for RotationCause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Compute an Argon2id password hash.
 pub fn hash_password(password: &str) -> Result<String, SessionError> {
     let salt = SaltString::generate(&mut OsRng);
@@ -667,7 +899,6 @@ pub fn hash_password(password: &str) -> Result<String, SessionError> {
 }
 
 /// Verify a password against an encoded Argon2id hash.
-#[allow(dead_code)]
 pub fn verify_password(hash: &str, candidate: &str) -> Result<(), SessionError> {
     let parsed =
         PasswordHash::new(hash).map_err(|err| SessionError::PasswordHash(err.to_string()))?;
@@ -678,7 +909,6 @@ pub fn verify_password(hash: &str, candidate: &str) -> Result<(), SessionError> 
 }
 
 #[derive(sqlx::FromRow)]
-#[allow(dead_code)]
 struct CredentialRow {
     id: Uuid,
     email: String,
@@ -700,6 +930,9 @@ struct ActiveSessionRow {
     absolute_expires_at: DateTime<Utc>,
     requires_rotation: bool,
     roles_snapshot: Option<Vec<String>>,
+    user_agent: Option<String>,
+    ip: Option<String>,
+    client_meta: Option<Json<JsonValue>>,
     disabled_at: Option<DateTime<Utc>>,
 }
 
@@ -723,7 +956,7 @@ struct SessionRefreshRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::config::server::Profile;
+    use shared::{config::server::Profile, models::UserRole};
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
     fn service_with_config(config: Config) -> SessionService {
@@ -784,5 +1017,23 @@ mod tests {
             SessionService::map_same_site(CookieSameSite::None),
             SameSite::None
         );
+    }
+
+    #[test]
+    fn privilege_change_forces_rotation_on_next_request() {
+        let roles = vec![UserRole::Admin];
+        let snapshot = Some(vec!["member".to_string()]);
+        assert!(roles_snapshot_changed(&roles, &snapshot));
+    }
+
+    #[test]
+    fn suspicious_ua_ip_triggers_refresh_if_enabled() {
+        let stored =
+            SessionMetadata::from_stored(Some("Agent/1.0".into()), Some("10.0.0.1".into()), None);
+        let current = SessionMetadata::default()
+            .with_user_agent(Some("Agent/2.0".into()))
+            .with_ip(Some("10.0.0.2".parse().unwrap()));
+
+        assert!(stored.suspicious_mismatch(&current));
     }
 }

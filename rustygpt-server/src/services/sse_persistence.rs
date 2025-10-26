@@ -24,7 +24,6 @@ pub struct PersistedStreamEvent {
     pub event_type: String,
     pub payload: Value,
     pub root_message_id: Option<Uuid>,
-    #[allow(dead_code)]
     pub created_at: DateTime<Utc>,
 }
 

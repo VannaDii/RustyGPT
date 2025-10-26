@@ -235,8 +235,11 @@ fn convert_persisted_record(record: PersistedStreamEvent) -> Option<StampedEvent
         event_type: stored_event_type,
         payload,
         root_message_id: stored_root_id,
+        created_at,
         ..
     } = record;
+
+    let _ = created_at;
 
     let sequence = u64::try_from(sequence).ok()?;
     let event = deserialize_persisted_event(payload)?;

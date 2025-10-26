@@ -1,4 +1,5 @@
 use axum::{http::StatusCode, response::IntoResponse};
+use http::header::{HeaderName, HeaderValue};
 use serde_json::json;
 use thiserror::Error;
 
@@ -14,6 +15,7 @@ pub struct ApiError {
     code: &'static str,
     message: String,
     details: Option<serde_json::Value>,
+    headers: Vec<(HeaderName, HeaderValue)>,
 }
 
 impl ApiError {
@@ -23,31 +25,33 @@ impl ApiError {
             code,
             message: message.into(),
             details: None,
+            headers: Vec::new(),
         }
     }
 
     pub fn forbidden(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::FORBIDDEN, "forbidden", message)
+        Self::new(StatusCode::FORBIDDEN, "RGP.RBAC.FORBIDDEN", message)
     }
 
     pub fn not_found(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::NOT_FOUND, "not_found", message)
+        Self::new(StatusCode::NOT_FOUND, "RGP.NOT_FOUND", message)
     }
 
     pub fn too_many_requests(message: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            "rate_limit_exceeded",
-            message,
-        )
+        Self::new(StatusCode::TOO_MANY_REQUESTS, "RGP.RATE_LIMITED", message)
     }
 
     pub fn internal_server_error(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "RGP.INTERNAL", message)
     }
 
     pub fn with_details(mut self, details: serde_json::Value) -> Self {
         self.details = Some(details);
+        self
+    }
+
+    pub fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+        self.headers.push((name, value));
         self
     }
 }
@@ -55,13 +59,18 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         let details = self.details;
+        let headers = self.headers;
 
         let mut problem = ProblemDetails::new(self.status, self.code, self.message);
         if let Some(details) = details {
             problem = problem.with_details(details);
         }
 
-        problem.into_response()
+        let mut response = problem.into_response();
+        for (name, value) in headers {
+            response.headers_mut().insert(name, value);
+        }
+        response
     }
 }
 
@@ -127,7 +136,7 @@ mod tests {
     fn new_sets_fields_and_allows_details() {
         let error = ApiError::forbidden("nope").with_details(json!({ "reason": "policy" }));
         assert_eq!(error.status, StatusCode::FORBIDDEN);
-        assert_eq!(error.code, "forbidden");
+        assert_eq!(error.code, "RGP.RBAC.FORBIDDEN");
         assert!(
             error
                 .details
@@ -153,7 +162,7 @@ mod tests {
             .expect("body to bytes");
         let json: Value =
             serde_json::from_slice(&bytes).expect("problem details deserializes to json");
-        assert_eq!(json["code"], "not_found");
+        assert_eq!(json["code"], "RGP.NOT_FOUND");
         assert_eq!(json["message"], "missing resource");
         assert_eq!(json["details"]["resource"], "thing");
     }

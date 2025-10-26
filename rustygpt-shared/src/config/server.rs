@@ -346,6 +346,62 @@ impl Default for RateLimitConfig {
     }
 }
 
+/// Dynamic rate limit profile configuration.
+#[derive(Serialize, Clone)]
+pub struct LimitsConfig {
+    pub enabled: bool,
+    pub default_profile: String,
+}
+
+impl fmt::Debug for LimitsConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LimitsConfig")
+            .field("enabled", &self.enabled)
+            .field("default_profile", &self.default_profile)
+            .finish()
+    }
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_profile: "standard".into(),
+        }
+    }
+}
+
+/// High level auth policy controls.
+#[derive(Serialize, Clone)]
+pub struct AuthConfig {
+    pub idle_seconds: u64,
+    pub absolute_seconds: u64,
+    pub csrf: bool,
+    pub suspicious_check: bool,
+}
+
+impl fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthConfig")
+            .field("idle_seconds", &self.idle_seconds)
+            .field("absolute_seconds", &self.absolute_seconds)
+            .field("csrf", &self.csrf)
+            .field("suspicious_check", &self.suspicious_check)
+            .finish()
+    }
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            idle_seconds: 28_800,
+            absolute_seconds: 604_800,
+            csrf: true,
+            suspicious_check: false,
+        }
+    }
+}
+
 /// Session management configuration.
 #[derive(Serialize, Clone)]
 pub struct SessionConfig {
@@ -376,6 +432,28 @@ impl Default for SessionConfig {
             session_cookie_name: "SESSION_ID".into(),
             csrf_cookie_name: "CSRF-TOKEN".into(),
             max_sessions_per_user: Some(5),
+        }
+    }
+}
+
+/// Public API feature toggles.
+#[derive(Serialize, Clone)]
+pub struct ApiConfig {
+    pub openai_compat: bool,
+}
+
+impl fmt::Debug for ApiConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApiConfig")
+            .field("openai_compat", &self.openai_compat)
+            .finish()
+    }
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            openai_compat: true,
         }
     }
 }
@@ -477,6 +555,8 @@ pub struct SseConfig {
     pub heartbeat_seconds: u64,
     pub channel_capacity: usize,
     pub id_prefix: String,
+    pub replay_retention_seconds: u64,
+    pub max_backfill_events: usize,
     pub persistence: SsePersistenceConfig,
     pub backpressure: SseBackpressureConfig,
 }
@@ -487,6 +567,8 @@ impl fmt::Debug for SseConfig {
             .field("heartbeat_seconds", &self.heartbeat_seconds)
             .field("channel_capacity", &self.channel_capacity)
             .field("id_prefix", &self.id_prefix)
+            .field("replay_retention_seconds", &self.replay_retention_seconds)
+            .field("max_backfill_events", &self.max_backfill_events)
             .field("persistence", &self.persistence)
             .field("backpressure", &self.backpressure)
             .finish()
@@ -499,6 +581,8 @@ impl Default for SseConfig {
             heartbeat_seconds: 20,
             channel_capacity: 128,
             id_prefix: "evt_".into(),
+            replay_retention_seconds: 1800,
+            max_backfill_events: 512,
             persistence: SsePersistenceConfig::default(),
             backpressure: SseBackpressureConfig::default(),
         }
@@ -693,8 +777,11 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub server: ServerConfig,
     pub security: SecurityConfig,
+    pub auth: AuthConfig,
     pub rate_limits: RateLimitConfig,
+    pub limits: LimitsConfig,
     pub session: SessionConfig,
+    pub api: ApiConfig,
     pub oauth: OAuthConfig,
     pub db: DatabaseConfig,
     pub sse: SseConfig,
@@ -712,8 +799,11 @@ impl fmt::Debug for Config {
             .field("logging", &self.logging)
             .field("server", &self.server)
             .field("security", &self.security)
+            .field("auth", &self.auth)
             .field("rate_limits", &self.rate_limits)
+            .field("limits", &self.limits)
             .field("session", &self.session)
+            .field("api", &self.api)
             .field("oauth", &self.oauth)
             .field("db", &self.db)
             .field("sse", &self.sse)
@@ -787,6 +877,17 @@ impl Config {
         let public_base_url =
             Self::derive_public_base_url(profile, &host, port).expect("default URL must be valid");
 
+        let mut security = SecurityConfig::defaults(profile);
+        let auth = AuthConfig::default();
+        security.csrf.enabled = auth.csrf;
+
+        let rate_limits = RateLimitConfig::default();
+        let limits = LimitsConfig::default();
+
+        let mut session = SessionConfig::default();
+        session.idle_seconds = auth.idle_seconds;
+        session.absolute_seconds = auth.absolute_seconds;
+
         Self {
             profile,
             logging: LoggingConfig {
@@ -804,9 +905,12 @@ impl Config {
                 cors: CorsConfig::defaults(profile),
                 request_id_header: "x-request-id".into(),
             },
-            security: SecurityConfig::defaults(profile),
-            rate_limits: RateLimitConfig::default(),
-            session: SessionConfig::default(),
+            security,
+            auth,
+            rate_limits,
+            limits,
+            session,
+            api: ApiConfig::default(),
             oauth: OAuthConfig::default(),
             db: DatabaseConfig::default(),
             sse: SseConfig::default(),
@@ -836,12 +940,24 @@ impl Config {
             self.apply_security_partial(security);
         }
 
+        if let Some(auth) = &partial.auth {
+            self.apply_auth_partial(auth);
+        }
+
         if let Some(rate_limits) = &partial.rate_limits {
             self.apply_rate_limit_partial(rate_limits);
         }
 
+        if let Some(limits) = &partial.limits {
+            self.apply_limits_partial(limits);
+        }
+
         if let Some(session) = &partial.session {
             self.apply_session_partial(session);
+        }
+
+        if let Some(api) = &partial.api {
+            self.apply_api_partial(api);
         }
 
         if let Some(oauth) = &partial.oauth {
@@ -976,6 +1092,24 @@ impl Config {
         }
     }
 
+    const fn apply_auth_partial(&mut self, auth: &AuthPartial) {
+        if let Some(idle) = auth.idle_seconds {
+            self.auth.idle_seconds = idle;
+            self.session.idle_seconds = idle;
+        }
+        if let Some(absolute) = auth.absolute_seconds {
+            self.auth.absolute_seconds = absolute;
+            self.session.absolute_seconds = absolute;
+        }
+        if let Some(csrf) = auth.csrf {
+            self.auth.csrf = csrf;
+            self.security.csrf.enabled = csrf;
+        }
+        if let Some(suspicious) = auth.suspicious_check {
+            self.auth.suspicious_check = suspicious;
+        }
+    }
+
     const fn apply_rate_limit_partial(&mut self, rate_limits: &RateLimitPartial) {
         if let Some(value) = rate_limits.auth_login_per_ip_per_min {
             self.rate_limits.auth_login_per_ip_per_min = value;
@@ -991,12 +1125,23 @@ impl Config {
         }
     }
 
+    fn apply_limits_partial(&mut self, limits: &LimitsPartial) {
+        if let Some(enabled) = limits.enabled {
+            self.limits.enabled = enabled;
+        }
+        if let Some(default_profile) = &limits.default_profile {
+            self.limits.default_profile = default_profile.clone();
+        }
+    }
+
     fn apply_session_partial(&mut self, session: &SessionPartial) {
         if let Some(idle) = session.idle_seconds {
             self.session.idle_seconds = idle;
+            self.auth.idle_seconds = idle;
         }
         if let Some(absolute) = session.absolute_seconds {
             self.session.absolute_seconds = absolute;
+            self.auth.absolute_seconds = absolute;
         }
         if let Some(cookie_name) = &session.session_cookie_name {
             self.session.session_cookie_name = cookie_name.clone();
@@ -1006,6 +1151,12 @@ impl Config {
         }
         if let Some(max_sessions) = session.max_sessions_per_user {
             self.session.max_sessions_per_user = Some(max_sessions);
+        }
+    }
+
+    const fn apply_api_partial(&mut self, api: &ApiPartial) {
+        if let Some(openai) = api.openai_compat {
+            self.api.openai_compat = openai;
         }
     }
 
@@ -1060,6 +1211,12 @@ impl Config {
         }
         if let Some(prefix) = &sse.id_prefix {
             self.sse.id_prefix = prefix.clone();
+        }
+        if let Some(retention) = sse.replay_retention_seconds {
+            self.sse.replay_retention_seconds = retention;
+        }
+        if let Some(max_backfill) = sse.max_backfill_events {
+            self.sse.max_backfill_events = max_backfill as usize;
         }
         if let Some(persistence) = &sse.persistence {
             self.apply_sse_persistence_partial(persistence);
@@ -1143,8 +1300,11 @@ impl Config {
         self.apply_env_logging_overrides()?;
         self.apply_env_server_overrides(&mut flags)?;
         self.apply_env_security_overrides()?;
+        self.apply_env_auth_overrides()?;
         self.apply_env_rate_limit_overrides()?;
+        self.apply_env_limits_overrides()?;
         self.apply_env_session_overrides()?;
+        self.apply_env_api_overrides()?;
         self.apply_env_oauth_overrides(&mut flags)?;
         self.apply_env_database_overrides()?;
         self.apply_env_sse_overrides()?;
@@ -1239,6 +1399,25 @@ impl Config {
         Ok(())
     }
 
+    fn apply_env_auth_overrides(&mut self) -> Result<(), ConfigError> {
+        if let Some(idle) = env_value_u64(&["auth", "idle_seconds"])? {
+            self.auth.idle_seconds = idle;
+            self.session.idle_seconds = idle;
+        }
+        if let Some(absolute) = env_value_u64(&["auth", "absolute_seconds"])? {
+            self.auth.absolute_seconds = absolute;
+            self.session.absolute_seconds = absolute;
+        }
+        if let Some(csrf) = env_value_bool(&["auth", "csrf"])? {
+            self.auth.csrf = csrf;
+            self.security.csrf.enabled = csrf;
+        }
+        if let Some(suspicious) = env_value_bool(&["auth", "suspicious_check"])? {
+            self.auth.suspicious_check = suspicious;
+        }
+        Ok(())
+    }
+
     fn apply_env_rate_limit_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(auth_limit) = env_value_u32(&["rate_limits", "auth_login_per_ip_per_min"])? {
             self.rate_limits.auth_login_per_ip_per_min = auth_limit;
@@ -1255,12 +1434,24 @@ impl Config {
         Ok(())
     }
 
+    fn apply_env_limits_overrides(&mut self) -> Result<(), ConfigError> {
+        if let Some(enabled) = env_value_bool(&["limits", "enabled"])? {
+            self.limits.enabled = enabled;
+        }
+        if let Some(default_profile) = env_value(&["limits", "default_profile"]) {
+            self.limits.default_profile = default_profile;
+        }
+        Ok(())
+    }
+
     fn apply_env_session_overrides(&mut self) -> Result<(), ConfigError> {
         if let Some(idle) = env_value_u64(&["session", "idle_seconds"])? {
             self.session.idle_seconds = idle;
+            self.auth.idle_seconds = idle;
         }
         if let Some(absolute) = env_value_u64(&["session", "absolute_seconds"])? {
             self.session.absolute_seconds = absolute;
+            self.auth.absolute_seconds = absolute;
         }
         if let Some(cookie_name) = env_value(&["session", "session_cookie_name"]) {
             self.session.session_cookie_name = cookie_name;
@@ -1270,6 +1461,13 @@ impl Config {
         }
         if let Some(max_sessions) = env_value_u32(&["session", "max_sessions_per_user"])? {
             self.session.max_sessions_per_user = Some(max_sessions);
+        }
+        Ok(())
+    }
+
+    fn apply_env_api_overrides(&mut self) -> Result<(), ConfigError> {
+        if let Some(openai) = env_value_bool(&["api", "openai_compat"])? {
+            self.api.openai_compat = openai;
         }
         Ok(())
     }
@@ -1329,6 +1527,12 @@ impl Config {
         if let Some(id_prefix) = env_value(&["sse", "id_prefix"]) {
             self.sse.id_prefix = id_prefix;
         }
+        if let Some(retention) = env_value_u64(&["sse", "replay_retention_seconds"])? {
+            self.sse.replay_retention_seconds = retention;
+        }
+        if let Some(max_backfill) = env_value_usize(&["sse", "max_backfill_events"])? {
+            self.sse.max_backfill_events = max_backfill;
+        }
         if let Some(enabled) = env_value_bool(&["sse", "persistence", "enabled"])? {
             self.sse.persistence.enabled = enabled;
         }
@@ -1386,7 +1590,9 @@ impl Config {
 
         self.validate_server(&mut errors, &mut warnings);
         self.validate_security(&mut errors, &mut warnings);
+        self.validate_auth(&mut errors);
         self.validate_rate_limits(&mut errors);
+        self.validate_limits(&mut errors);
         self.validate_session(&mut errors);
         self.validate_database(&mut errors, &mut warnings);
         self.validate_logging(&mut errors);
@@ -1455,6 +1661,20 @@ impl Config {
         }
     }
 
+    fn validate_auth(&self, errors: &mut Vec<String>) {
+        if self.auth.idle_seconds == 0 {
+            errors.push("auth.idle_seconds must be greater than zero".into());
+        }
+        if self.auth.absolute_seconds == 0 {
+            errors.push("auth.absolute_seconds must be greater than zero".into());
+        }
+        if self.auth.absolute_seconds < self.auth.idle_seconds {
+            errors.push(
+                "auth.absolute_seconds must be greater than or equal to auth.idle_seconds".into(),
+            );
+        }
+    }
+
     fn validate_rate_limits(&self, errors: &mut Vec<String>) {
         if self.rate_limits.auth_login_per_ip_per_min == 0 {
             errors.push("rate_limits.auth_login_per_ip_per_min must be greater than zero".into());
@@ -1464,6 +1684,12 @@ impl Config {
         }
         if self.rate_limits.burst == 0 {
             errors.push("rate_limits.burst must be greater than zero".into());
+        }
+    }
+
+    fn validate_limits(&self, errors: &mut Vec<String>) {
+        if self.limits.default_profile.trim().is_empty() {
+            errors.push("limits.default_profile must not be empty".into());
         }
     }
 
@@ -1528,6 +1754,19 @@ impl Config {
                     .into(),
             );
             self.sse.channel_capacity = 1;
+        }
+        if self.sse.replay_retention_seconds == 0 {
+            errors.push("sse.replay_retention_seconds must be greater than zero".into());
+        }
+        if self.sse.max_backfill_events == 0 {
+            errors.push("sse.max_backfill_events must be greater than zero".into());
+        }
+        if self.sse.max_backfill_events > self.sse.persistence.max_events_per_user {
+            warnings.push(
+                "sse.max_backfill_events exceeds persistence.max_events_per_user; clamping to persistence limit"
+                    .into(),
+            );
+            self.sse.max_backfill_events = self.sse.persistence.max_events_per_user;
         }
         if self.sse.persistence.max_events_per_user == 0 {
             errors.push("sse.persistence.max_events_per_user must be greater than zero".into());
@@ -1666,9 +1905,15 @@ struct FileConfig {
     #[serde(default)]
     security: Option<SecurityPartial>,
     #[serde(default)]
+    auth: Option<AuthPartial>,
+    #[serde(default)]
     rate_limits: Option<RateLimitPartial>,
     #[serde(default)]
+    limits: Option<LimitsPartial>,
+    #[serde(default)]
     session: Option<SessionPartial>,
+    #[serde(default)]
+    api: Option<ApiPartial>,
     #[serde(default)]
     oauth: Option<OAuthPartial>,
     #[serde(default)]
@@ -1757,12 +2002,34 @@ struct RateLimitPartial {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct LimitsPartial {
+    pub enabled: Option<bool>,
+    pub default_profile: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthPartial {
+    pub idle_seconds: Option<u64>,
+    pub absolute_seconds: Option<u64>,
+    pub csrf: Option<bool>,
+    pub suspicious_check: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SessionPartial {
     pub idle_seconds: Option<u64>,
     pub absolute_seconds: Option<u64>,
     pub session_cookie_name: Option<String>,
     pub csrf_cookie_name: Option<String>,
     pub max_sessions_per_user: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApiPartial {
+    pub openai_compat: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1795,6 +2062,8 @@ struct SsePartial {
     pub heartbeat_seconds: Option<u64>,
     pub channel_capacity: Option<u64>,
     pub id_prefix: Option<String>,
+    pub replay_retention_seconds: Option<u64>,
+    pub max_backfill_events: Option<u64>,
     #[serde(default)]
     pub persistence: Option<SsePersistencePartial>,
     #[serde(default)]
@@ -2190,6 +2459,22 @@ mod tests {
     }
 
     #[test]
+    fn config_keys_present_with_defaults() {
+        let config = Config::default_for_profile(Profile::Dev);
+        assert_eq!(config.auth.idle_seconds, config.session.idle_seconds);
+        assert_eq!(
+            config.auth.absolute_seconds,
+            config.session.absolute_seconds
+        );
+        assert!(config.auth.csrf);
+        assert!(config.limits.enabled);
+        assert_eq!(config.limits.default_profile, "standard");
+        assert!(config.api.openai_compat);
+        assert!(config.sse.replay_retention_seconds > 0);
+        assert!(config.sse.max_backfill_events > 0);
+    }
+
+    #[test]
     #[serial]
     fn load_from_toml_file() {
         clear_relevant_env();
@@ -2315,6 +2600,38 @@ url = "sqlite://memory"
                 .iter()
                 .any(|warning| warning.contains("sse.persistence.enabled"))
         );
+    }
+
+    #[test]
+    fn config_range_validation_errors() {
+        let mut config = Config::default_for_profile(Profile::Dev);
+        config.auth.idle_seconds = 0;
+        config.auth.absolute_seconds = 0;
+        config.limits.default_profile.clear();
+        config.sse.max_backfill_events = 0;
+
+        match config.validate() {
+            Ok(_) => panic!("validation should have failed"),
+            Err(ConfigError::Validation { errors, .. }) => {
+                assert!(errors.iter().any(|msg| msg.contains("auth.idle_seconds")));
+                assert!(
+                    errors
+                        .iter()
+                        .any(|msg| msg.contains("auth.absolute_seconds"))
+                );
+                assert!(
+                    errors
+                        .iter()
+                        .any(|msg| msg.contains("limits.default_profile"))
+                );
+                assert!(
+                    errors
+                        .iter()
+                        .any(|msg| msg.contains("sse.max_backfill_events"))
+                );
+            }
+            Err(other) => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]

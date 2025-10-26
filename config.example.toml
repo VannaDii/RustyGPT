@@ -33,11 +33,21 @@ cookie_name = "CSRF-TOKEN"
 header_name = "X-CSRF-TOKEN"
 enabled = true
 
+[auth]
+idle_seconds = 28800
+absolute_seconds = 604800
+csrf = true
+suspicious_check = false
+
 [rate_limits]
 auth_login_per_ip_per_min = 10
 default_rps = 50.0
 burst = 100
 admin_api_enabled = false
+
+[limits]
+enabled = true
+default_profile = "standard"
 
 [session]
 idle_seconds = 28800
@@ -45,6 +55,9 @@ absolute_seconds = 604800
 session_cookie_name = "SESSION_ID"
 csrf_cookie_name = "CSRF-TOKEN"
 max_sessions_per_user = 5
+
+[api]
+openai_compat = true
 
 [oauth]
 redirect_base = "http://localhost:8080/api/auth/github/callback"
@@ -63,6 +76,8 @@ bootstrap_path = "../scripts/pg"
 heartbeat_seconds = 20
 channel_capacity = 128
 id_prefix = "evt_"
+replay_retention_seconds = 1800
+max_backfill_events = 512
 
 [sse.persistence]
 enabled = false

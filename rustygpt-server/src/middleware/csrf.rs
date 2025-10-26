@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderName, Method, Request, header},
+    http::{HeaderName, Method, Request, StatusCode, header},
     middleware::Next,
     response::Response,
 };
@@ -9,6 +9,10 @@ use cookie::Cookie;
 
 use crate::http::error::{ApiError, AppResult};
 use shared::config::server::Config;
+
+fn csrf_error(message: &'static str) -> ApiError {
+    ApiError::new(StatusCode::FORBIDDEN, "RGP.AUTH.CSRF", message)
+}
 
 #[derive(Clone)]
 pub struct CsrfState {
@@ -61,9 +65,9 @@ pub async fn enforce_csrf(
 
     match (header_token, cookie_token) {
         (Some(header), Some(cookie)) if header == cookie => Ok(next.run(request).await),
-        (None, _) => Err(ApiError::forbidden("missing CSRF header token")),
-        (_, None) => Err(ApiError::forbidden("missing CSRF cookie token")),
-        (Some(_), Some(_)) => Err(ApiError::forbidden("CSRF token mismatch")),
+        (None, _) => Err(csrf_error("missing CSRF header token")),
+        (_, None) => Err(csrf_error("missing CSRF cookie token")),
+        (Some(_), Some(_)) => Err(csrf_error("CSRF token mismatch")),
     }
 }
 
@@ -135,7 +139,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_missing_header_token() {
+    async fn csrf_required_for_mutations_cookie_flows() {
         let request = Request::builder()
             .method(Method::POST)
             .uri("/api/messages")

@@ -16,6 +16,13 @@ struct HealthResponse<'a> {
     status: &'a str,
 }
 
+#[derive(Serialize)]
+struct ReadyzResponse {
+    ready: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    missing: Vec<&'static str>,
+}
+
 async fn healthz() -> impl IntoResponse {
     metrics::counter!("health_checks_total", "endpoint" => "healthz", "status" => "ok")
         .increment(1);
@@ -24,15 +31,36 @@ async fn healthz() -> impl IntoResponse {
 
 async fn readyz(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     if let Some(pool) = state.pool.as_ref() {
-        match bootstrap::ensure_readiness(pool).await {
-            Ok(_) => {
+        match bootstrap::readiness_state(pool).await {
+            Ok(status) if status.ready => {
                 metrics::counter!(
                     "health_checks_total",
                     "endpoint" => "readyz",
                     "status" => "ok"
                 )
                 .increment(1);
-                (StatusCode::OK, Json(HealthResponse { status: "ready" }))
+                (
+                    StatusCode::OK,
+                    Json(ReadyzResponse {
+                        ready: true,
+                        missing: Vec::new(),
+                    }),
+                )
+            }
+            Ok(status) => {
+                metrics::counter!(
+                    "health_checks_total",
+                    "endpoint" => "readyz",
+                    "status" => "incomplete"
+                )
+                .increment(1);
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ReadyzResponse {
+                        ready: false,
+                        missing: status.missing.clone(),
+                    }),
+                )
             }
             Err(_) => {
                 metrics::counter!(
@@ -43,7 +71,10 @@ async fn readyz(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 .increment(1);
                 (
                     StatusCode::SERVICE_UNAVAILABLE,
-                    Json(HealthResponse { status: "degraded" }),
+                    Json(ReadyzResponse {
+                        ready: false,
+                        missing: vec!["readiness_check_failed"],
+                    }),
                 )
             }
         }
@@ -56,7 +87,10 @@ async fn readyz(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         .increment(1);
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(HealthResponse { status: "no_db" }),
+            Json(ReadyzResponse {
+                ready: false,
+                missing: vec!["database_connection_unavailable"],
+            }),
         )
     }
 }
@@ -70,7 +104,11 @@ pub fn create_health_router() -> Router<Arc<AppState>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use serde_json::Value;
     use serial_test::serial;
     use sqlx::postgres::PgPoolOptions;
     use std::io;
@@ -103,7 +141,12 @@ mod tests {
     #[serial]
     async fn readyz_returns_ready_when_database_is_healthy() {
         let _ = crate::server::metrics_handle();
-        crate::db::bootstrap::set_readiness_override(Some(Ok(())));
+        crate::db::bootstrap::set_readiness_override(Some(Ok(
+            crate::db::bootstrap::BootstrapStatus {
+                ready: true,
+                missing: vec![],
+            },
+        )));
 
         let state = Arc::new(AppState {
             pool: Some(test_pool()),
@@ -125,6 +168,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["ready"], serde_json::json!(true));
         crate::db::bootstrap::set_readiness_override(None);
     }
 

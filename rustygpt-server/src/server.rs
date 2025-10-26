@@ -5,6 +5,7 @@ use routes::openapi::openapi_routes;
 use shared::config::server::{Config, DatabaseConfig, LogFormat, SsePersistenceConfig};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::{
+    fmt,
     net::SocketAddr,
     sync::{Arc, OnceLock},
     time::Duration,
@@ -19,7 +20,7 @@ use tower_http::{
 };
 use tracing::{info, level_filters::LevelFilter, warn};
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::fmt;
+use tracing_subscriber::fmt as tracing_fmt;
 
 use crate::{
     app_state,
@@ -137,7 +138,7 @@ fn spawn_sse_retention_task(
 pub fn initialize_tracing(config: &Config) -> String {
     if matches!(config.logging.format, LogFormat::Json) {
         let env_filter = build_env_filter(config);
-        let _ = fmt::fmt()
+        let _ = tracing_fmt::fmt()
             .with_env_filter(env_filter)
             .with_target(false)
             .with_level(true)
@@ -148,7 +149,7 @@ pub fn initialize_tracing(config: &Config) -> String {
             .try_init();
     } else {
         let env_filter = build_env_filter(config);
-        let _ = fmt::fmt()
+        let _ = tracing_fmt::fmt()
             .with_env_filter(env_filter)
             .with_target(false)
             .with_level(true)
@@ -401,6 +402,34 @@ pub async fn create_shutdown_signal() {
 /// Returns an error if the server fails to start.
 type AnyError = Box<dyn std::error::Error>;
 
+#[derive(Debug)]
+struct BootstrapIncompleteError {
+    missing: Vec<&'static str>,
+}
+
+impl BootstrapIncompleteError {
+    #[allow(clippy::missing_const_for_fn)]
+    fn new(missing: Vec<&'static str>) -> Self {
+        Self { missing }
+    }
+}
+
+impl fmt::Display for BootstrapIncompleteError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.missing.is_empty() {
+            f.write_str("bootstrap incomplete")
+        } else {
+            write!(
+                f,
+                "bootstrap incomplete; missing stages: {}",
+                self.missing.join(", ")
+            )
+        }
+    }
+}
+
+impl std::error::Error for BootstrapIncompleteError {}
+
 pub async fn run(config: Config) -> Result<(), AnyError> {
     initialize_tracing(&config);
     info!("Starting server...");
@@ -453,9 +482,12 @@ async fn setup_database(config: &Arc<Config>) -> Result<PgPool, AnyError> {
         .await
         .map_err(|err| -> AnyError { Box::new(err) })?;
 
-    bootstrap::ensure_readiness(&pool)
+    let readiness = bootstrap::readiness_state(&pool)
         .await
         .map_err(|err| -> AnyError { Box::new(err) })?;
+    if !readiness.ready {
+        return Err(Box::new(BootstrapIncompleteError::new(readiness.missing)));
+    }
 
     Ok(pool)
 }
@@ -501,7 +533,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
     use tracing::{Subscriber, info};
-    use tracing_subscriber::fmt::{self, MakeWriter};
+    use tracing_subscriber::fmt::MakeWriter;
 
     #[derive(Clone)]
     struct BufferMakeWriter {
@@ -598,7 +630,7 @@ mod tests {
     where
         W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
     {
-        let builder = fmt::fmt()
+        let builder = tracing_fmt::fmt()
             .with_max_level(tracing::Level::TRACE)
             .with_target(false)
             .with_level(true)

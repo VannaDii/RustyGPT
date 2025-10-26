@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 
 use axum::{
     Json,
@@ -14,6 +14,7 @@ use crate::{
     http::error::{ApiError, AppResult},
     middleware::request_context::RequestContext,
 };
+use serde_json::json;
 use shared::{
     config::server::{Config, CookieSameSite},
     models::{
@@ -26,21 +27,32 @@ fn map_session_error(error: SessionError) -> ApiError {
     match error {
         SessionError::InvalidCredentials => ApiError::new(
             StatusCode::UNAUTHORIZED,
-            "invalid_credentials",
+            "RGP.AUTH.INVALID_CREDENTIALS",
             "invalid credentials",
         ),
         SessionError::SessionExpired | SessionError::AbsoluteExpired => ApiError::new(
             StatusCode::UNAUTHORIZED,
-            "session_expired",
+            "RGP.AUTH.EXPIRED",
             "session expired",
         ),
-        SessionError::DisabledUser => {
-            ApiError::new(StatusCode::LOCKED, "user_disabled", "user account disabled")
-        }
+        SessionError::DisabledUser => ApiError::new(
+            StatusCode::LOCKED,
+            "RGP.AUTH.DISABLED",
+            "user account disabled",
+        ),
         SessionError::RotationRequired => ApiError::new(
             StatusCode::CONFLICT,
-            "session_conflict",
+            "RGP.AUTH.ROTATION_REQUIRED",
             "session rotation failed",
+        ),
+        SessionError::SuspiciousActivity => ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "RGP.AUTH.SUSPICIOUS",
+            "session requires refresh",
+        )
+        .with_header(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static("refresh"),
         ),
         other => ApiError::internal_server_error(other.to_string()),
     }
@@ -68,10 +80,24 @@ fn metadata_from_headers(headers: &HeaderMap) -> SessionMetadata {
         .and_then(|value| value.to_str().ok())
         .map(|value| value.to_string());
 
-    SessionMetadata::default()
+    let ip_source = forwarded_ip.or(real_ip);
+
+    let mut metadata = SessionMetadata::default()
         .with_user_agent(user_agent)
-        .with_ip_str(forwarded_ip.or(real_ip))
-        .with_fingerprint(fingerprint)
+        .with_fingerprint(fingerprint);
+
+    if let Some(ip_value) = ip_source {
+        match ip_value.parse::<IpAddr>() {
+            Ok(parsed) => {
+                metadata = metadata.with_ip(Some(parsed));
+            }
+            Err(_) => {
+                metadata = metadata.with_ip_str(Some(ip_value));
+            }
+        }
+    }
+
+    metadata
 }
 
 fn extract_session_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -174,10 +200,6 @@ pub async fn login(
         &mut response,
         &[bundle.session_cookie.clone(), bundle.csrf_cookie.clone()],
     );
-    response.headers_mut().insert(
-        header::HeaderName::from_static("x-session-rotated"),
-        HeaderValue::from_static("1"),
-    );
 
     Ok(response)
 }
@@ -187,7 +209,7 @@ mod tests {
     use super::*;
     use crate::auth::session::{SessionBundle, SessionUser};
     use crate::services::chat_service::ChatServiceError;
-    use axum::body::Body;
+    use axum::{Json, body::Body};
     use http::HeaderName;
     use shared::config::server::Profile;
     use sqlx::Error as SqlxError;
@@ -195,7 +217,6 @@ mod tests {
 
     fn session_bundle() -> SessionBundle {
         SessionBundle {
-            token: "raw-token".into(),
             session_cookie: cookie::Cookie::build(("session", "token"))
                 .path("/")
                 .build(),
@@ -238,6 +259,13 @@ mod tests {
             .into_response()
             .status();
         assert_eq!(conflict, StatusCode::CONFLICT);
+
+        let suspicious = map_session_error(SessionError::SuspiciousActivity).into_response();
+        assert_eq!(suspicious.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            suspicious.headers().get(header::WWW_AUTHENTICATE).unwrap(),
+            "refresh"
+        );
     }
 
     #[test]
@@ -281,12 +309,10 @@ mod tests {
     }
 
     #[test]
-    fn apply_cookies_appends_set_cookie_headers() {
+    fn login_sets_cookie_and_csrf_exact_values() {
         let mut response = Response::new(Body::empty());
-        let cookies = [
-            cookie::Cookie::build(("a", "1")).path("/").build(),
-            cookie::Cookie::build(("b", "2")).path("/").build(),
-        ];
+        let bundle = session_bundle();
+        let cookies = [bundle.session_cookie.clone(), bundle.csrf_cookie.clone()];
         apply_cookies(&mut response, &cookies);
         let headers = response
             .headers()
@@ -295,8 +321,44 @@ mod tests {
             .map(|value| value.to_str().unwrap().to_string())
             .collect::<Vec<_>>();
         assert_eq!(headers.len(), 2);
-        assert!(headers.iter().any(|value| value.starts_with("a=")));
-        assert!(headers.iter().any(|value| value.starts_with("b=")));
+        assert!(
+            headers
+                .iter()
+                .any(|value| value.starts_with("session=") && value.contains("Path=/"))
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|value| value.starts_with("csrf=") && value.contains("Path=/"))
+        );
+    }
+
+    #[test]
+    fn refresh_rotates_cookie_and_sets_x_session_rotated() {
+        let bundle = session_bundle();
+        let response_body = LoginResponse {
+            user: build_authenticated_user(&session_user()),
+            session: build_session_summary(&bundle),
+            csrf_token: bundle.csrf_token.clone(),
+        };
+
+        let mut response = Json(response_body).into_response();
+        apply_cookies(
+            &mut response,
+            &[bundle.session_cookie.clone(), bundle.csrf_cookie.clone()],
+        );
+        response.headers_mut().insert(
+            header::HeaderName::from_static("x-session-rotated"),
+            HeaderValue::from_static("1"),
+        );
+
+        assert_eq!(
+            response
+                .headers()
+                .get(header::HeaderName::from_static("x-session-rotated"))
+                .map(|value| value.to_str().unwrap()),
+            Some("1")
+        );
     }
 
     #[test]
@@ -375,7 +437,7 @@ pub async fn refresh(
     let token = extract_session_cookie(&headers, &session_cookie_name).ok_or_else(|| {
         ApiError::new(
             StatusCode::UNAUTHORIZED,
-            "missing_session",
+            "RGP.AUTH.MISSING_SESSION",
             "session cookie missing",
         )
     })?;
@@ -387,7 +449,7 @@ pub async fn refresh(
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::UNAUTHORIZED,
-                "invalid_session",
+                "RGP.AUTH.INVALID_SESSION",
                 "session expired",
             )
         })?;
@@ -448,7 +510,7 @@ pub async fn logout(
     let token = extract_session_cookie(&headers, &session_cookie_name).ok_or_else(|| {
         ApiError::new(
             StatusCode::UNAUTHORIZED,
-            "missing_session",
+            "RGP.AUTH.MISSING_SESSION",
             "session cookie missing",
         )
     })?;
@@ -460,7 +522,7 @@ pub async fn logout(
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::UNAUTHORIZED,
-                "invalid_session",
+                "RGP.AUTH.INVALID_SESSION",
                 "session expired",
             )
         })?;
@@ -470,7 +532,7 @@ pub async fn logout(
         .await
         .map_err(map_session_error)?;
 
-    let mut response = Response::new(axum::body::Body::empty());
+    let mut response = Json(json!({ "ok": true })).into_response();
     if let Ok(value) = HeaderValue::from_str(
         &clear_cookie(
             &config,
@@ -497,11 +559,7 @@ pub async fn logout(
     ) {
         response.headers_mut().append(header::SET_COOKIE, value);
     }
-    response.headers_mut().insert(
-        header::HeaderName::from_static("x-session-rotated"),
-        HeaderValue::from_static("1"),
-    );
-    *response.status_mut() = StatusCode::NO_CONTENT;
+    *response.status_mut() = StatusCode::OK;
 
     Ok(response)
 }

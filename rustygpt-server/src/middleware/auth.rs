@@ -8,7 +8,7 @@ use axum::{
 use cookie::Cookie;
 use http::StatusCode;
 use shared::config::server::Config;
-use std::{str::FromStr, sync::Arc};
+use std::{net::IpAddr, str::FromStr, sync::Arc};
 use tracing::{instrument, warn};
 
 use crate::{
@@ -73,10 +73,21 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
         .and_then(|value| value.to_str().ok())
         .map(|value| value.to_string());
 
-    let metadata = SessionMetadata::default()
+    let ip_source = forwarded_ip.or(real_ip);
+    let mut metadata = SessionMetadata::default()
         .with_user_agent(user_agent)
-        .with_ip_str(forwarded_ip.or(real_ip))
         .with_fingerprint(fingerprint);
+
+    if let Some(ip_value) = ip_source {
+        match ip_value.parse::<IpAddr>() {
+            Ok(parsed) => {
+                metadata = metadata.with_ip(Some(parsed));
+            }
+            Err(_) => {
+                metadata = metadata.with_ip_str(Some(ip_value));
+            }
+        }
+    }
 
     let validation = match session_service.validate_session(&token, &metadata).await {
         Ok(Some(value)) => value,
@@ -150,9 +161,13 @@ fn extract_session_cookie(headers: &http::HeaderMap, name: &str) -> Option<Strin
 }
 
 fn unauthorized_response() -> Response {
+    unauthorized_response_with("session")
+}
+
+fn unauthorized_response_with(scheme: &'static str) -> Response {
     http::Response::builder()
         .status(StatusCode::UNAUTHORIZED)
-        .header(header::WWW_AUTHENTICATE, "session")
+        .header(header::WWW_AUTHENTICATE, scheme)
         .body(Body::empty())
         .unwrap()
         .into()
@@ -178,6 +193,7 @@ fn map_session_error(error: SessionError) -> Response {
     match error {
         SessionError::DisabledUser => locked_response(),
         SessionError::RotationRequired => conflict_response(),
+        SessionError::SuspiciousActivity => unauthorized_response_with("refresh"),
         SessionError::SessionExpired
         | SessionError::AbsoluteExpired
         | SessionError::InvalidCredentials => unauthorized_response(),
@@ -215,5 +231,18 @@ mod tests {
     fn map_session_error_handles_expired() {
         let response = map_session_error(SessionError::SessionExpired);
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn map_session_error_suspicious_sets_refresh_header() {
+        let response = map_session_error(SessionError::SuspiciousActivity);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::WWW_AUTHENTICATE)
+                .map(|value| value.to_str().unwrap()),
+            Some("refresh")
+        );
     }
 }
