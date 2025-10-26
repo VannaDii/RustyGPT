@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -28,8 +29,48 @@ pub enum AssistantError {
 pub struct AssistantStreamingSession {
     pub stream: StreamingResponseStream,
     pub prompt_tokens: i64,
-    _model_guard: Arc<LlamaCppModel>,
-    _metrics_guard: SessionMetricsGuard,
+    _model_guard: Option<Arc<LlamaCppModel>>,
+    _metrics_guard: Option<SessionMetricsGuard>,
+}
+
+impl AssistantStreamingSession {
+    #[cfg(test)]
+    pub(crate) fn from_stream(stream: StreamingResponseStream, prompt_tokens: i64) -> Self {
+        Self {
+            stream,
+            prompt_tokens,
+            _model_guard: None,
+            _metrics_guard: None,
+        }
+    }
+
+    fn with_guards(
+        stream: StreamingResponseStream,
+        prompt_tokens: i64,
+        model_guard: Arc<LlamaCppModel>,
+        metrics_guard: SessionMetricsGuard,
+    ) -> Self {
+        Self {
+            stream,
+            prompt_tokens,
+            _model_guard: Some(model_guard),
+            _metrics_guard: Some(metrics_guard),
+        }
+    }
+}
+
+#[async_trait]
+pub trait AssistantRuntime: Send + Sync {
+    async fn stream_reply(
+        &self,
+        request: LLMRequest,
+    ) -> Result<AssistantStreamingSession, AssistantError>;
+
+    fn persist_stream_chunks(&self) -> bool;
+
+    fn default_model_name(&self) -> &str;
+
+    fn default_chat_config(&self) -> Result<LLMConfig, AssistantError>;
 }
 
 #[derive(Clone)]
@@ -70,14 +111,14 @@ impl AssistantService {
             .map_err(|err| AssistantError::Inference(err.to_string()))?;
 
         let metrics_guard =
-            SessionMetricsGuard::new(self.metrics.clone(), provider_type, model_name);
+            SessionMetricsGuard::new(self.metrics.clone(), provider_type, model_name.clone());
 
-        Ok(AssistantStreamingSession {
+        Ok(AssistantStreamingSession::with_guards(
             stream,
             prompt_tokens,
-            _model_guard: model,
-            _metrics_guard: metrics_guard,
-        })
+            model,
+            metrics_guard,
+        ))
     }
 
     fn resolve_model_choice(
@@ -189,6 +230,28 @@ impl AssistantService {
             .llm
             .get_default_chat_config()
             .map_err(AssistantError::Config)
+    }
+}
+
+#[async_trait]
+impl AssistantRuntime for AssistantService {
+    async fn stream_reply(
+        &self,
+        request: LLMRequest,
+    ) -> Result<AssistantStreamingSession, AssistantError> {
+        Self::stream_reply(self, request).await
+    }
+
+    fn persist_stream_chunks(&self) -> bool {
+        Self::persist_stream_chunks(self)
+    }
+
+    fn default_model_name(&self) -> &str {
+        Self::default_model_name(self)
+    }
+
+    fn default_chat_config(&self) -> Result<LLMConfig, AssistantError> {
+        Self::default_chat_config(self)
     }
 }
 

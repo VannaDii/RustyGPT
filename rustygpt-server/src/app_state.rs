@@ -1,24 +1,29 @@
 use std::sync::Arc;
 
 use crate::{
-    auth::session::SessionService,
+    auth::session::SessionManager,
     middleware::rate_limit::RateLimitState,
-    services::{assistant_service::AssistantService, sse_persistence::SsePersistence},
+    services::{
+        assistant_service::AssistantRuntime, sse_persistence::SsePersistence,
+        stream_supervisor::SharedStreamSupervisor,
+    },
 };
 
-// Application state that will be shared across all routes
+/// Application state shared across all routes.
 #[derive(Clone)]
 pub struct AppState {
     /// Optional PostgreSQL connection pool
     pub(crate) pool: Option<sqlx::PgPool>,
     /// Assistant streaming service for automated replies
-    pub(crate) assistant: Option<Arc<AssistantService>>,
+    pub(crate) assistant: Option<Arc<dyn AssistantRuntime>>,
     /// Optional persistence store for SSE history replay
     pub(crate) sse_store: Option<Arc<dyn SsePersistence>>,
     /// Session manager for cookie-backed authentication
-    pub(crate) sessions: Option<Arc<SessionService>>,
+    pub(crate) sessions: Option<Arc<dyn SessionManager>>,
     /// Dynamic rate limit manager
     pub(crate) rate_limits: Option<Arc<RateLimitState>>,
+    /// Supervisor tracking in-flight assistant streams
+    pub(crate) streams: Option<SharedStreamSupervisor>,
 }
 
 impl Default for AppState {
@@ -29,6 +34,7 @@ impl Default for AppState {
             sse_store: None,
             sessions: None,
             rate_limits: None,
+            streams: None,
         }
     }
 }
@@ -41,6 +47,7 @@ impl std::fmt::Debug for AppState {
             .field("has_sse_store", &self.sse_store.is_some())
             .field("has_sessions", &self.sessions.is_some())
             .field("has_rate_limits", &self.rate_limits.is_some())
+            .field("has_streams", &self.streams.is_some())
             .finish()
     }
 }
@@ -49,128 +56,50 @@ impl std::fmt::Debug for AppState {
 mod tests {
     use super::*;
 
-    /// Test AppState default creation
     #[test]
-    fn test_app_state_default() {
+    fn default_state_is_empty() {
         let state = AppState::default();
         assert!(state.pool.is_none());
         assert!(state.assistant.is_none());
         assert!(state.sse_store.is_none());
         assert!(state.sessions.is_none());
         assert!(state.rate_limits.is_none());
+        assert!(state.streams.is_none());
     }
 
-    /// Test AppState equivalence between default instances
     #[test]
-    fn test_app_state_default_equals_new() {
-        let state1 = AppState::default();
-        let state2 = AppState::default();
-
-        assert_eq!(state1.pool.is_some(), state2.pool.is_some());
-        assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
-        assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
-        assert_eq!(state1.sessions.is_some(), state2.sessions.is_some());
-        assert_eq!(state1.rate_limits.is_some(), state2.rate_limits.is_some());
-    }
-
-    /// Test AppState cloning
-    #[test]
-    fn test_app_state_clone() {
+    fn clone_preserves_flags() {
         let state1 = AppState::default();
         let state2 = state1.clone();
-
         assert_eq!(state1.pool.is_some(), state2.pool.is_some());
         assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
         assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
         assert_eq!(state1.sessions.is_some(), state2.sessions.is_some());
         assert_eq!(state1.rate_limits.is_some(), state2.rate_limits.is_some());
+        assert_eq!(state1.streams.is_some(), state2.streams.is_some());
     }
 
-    /// Test AppState with_pool method (can't create real pool in test)
     #[test]
-    fn test_app_state_with_pool_concept() {
-        // We can't create a real PgPool in tests without a database
-        // But we can test the logic structure
+    fn debug_lists_all_fields() {
         let state = AppState::default();
-        assert!(state.pool.is_none());
-        assert!(state.assistant.is_none());
-        assert!(state.sse_store.is_none());
-        assert!(state.sessions.is_none());
-        assert!(state.rate_limits.is_none());
-
-        // In a real scenario with a pool:
-        // let pool = create_test_pool().await;
-        // let state_with_pool = AppState::with_pool(pool);
-        // assert!(state_with_pool.pool.is_some());
-    }
-
-    /// Test AppState debug formatting
-    #[test]
-    fn test_app_state_debug() {
-        let state = AppState::default();
-        let debug_str = format!("{:?}", state);
-
-        assert!(debug_str.contains("AppState"));
+        let debug_str = format!("{state:?}");
         assert!(debug_str.contains("has_pool"));
-        assert!(debug_str.contains("false")); // has_pool should be false
         assert!(debug_str.contains("has_assistant"));
         assert!(debug_str.contains("has_sse_store"));
+        assert!(debug_str.contains("has_sessions"));
         assert!(debug_str.contains("has_rate_limits"));
+        assert!(debug_str.contains("has_streams"));
     }
 
-    /// Test AppState pool accessor field
     #[test]
-    fn test_app_state_pool_accessor() {
-        let state = AppState::default();
-        assert!(state.pool.is_none());
-        assert!(state.assistant.is_none());
-        assert!(state.sse_store.is_none());
-        assert!(state.sessions.is_none());
-        assert!(state.rate_limits.is_none());
-    }
-
-    /// Test AppState pool consistency
-    #[test]
-    fn test_app_state_has_database_consistency() {
-        let state = AppState::default();
-
-        // pool.is_some() should be consistent with having a database
-        assert!(state.pool.is_none());
-        assert!(state.assistant.is_none());
-        assert!(state.sse_store.is_none());
-        assert!(state.sessions.is_none());
-        assert!(state.rate_limits.is_none());
-    }
-
-    /// Test multiple AppState instances independence
-    #[test]
-    fn test_app_state_independence() {
-        let state1 = AppState::default();
-        let state2 = AppState::default();
-
-        // Both should be independent and have the same default state
-        assert_eq!(state1.pool.is_some(), state2.pool.is_some());
-        assert!(state1.pool.is_none());
-        assert!(state2.pool.is_none());
-        assert_eq!(state1.assistant.is_some(), state2.assistant.is_some());
-        assert_eq!(state1.sse_store.is_some(), state2.sse_store.is_some());
-        assert_eq!(state1.sessions.is_some(), state2.sessions.is_some());
-        assert_eq!(state1.rate_limits.is_some(), state2.rate_limits.is_some());
-    }
-
-    /// Test AppState field visibility
-    #[test]
-    fn test_app_state_field_access() {
-        let state = AppState::default();
-
-        // We should be able to access pool field within the crate
-        assert!(state.pool.is_none());
-        assert!(state.assistant.is_none());
-        assert!(state.sse_store.is_none());
-        assert!(state.sessions.is_none());
-        assert!(state.rate_limits.is_none());
-
-        // Direct field access should not be possible from external modules
-        // (This is enforced by the pub(crate) visibility)
+    fn independent_instances_match() {
+        let a = AppState::default();
+        let b = AppState::default();
+        assert_eq!(a.pool.is_some(), b.pool.is_some());
+        assert_eq!(a.assistant.is_some(), b.assistant.is_some());
+        assert_eq!(a.sse_store.is_some(), b.sse_store.is_some());
+        assert_eq!(a.sessions.is_some(), b.sessions.is_some());
+        assert_eq!(a.rate_limits.is_some(), b.rate_limits.is_some());
+        assert_eq!(a.streams.is_some(), b.streams.is_some());
     }
 }

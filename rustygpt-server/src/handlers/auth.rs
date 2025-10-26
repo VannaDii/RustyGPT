@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use crate::{
     app_state::AppState,
-    auth::session::{SessionError, SessionMetadata, SessionService},
+    auth::session::{SessionError, SessionManager, SessionMetadata},
     http::error::{ApiError, AppResult},
     middleware::request_context::RequestContext,
 };
@@ -23,7 +23,7 @@ use shared::{
 };
 use time::{Duration as TimeDuration, OffsetDateTime};
 
-fn map_session_error(error: SessionError) -> ApiError {
+pub fn map_session_error(error: SessionError) -> ApiError {
     match error {
         SessionError::InvalidCredentials => ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -58,7 +58,7 @@ fn map_session_error(error: SessionError) -> ApiError {
     }
 }
 
-fn metadata_from_headers(headers: &HeaderMap) -> SessionMetadata {
+pub fn metadata_from_headers(headers: &HeaderMap) -> SessionMetadata {
     let user_agent = headers
         .get(header::USER_AGENT)
         .and_then(|value| value.to_str().ok())
@@ -100,7 +100,7 @@ fn metadata_from_headers(headers: &HeaderMap) -> SessionMetadata {
     metadata
 }
 
-fn extract_session_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+pub fn extract_session_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(header::COOKIE)
         .and_then(|value| value.to_str().ok())
@@ -139,7 +139,7 @@ fn apply_cookies(response: &mut Response, cookies: &[cookie::Cookie<'static>]) {
     }
 }
 
-fn session_service(state: &Arc<AppState>) -> Result<Arc<SessionService>, ApiError> {
+fn session_service(state: &Arc<AppState>) -> Result<Arc<dyn SessionManager>, ApiError> {
     state
         .sessions
         .clone()
@@ -207,29 +207,47 @@ pub async fn login(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::session::{SessionBundle, SessionUser};
-    use crate::services::chat_service::ChatServiceError;
-    use axum::{Json, body::Body};
-    use http::HeaderName;
-    use shared::config::server::Profile;
+    use crate::{
+        auth::session::{
+            SessionBundle, SessionManager, SessionMetadata, SessionUser, SessionValidation,
+        },
+        middleware::{auth::auth_middleware, csrf},
+        server,
+        services::chat_service::ChatServiceError,
+    };
+    use async_trait::async_trait;
+    use axum::{
+        Extension, Json, Router,
+        body::Body,
+        http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
+        response::IntoResponse,
+        routing::post,
+    };
+    use axum_test::TestServer;
+    use chrono::{Duration as ChronoDuration, Utc};
+    use cookie::{Cookie, SameSite};
+    use serde_json::json;
+    use shared::config::server::{Config, Profile};
     use sqlx::Error as SqlxError;
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, Mutex},
+    };
     use uuid::Uuid;
 
-    fn session_bundle() -> SessionBundle {
+    fn sample_session_bundle() -> SessionBundle {
         SessionBundle {
-            session_cookie: cookie::Cookie::build(("session", "token"))
-                .path("/")
-                .build(),
+            session_cookie: Cookie::build(("session", "token")).path("/").build(),
             csrf_token: "csrf-token".into(),
-            csrf_cookie: cookie::Cookie::build(("csrf", "token")).path("/").build(),
+            csrf_cookie: Cookie::build(("csrf", "token")).path("/").build(),
             session_id: Uuid::new_v4(),
-            issued_at: chrono::Utc::now(),
-            expires_at: chrono::Utc::now(),
-            absolute_expires_at: chrono::Utc::now(),
+            issued_at: Utc::now(),
+            expires_at: Utc::now(),
+            absolute_expires_at: Utc::now(),
         }
     }
 
-    fn session_user() -> SessionUser {
+    fn sample_session_user() -> SessionUser {
         SessionUser {
             id: Uuid::new_v4(),
             email: "user@example.com".into(),
@@ -237,9 +255,9 @@ mod tests {
             display_name: Some("User".into()),
             roles: vec![shared::models::UserRole::Member],
             session_id: Uuid::new_v4(),
-            issued_at: chrono::Utc::now(),
-            expires_at: chrono::Utc::now(),
-            absolute_expires_at: chrono::Utc::now(),
+            issued_at: Utc::now(),
+            expires_at: Utc::now(),
+            absolute_expires_at: Utc::now(),
         }
     }
 
@@ -292,7 +310,7 @@ mod tests {
 
     #[test]
     fn build_authenticated_user_clones_fields() {
-        let source = session_user();
+        let source = sample_session_user();
         let auth_user = build_authenticated_user(&source);
         assert_eq!(auth_user.id, source.id);
         assert_eq!(auth_user.email, source.email);
@@ -301,7 +319,7 @@ mod tests {
 
     #[test]
     fn build_session_summary_wraps_timestamps() {
-        let bundle = session_bundle();
+        let bundle = sample_session_bundle();
         let summary = build_session_summary(&bundle);
         assert_eq!(summary.id, bundle.session_id);
         assert_eq!(summary.issued_at.0, bundle.issued_at);
@@ -311,7 +329,7 @@ mod tests {
     #[test]
     fn login_sets_cookie_and_csrf_exact_values() {
         let mut response = Response::new(Body::empty());
-        let bundle = session_bundle();
+        let bundle = sample_session_bundle();
         let cookies = [bundle.session_cookie.clone(), bundle.csrf_cookie.clone()];
         apply_cookies(&mut response, &cookies);
         let headers = response
@@ -335,9 +353,9 @@ mod tests {
 
     #[test]
     fn refresh_rotates_cookie_and_sets_x_session_rotated() {
-        let bundle = session_bundle();
+        let bundle = sample_session_bundle();
         let response_body = LoginResponse {
-            user: build_authenticated_user(&session_user()),
+            user: build_authenticated_user(&sample_session_user()),
             session: build_session_summary(&bundle),
             csrf_token: bundle.csrf_token.clone(),
         };
@@ -421,6 +439,356 @@ mod tests {
             .into_response()
             .status();
         assert_eq!(db, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[derive(Default)]
+    struct StubSessionManager {
+        authenticate: Mutex<VecDeque<Result<(SessionUser, SessionBundle), SessionError>>>,
+        validate: Mutex<VecDeque<Result<Option<SessionValidation>, SessionError>>>,
+        refresh: Mutex<VecDeque<Result<Option<(SessionUser, SessionBundle)>, SessionError>>>,
+    }
+
+    impl StubSessionManager {
+        fn enqueue_auth(&self, response: Result<(SessionUser, SessionBundle), SessionError>) {
+            self.authenticate.lock().unwrap().push_back(response);
+        }
+
+        fn enqueue_validate(&self, response: Result<Option<SessionValidation>, SessionError>) {
+            self.validate.lock().unwrap().push_back(response);
+        }
+
+        fn enqueue_refresh(
+            &self,
+            response: Result<Option<(SessionUser, SessionBundle)>, SessionError>,
+        ) {
+            self.refresh.lock().unwrap().push_back(response);
+        }
+    }
+
+    #[async_trait]
+    impl SessionManager for StubSessionManager {
+        async fn authenticate(
+            &self,
+            _identifier: &str,
+            _password: &str,
+            _metadata: &SessionMetadata,
+        ) -> Result<(SessionUser, SessionBundle), SessionError> {
+            self.authenticate
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("missing authenticate response")
+        }
+
+        async fn validate_session(
+            &self,
+            _token: &str,
+            _metadata: &SessionMetadata,
+        ) -> Result<Option<SessionValidation>, SessionError> {
+            self.validate
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(Ok(None))
+        }
+
+        async fn refresh_session(
+            &self,
+            _token: &str,
+            _metadata: &SessionMetadata,
+        ) -> Result<Option<(SessionUser, SessionBundle)>, SessionError> {
+            self.refresh.lock().unwrap().pop_front().unwrap_or(Ok(None))
+        }
+
+        async fn revoke_session_by_id(
+            &self,
+            _session_id: Uuid,
+            _reason: Option<&str>,
+        ) -> Result<(), SessionError> {
+            Ok(())
+        }
+
+        async fn mark_user_for_rotation(
+            &self,
+            _user_id: Uuid,
+            _reason: &str,
+        ) -> Result<i64, SessionError> {
+            Ok(0)
+        }
+    }
+
+    fn test_config() -> Arc<Config> {
+        let mut config = Config::default_for_profile(Profile::Test);
+        config.features.auth_v1 = true;
+        config.security.cookie.secure = false;
+        config.security.cookie.same_site = CookieSameSite::Lax;
+        Arc::new(config)
+    }
+
+    fn build_session_artifacts() -> (SessionUser, SessionBundle) {
+        let session_id = Uuid::new_v4();
+        let issued_at = Utc::now();
+        let expires_at = issued_at + ChronoDuration::hours(1);
+        let absolute_expires_at = issued_at + ChronoDuration::hours(4);
+
+        let session_cookie = Cookie::build(("SESSION_ID", "session-token"))
+            .http_only(true)
+            .path("/")
+            .same_site(SameSite::Lax)
+            .build();
+        let csrf_cookie = Cookie::build(("CSRF-TOKEN", "csrf-token"))
+            .http_only(false)
+            .path("/")
+            .same_site(SameSite::Strict)
+            .build();
+
+        let bundle = SessionBundle {
+            session_cookie,
+            csrf_token: "csrf-token".into(),
+            csrf_cookie,
+            session_id,
+            issued_at,
+            expires_at,
+            absolute_expires_at,
+        };
+
+        let user = SessionUser {
+            id: Uuid::new_v4(),
+            email: "integration@example.com".into(),
+            username: "integration".into(),
+            display_name: Some("Integration".into()),
+            roles: vec![shared::models::UserRole::Member],
+            session_id,
+            issued_at,
+            expires_at,
+            absolute_expires_at,
+        };
+
+        (user, bundle)
+    }
+
+    #[tokio::test]
+    async fn login_handler_sets_cookies_and_returns_payload() {
+        let stub = Arc::new(StubSessionManager::default());
+        let (user, bundle) = build_session_artifacts();
+        stub.enqueue_auth(Ok((user.clone(), bundle.clone())));
+
+        let session_manager: Arc<dyn SessionManager> = stub.clone();
+        let state = server::create_app_state(None, None, None, Some(session_manager), None, None);
+
+        let app = Router::new()
+            .route("/api/auth/login", post(login))
+            .layer(Extension(state));
+
+        let server = TestServer::new(app).expect("test server");
+        let response = server
+            .post("/api/auth/login")
+            .json(&LoginRequest {
+                email: "integration@example.com".into(),
+                password: "secret".into(),
+            })
+            .await;
+
+        assert_eq!(response.status_code(), StatusCode::OK);
+
+        let cookies = response.cookies();
+        let body: LoginResponse = response.json();
+
+        assert_eq!(body.user.id, user.id);
+        assert_eq!(body.session.id, bundle.session_id);
+        assert_eq!(body.csrf_token, bundle.csrf_token);
+
+        let session = cookies
+            .iter()
+            .find(|cookie| cookie.name() == "SESSION_ID")
+            .expect("session cookie");
+        assert_eq!(session.value(), "session-token");
+        let csrf = cookies
+            .iter()
+            .find(|cookie| cookie.name() == "CSRF-TOKEN")
+            .expect("csrf cookie");
+        assert_eq!(csrf.value(), "csrf-token");
+    }
+
+    #[tokio::test]
+    async fn refresh_returns_rotated_session_and_header() {
+        let config = test_config();
+        let stub = Arc::new(StubSessionManager::default());
+        let (user, bundle) = build_session_artifacts();
+        stub.enqueue_refresh(Ok(Some((user.clone(), bundle.clone()))));
+
+        let session_manager: Arc<dyn SessionManager> = stub.clone();
+        let state = server::create_app_state(None, None, None, Some(session_manager), None, None);
+
+        let app = Router::new()
+            .route("/api/auth/refresh", post(refresh))
+            .layer(Extension(config.clone()))
+            .layer(Extension(state));
+
+        let server = TestServer::new(app).expect("test server");
+        let response = server
+            .post("/api/auth/refresh")
+            .add_header(
+                header::COOKIE,
+                "SESSION_ID=existing-session; CSRF-TOKEN=token",
+            )
+            .await;
+
+        assert_eq!(response.status_code(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-session-rotated")
+                .expect("rotation header"),
+            "1"
+        );
+
+        let body: LoginResponse = response.json();
+        assert_eq!(body.session.id, bundle.session_id);
+        assert_eq!(body.csrf_token, bundle.csrf_token);
+    }
+
+    async fn messages_handler() -> impl IntoResponse {
+        Json(json!({ "ok": true }))
+    }
+
+    #[tokio::test]
+    async fn login_then_mutation_with_csrf_succeeds() {
+        let config = test_config();
+        let stub = Arc::new(StubSessionManager::default());
+        let (user, bundle) = build_session_artifacts();
+        let validation = SessionValidation {
+            user: user.clone(),
+            bundle: None,
+            rotated: false,
+        };
+
+        stub.enqueue_auth(Ok((user.clone(), bundle.clone())));
+        stub.enqueue_validate(Ok(Some(validation)));
+
+        let session_manager: Arc<dyn SessionManager> = stub.clone();
+        let state = server::create_app_state(None, None, None, Some(session_manager), None, None);
+
+        let csrf_state = csrf::CsrfState::from_config(&config);
+
+        let protected = Router::new()
+            .route("/api/messages", post(messages_handler))
+            .layer(axum::middleware::from_fn_with_state(
+                csrf_state.clone(),
+                csrf::enforce_csrf,
+            ))
+            .route_layer(axum::middleware::from_fn(auth_middleware));
+
+        let app = Router::new()
+            .route("/api/auth/login", post(login))
+            .merge(protected)
+            .layer(Extension(config.clone()))
+            .layer(Extension(state));
+
+        let server = TestServer::new(app).expect("test server");
+        let login_response = server
+            .post("/api/auth/login")
+            .json(&LoginRequest {
+                email: "integration@example.com".into(),
+                password: "secret".into(),
+            })
+            .await;
+
+        assert_eq!(login_response.status_code(), StatusCode::OK);
+
+        let cookies = login_response.cookies();
+        let body: LoginResponse = login_response.json();
+
+        let session_cookie = cookies
+            .iter()
+            .find(|cookie| cookie.name() == "SESSION_ID")
+            .expect("session cookie")
+            .value()
+            .to_string();
+        let csrf_cookie = cookies
+            .iter()
+            .find(|cookie| cookie.name() == "CSRF-TOKEN")
+            .expect("csrf cookie")
+            .value()
+            .to_string();
+        let cookie_header = format!("SESSION_ID={}; CSRF-TOKEN={}", session_cookie, csrf_cookie);
+
+        let response = server
+            .post("/api/messages")
+            .add_header(header::COOKIE, cookie_header)
+            .add_header(
+                config.security.csrf.header_name.to_string(),
+                body.csrf_token.clone(),
+            )
+            .json(&json!({ "message": "hello" }))
+            .await;
+
+        assert_eq!(response.status_code(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn mutation_without_csrf_is_rejected() {
+        let config = test_config();
+        let stub = Arc::new(StubSessionManager::default());
+        let (user, bundle) = build_session_artifacts();
+        let validation = SessionValidation {
+            user: user.clone(),
+            bundle: None,
+            rotated: false,
+        };
+
+        stub.enqueue_auth(Ok((user.clone(), bundle.clone())));
+        stub.enqueue_validate(Ok(Some(validation)));
+
+        let session_manager: Arc<dyn SessionManager> = stub.clone();
+        let state = server::create_app_state(None, None, None, Some(session_manager), None, None);
+
+        let csrf_state = csrf::CsrfState::from_config(&config);
+
+        let protected = Router::new()
+            .route("/api/messages", post(messages_handler))
+            .layer(axum::middleware::from_fn_with_state(
+                csrf_state,
+                csrf::enforce_csrf,
+            ))
+            .route_layer(axum::middleware::from_fn(auth_middleware));
+
+        let app = Router::new()
+            .route("/api/auth/login", post(login))
+            .merge(protected)
+            .layer(Extension(config.clone()))
+            .layer(Extension(state));
+
+        let server = TestServer::new(app).expect("test server");
+
+        let login_response = server
+            .post("/api/auth/login")
+            .json(&LoginRequest {
+                email: "integration@example.com".into(),
+                password: "secret".into(),
+            })
+            .await;
+
+        let cookies = login_response.cookies();
+        let session_cookie = cookies
+            .iter()
+            .find(|cookie| cookie.name() == "SESSION_ID")
+            .expect("session cookie")
+            .value()
+            .to_string();
+
+        let response = server
+            .post("/api/messages")
+            .add_header(
+                header::COOKIE,
+                format!("SESSION_ID={}; CSRF-TOKEN=csrf-token", session_cookie),
+            )
+            .json(&json!({ "message": "hello" }))
+            .await;
+
+        assert_eq!(response.status_code(), StatusCode::FORBIDDEN);
+        let payload: serde_json::Value = response.json();
+        assert_eq!(payload["code"], "RGP.AUTH.CSRF");
     }
 }
 

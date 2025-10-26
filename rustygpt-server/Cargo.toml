@@ -38,6 +38,7 @@ shared = { workspace = true, features = ["server"] }
 sqlx = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 tower-service = { workspace = true }

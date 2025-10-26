@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{Duration, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tracing::{instrument, warn};
 use uuid::Uuid;
@@ -19,8 +19,9 @@ use crate::{
     http::error::{ApiError, AppResult},
     middleware::request_context::RequestContext,
     services::{
-        assistant_service::{AssistantService, finish_reason_to_string},
+        assistant_service::{AssistantRuntime, finish_reason_to_string},
         chat_service::{ChatService, ChatServiceError, ThreadSummaryWithConversation},
+        stream_supervisor::{SharedStreamSupervisor, StreamSession, StreamStopReason},
     },
 };
 use futures::StreamExt;
@@ -51,6 +52,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/messages/{message_id}/delete", post(delete_message))
         .route("/api/messages/{message_id}/restore", post(restore_message))
         .route("/api/messages/{message_id}/edit", post(edit_message))
+        .route("/api/messages/{message_id}/cancel", post(cancel_message))
         .route("/api/typing", post(set_typing))
         .route("/api/presence/heartbeat", post(presence_heartbeat))
 }
@@ -65,6 +67,12 @@ struct ThreadTreeQuery {
 struct ChunkQuery {
     from: Option<i32>,
     limit: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+struct CancelResponse {
+    message_id: Uuid,
+    status: &'static str,
 }
 
 #[instrument(skip(app_state, context, query))]
@@ -173,6 +181,7 @@ async fn post_root(
             pool,
             hub.clone(),
             assistant.clone(),
+            app_state.streams.clone(),
             user_id,
             response.message_id,
             content,
@@ -266,6 +275,7 @@ async fn reply_message(
             pool,
             hub.clone(),
             assistant.clone(),
+            app_state.streams.clone(),
             user_id,
             response.message_id,
             content,
@@ -348,6 +358,42 @@ async fn delete_message(
         .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[instrument(skip(app_state, context))]
+async fn cancel_message(
+    Extension(app_state): Extension<Arc<AppState>>,
+    Extension(context): Extension<RequestContext>,
+    Path(message_id): Path<Uuid>,
+) -> AppResult<impl IntoResponse> {
+    let actor = require_user(&context)?;
+    let pool = require_pool(&app_state)?;
+    let service = ChatService::new(pool);
+
+    let message = service.get_message(actor, message_id).await?;
+    if message.role != MessageRole::Assistant {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "RGP.V1.CANCEL_ROLE",
+            "only assistant messages can be cancelled",
+        ));
+    }
+
+    let status = if let Some(supervisor) = app_state.streams.clone() {
+        match supervisor.cancel(&message_id).await {
+            StreamStopReason::Cancelled => "cancelled",
+            StreamStopReason::TimedOut => "timed_out",
+            StreamStopReason::Completed => "completed",
+            StreamStopReason::None => "not_tracked",
+        }
+    } else {
+        "not_tracked"
+    };
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(CancelResponse { message_id, status }),
+    ))
 }
 
 #[instrument(skip(app_state, context))]
@@ -473,11 +519,15 @@ struct StreamOutcome {
 async fn process_assistant_stream(
     service: &ChatService,
     hub: &SharedStreamHub,
+    supervisor: Option<SharedStreamSupervisor>,
+    session: Option<Arc<StreamSession>>,
     actor: Uuid,
     parent_message_id: Uuid,
     stream: &mut StreamingResponseStream,
     persist_chunks: bool,
 ) -> Result<StreamOutcome, ChatServiceError> {
+    let cancellation_token = session.as_ref().map(|handle| handle.cancellation_token());
+
     let mut accumulated = String::new();
     let mut reply_response: Option<ReplyMessageResponse> = None;
     let mut summary = None;
@@ -486,8 +536,24 @@ async fn process_assistant_stream(
     let mut usage: Option<TokenUsage> = None;
     let mut stream_error: Option<String> = None;
     let mut chunk_index: i32 = 0;
+    let mut registered = false;
 
-    while let Some(next) = stream.next().await {
+    loop {
+        let next_item = if let Some(token) = cancellation_token.as_ref() {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    break;
+                }
+                next = stream.next() => next
+            }
+        } else {
+            stream.next().await
+        };
+
+        let Some(next) = next_item else {
+            break;
+        };
+
         match next {
             Ok(chunk) => {
                 if let Some(reason) = &chunk.finish_reason {
@@ -512,6 +578,19 @@ async fn process_assistant_stream(
                 .await?
                 {
                     continue;
+                }
+
+                if !registered && reply_response.is_some() {
+                    if let Some(message_id) =
+                        reply_response.as_ref().map(|created| created.message_id)
+                    {
+                        if let (Some(supervisor), Some(session_handle)) =
+                            (supervisor.as_ref(), session.as_ref().map(Arc::clone))
+                        {
+                            supervisor.register(message_id, session_handle).await;
+                        }
+                        registered = true;
+                    }
                 }
 
                 let Some(created) = reply_response.as_ref() else {
@@ -557,7 +636,7 @@ async fn process_assistant_stream(
     })
 }
 
-async fn ensure_reply_response(
+pub async fn ensure_reply_response(
     service: &ChatService,
     actor: Uuid,
     parent_message_id: Uuid,
@@ -593,7 +672,7 @@ async fn ensure_reply_response(
     Ok(false)
 }
 
-async fn persist_chunk_if_needed(
+pub async fn persist_chunk_if_needed(
     service: &ChatService,
     actor: Uuid,
     created: &ReplyMessageResponse,
@@ -616,7 +695,7 @@ async fn persist_chunk_if_needed(
     }
 }
 
-async fn publish_delta_event(
+pub async fn publish_delta_event(
     hub: &SharedStreamHub,
     conversation_id: Uuid,
     created: &ReplyMessageResponse,
@@ -657,24 +736,35 @@ async fn publish_delta_event(
 fn spawn_assistant_reply(
     pool: PgPool,
     hub: SharedStreamHub,
-    assistant: Arc<AssistantService>,
+    assistant: Arc<dyn AssistantRuntime>,
+    supervisor: Option<SharedStreamSupervisor>,
     actor: Uuid,
     parent_message_id: Uuid,
     user_message: String,
 ) {
     tokio::spawn(async move {
-        if let Err(err) =
-            run_assistant_reply(pool, hub, assistant, actor, parent_message_id, user_message).await
+        if let Err(err) = run_assistant_reply(
+            pool,
+            hub,
+            assistant,
+            supervisor,
+            actor,
+            parent_message_id,
+            user_message,
+        )
+        .await
         {
             warn!(error = %err, "assistant reply generation failed");
         }
     });
 }
 
+#[allow(clippy::cognitive_complexity)]
 async fn run_assistant_reply(
     pool: PgPool,
     hub: SharedStreamHub,
-    assistant: Arc<AssistantService>,
+    assistant: Arc<dyn AssistantRuntime>,
+    supervisor: Option<SharedStreamSupervisor>,
     actor: Uuid,
     parent_message_id: Uuid,
     user_message: String,
@@ -699,24 +789,28 @@ async fn run_assistant_reply(
         &user_message,
     );
 
-    let session = assistant
+    let assistant_session = assistant
         .stream_reply(request)
         .await
         .map_err(|err| ChatServiceError::Validation(err.to_string()))?;
 
-    let mut stream = session.stream;
+    let mut stream = assistant_session.stream;
     let persist_chunks = assistant.persist_stream_chunks();
+    let stream_session = supervisor.as_ref().map(|sup| sup.create_session());
+
     let StreamOutcome {
         accumulated: initial_content,
         reply_response: initial_reply,
         summary: initial_summary,
         resolved_conversation: initial_conversation,
-        finish_reason,
+        finish_reason: outcome_finish_reason,
         usage,
-        stream_error,
+        stream_error: outcome_stream_error,
     } = process_assistant_stream(
         &service,
         &hub,
+        supervisor.clone(),
+        stream_session.clone(),
         actor,
         parent_message_id,
         &mut stream,
@@ -724,15 +818,28 @@ async fn run_assistant_reply(
     )
     .await?;
 
+    if let Some(handle) = stream_session.as_ref() {
+        handle.mark_completed();
+    }
+
+    let stop_reason = stream_session.as_ref().map(|handle| handle.stop_reason());
+
     let mut accumulated = initial_content;
     let mut summary = initial_summary;
     let mut resolved_conversation = initial_conversation;
-    let mut finish_reason = finish_reason;
+    let mut stream_error = outcome_stream_error;
+    let default_finish = outcome_finish_reason.unwrap_or_else(|| "stop".to_string());
 
     let reply_response = if let Some(reply) = initial_reply {
         reply
     } else {
-        let fallback = "I'm sorry, I couldn't generate a response right now.".to_string();
+        let fallback = match stop_reason {
+            Some(StreamStopReason::Cancelled) => "Assistant response cancelled.".to_string(),
+            Some(StreamStopReason::TimedOut) => {
+                "Assistant response timed out before completion.".to_string()
+            }
+            _ => "I'm sorry, I couldn't generate a response right now.".to_string(),
+        };
         let created = service
             .reply_as_assistant(actor, parent_message_id, fallback.clone())
             .await?;
@@ -745,27 +852,40 @@ async fn run_assistant_reply(
         created
     };
 
-    if let Some(error) = stream_error.as_ref() {
-        if !accumulated.is_empty() {
-            accumulated.push_str("\n\n");
-        }
-        let warning = format!("⚠️ Assistant stream interrupted: {error}");
-        accumulated.push_str(&warning);
-        finish_reason = Some("error".to_string());
-        let conversation = resolved_conversation.unwrap_or(reply_response.conversation_id);
-        hub.publish(
-            conversation,
-            ConversationStreamEvent::Error {
-                payload: StreamErrorEvent {
-                    code: "assistant_stream_error".to_string(),
-                    message: warning,
-                },
-            },
-        )
-        .await;
+    if let Some(supervisor) = supervisor.as_ref() {
+        supervisor.unregister(&reply_response.message_id).await;
     }
 
     let conversation = resolved_conversation.unwrap_or(reply_response.conversation_id);
+
+    let mut error_event: Option<StreamErrorEvent> = None;
+
+    if stop_reason == Some(StreamStopReason::TimedOut) {
+        let message = "Assistant generation timed out before completion.".to_string();
+        if !accumulated.is_empty() {
+            accumulated.push_str("\n\n");
+        }
+        accumulated.push_str(&format!("⚠️ {}", message));
+        error_event = Some(StreamErrorEvent {
+            code: "assistant_timeout".to_string(),
+            message,
+        });
+        stream_error = None;
+    }
+
+    if error_event.is_none() {
+        if let Some(error) = stream_error.take() {
+            let message = format!("Assistant stream error: {error}");
+            if !accumulated.is_empty() {
+                accumulated.push_str("\n\n");
+            }
+            accumulated.push_str(&format!("⚠️ {}", message));
+            error_event = Some(StreamErrorEvent {
+                code: "assistant_stream_error".to_string(),
+                message,
+            });
+        }
+    }
 
     if let Err(err) = service
         .update_message_content(actor, reply_response.message_id, accumulated.clone())
@@ -775,13 +895,22 @@ async fn run_assistant_reply(
     }
 
     let usage_breakdown = usage
-        .map(|usage| token_usage_to_breakdown(&usage, session.prompt_tokens, &accumulated))
-        .unwrap_or_else(|| infer_usage_from_text(session.prompt_tokens, &accumulated));
+        .map(|usage| {
+            token_usage_to_breakdown(&usage, assistant_session.prompt_tokens, &accumulated)
+        })
+        .unwrap_or_else(|| infer_usage_from_text(assistant_session.prompt_tokens, &accumulated));
 
-    let finish_reason_value = stream_error
-        .map(|_| "error".to_string())
-        .or_else(|| finish_reason.clone())
-        .unwrap_or_else(|| "stop".to_string());
+    let finish_reason_value = match stop_reason {
+        Some(StreamStopReason::Cancelled) => "cancelled".to_string(),
+        Some(StreamStopReason::TimedOut) => "timeout".to_string(),
+        _ => {
+            if error_event.is_some() {
+                "error".to_string()
+            } else {
+                default_finish
+            }
+        }
+    };
 
     let done = ConversationStreamEvent::MessageDone {
         payload: MessageDoneEvent {
@@ -793,6 +922,14 @@ async fn run_assistant_reply(
         },
     };
     hub.publish(conversation, done).await;
+
+    if let Some(event) = error_event {
+        hub.publish(
+            conversation,
+            ConversationStreamEvent::Error { payload: event },
+        )
+        .await;
+    }
 
     if summary.is_none() {
         summary = service
@@ -844,13 +981,13 @@ fn require_pool(state: &AppState) -> AppResult<PgPool> {
     })
 }
 
-fn require_assistant(state: &AppState) -> AppResult<Arc<AssistantService>> {
+fn require_assistant(state: &AppState) -> AppResult<Arc<dyn AssistantRuntime>> {
     state.assistant.clone().ok_or_else(|| {
         ApiError::internal_server_error("assistant streaming service not configured")
     })
 }
 
-fn token_usage_to_breakdown(
+pub fn token_usage_to_breakdown(
     usage: &TokenUsage,
     prompt_fallback: i64,
     content: &str,
@@ -880,7 +1017,7 @@ fn token_usage_to_breakdown(
     }
 }
 
-fn infer_usage_from_text(prompt_tokens: i64, content: &str) -> UsageBreakdown {
+pub fn infer_usage_from_text(prompt_tokens: i64, content: &str) -> UsageBreakdown {
     let completion_tokens = approximate_text_tokens(content);
     UsageBreakdown {
         prompt_tokens,

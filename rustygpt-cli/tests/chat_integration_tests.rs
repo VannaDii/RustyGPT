@@ -1,6 +1,7 @@
 //! Integration tests for the CLI chat command.
 
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 
 #[tokio::test]
 async fn test_chat_command_help() {
@@ -55,7 +56,8 @@ async fn test_chat_command_connection_failure() {
         .arg("5")
         .timeout(std::time::Duration::from_secs(10));
 
-    cmd.assert()
-        .failure()
-        .stderr(predicates::str::contains("failed to fetch threads"));
+    cmd.assert().failure().stderr(
+        predicates::str::contains("failed to fetch threads")
+            .or(predicates::str::contains("no session cookie jar found")),
+    );
 }

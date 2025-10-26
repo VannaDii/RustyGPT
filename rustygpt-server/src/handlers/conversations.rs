@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
-    auth::session::SessionService,
+    auth::session::SessionManager,
     handlers::streaming::SharedStreamHub,
     http::error::{ApiError, AppResult},
     middleware::request_context::RequestContext,
@@ -282,7 +282,7 @@ fn require_pool(state: &AppState) -> AppResult<PgPool> {
     })
 }
 
-fn require_sessions(state: &AppState) -> AppResult<Arc<SessionService>> {
+fn require_sessions(state: &AppState) -> AppResult<Arc<dyn SessionManager>> {
     state.sessions.clone().ok_or_else(|| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,

@@ -5,6 +5,7 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
+use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 use cookie::{Cookie, SameSite};
@@ -161,6 +162,40 @@ pub struct SessionValidation {
     pub user: SessionUser,
     pub bundle: Option<SessionBundle>,
     pub rotated: bool,
+}
+
+#[async_trait]
+pub trait SessionManager: Send + Sync {
+    async fn authenticate(
+        &self,
+        identifier: &str,
+        password: &str,
+        metadata: &SessionMetadata,
+    ) -> Result<(SessionUser, SessionBundle), SessionError>;
+
+    async fn validate_session(
+        &self,
+        token: &str,
+        metadata: &SessionMetadata,
+    ) -> Result<Option<SessionValidation>, SessionError>;
+
+    async fn refresh_session(
+        &self,
+        token: &str,
+        metadata: &SessionMetadata,
+    ) -> Result<Option<(SessionUser, SessionBundle)>, SessionError>;
+
+    async fn revoke_session_by_id(
+        &self,
+        session_id: Uuid,
+        reason: Option<&str>,
+    ) -> Result<(), SessionError>;
+
+    async fn mark_user_for_rotation(
+        &self,
+        user_id: Uuid,
+        reason: &str,
+    ) -> Result<i64, SessionError>;
 }
 
 /// Database-backed session manager.
@@ -435,6 +470,7 @@ impl SessionService {
             );
 
             if stored_metadata.suspicious_mismatch(metadata) {
+                record_rotation_metric(RotationCause::SuspiciousFlag);
                 self.flag_session_rotation(&mut conn, row.session_id)
                     .await?;
                 return Err(SessionError::SuspiciousActivity);
@@ -806,6 +842,10 @@ impl SessionService {
             .set(value as f64);
         }
 
+        for (role, value) in counts {
+            metrics::gauge!(ACTIVE_SESSIONS_METRIC_NAME, "role" => role).set(value as f64);
+        }
+
         Ok(())
     }
 
@@ -834,6 +874,50 @@ impl SessionService {
         }
 
         Ok(roles)
+    }
+}
+
+#[async_trait]
+impl SessionManager for SessionService {
+    async fn authenticate(
+        &self,
+        identifier: &str,
+        password: &str,
+        metadata: &SessionMetadata,
+    ) -> Result<(SessionUser, SessionBundle), SessionError> {
+        Self::authenticate(self, identifier, password, metadata).await
+    }
+
+    async fn validate_session(
+        &self,
+        token: &str,
+        metadata: &SessionMetadata,
+    ) -> Result<Option<SessionValidation>, SessionError> {
+        Self::validate_session(self, token, metadata).await
+    }
+
+    async fn refresh_session(
+        &self,
+        token: &str,
+        metadata: &SessionMetadata,
+    ) -> Result<Option<(SessionUser, SessionBundle)>, SessionError> {
+        Self::refresh_session(self, token, metadata).await
+    }
+
+    async fn revoke_session_by_id(
+        &self,
+        session_id: Uuid,
+        reason: Option<&str>,
+    ) -> Result<(), SessionError> {
+        Self::revoke_session_by_id(self, session_id, reason).await
+    }
+
+    async fn mark_user_for_rotation(
+        &self,
+        user_id: Uuid,
+        reason: &str,
+    ) -> Result<i64, SessionError> {
+        Self::mark_user_for_rotation(self, user_id, reason).await
     }
 }
 
@@ -869,6 +953,7 @@ enum RotationCause {
     RoleChange,
     IdleRefresh,
     ExplicitRefresh,
+    SuspiciousFlag,
 }
 
 impl RotationCause {
@@ -878,6 +963,7 @@ impl RotationCause {
             Self::RoleChange => "role_change",
             Self::IdleRefresh => "idle_refresh",
             Self::ExplicitRefresh => "explicit_refresh",
+            Self::SuspiciousFlag => "suspicious_flag",
         }
     }
 }

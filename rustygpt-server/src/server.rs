@@ -1,6 +1,28 @@
 use crate::handlers::streaming::{SharedStreamHub, StreamHub};
+use crate::{
+    app_state,
+    auth::session::{SessionManager, SessionService},
+    db::bootstrap,
+    middleware::{
+        auth::auth_middleware,
+        csrf::{self, CsrfState},
+        rate_limit::{self, RateLimitState},
+        request_context::{self, RequestIdState},
+        security::{self, SecurityHeadersState},
+    },
+    routes,
+    services::{
+        assistant_service::{AssistantRuntime, AssistantService},
+        sse_persistence::{SsePersistence, SsePersistenceStore},
+        stream_supervisor::{SharedStreamSupervisor, StreamSupervisor},
+    },
+    tracer,
+};
 use app_state::AppState;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::{Extension, Router, middleware, response::IntoResponse, routing::get, serve};
+use chrono::{Duration as ChronoDuration, Utc};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use routes::openapi::openapi_routes;
 use shared::config::server::{Config, DatabaseConfig, LogFormat, SsePersistenceConfig};
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -21,28 +43,6 @@ use tower_http::{
 use tracing::{info, level_filters::LevelFilter, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt as tracing_fmt;
-
-use crate::{
-    app_state,
-    auth::session::SessionService,
-    db::bootstrap,
-    middleware::{
-        auth::auth_middleware,
-        csrf::{self, CsrfState},
-        rate_limit::{self, RateLimitState},
-        request_context::{self, RequestIdState},
-        security::{self, SecurityHeadersState},
-    },
-    routes,
-    services::{
-        assistant_service::AssistantService,
-        sse_persistence::{SsePersistence, SsePersistenceStore},
-    },
-    tracer,
-};
-use axum::http::{HeaderValue, StatusCode, header};
-use chrono::{Duration as ChronoDuration, Utc};
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 const SSE_RETENTION_SCAN_LIMIT: i64 = 128;
@@ -205,10 +205,11 @@ pub async fn create_database_pool(db: &DatabaseConfig) -> Result<sqlx::PgPool, s
 /// Returns an [`Arc<AppState>`] for sharing across the application.
 pub fn create_app_state(
     pool: Option<sqlx::PgPool>,
-    assistant: Option<Arc<AssistantService>>,
+    assistant: Option<Arc<dyn AssistantRuntime>>,
     sse_store: Option<Arc<dyn SsePersistence>>,
-    sessions: Option<Arc<SessionService>>,
+    sessions: Option<Arc<dyn SessionManager>>,
     rate_limits: Option<Arc<RateLimitState>>,
+    streams: Option<SharedStreamSupervisor>,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         pool,
@@ -216,6 +217,7 @@ pub fn create_app_state(
         sse_store,
         sessions,
         rate_limits,
+        streams,
     })
 }
 
@@ -439,10 +441,18 @@ pub async fn run(config: Config) -> Result<(), AnyError> {
 
     let pool = setup_database(&config).await?;
 
-    let assistant = Arc::new(AssistantService::new(config.clone()));
+    let assistant: Arc<dyn AssistantRuntime> = Arc::new(AssistantService::new(config.clone()));
     let sse_store = build_sse_store(&config, &pool);
     let session_service = build_session_service(&config, &pool);
     let rate_limit_state = initialize_rate_limiting(&config, &pool).await;
+    let timeout_seconds = config.llm.global_settings.default_timeout;
+    let supervisor_timeout = if timeout_seconds == 0 {
+        None
+    } else {
+        Some(Duration::from_secs(timeout_seconds))
+    };
+    let stream_supervisor: SharedStreamSupervisor =
+        Arc::new(StreamSupervisor::new(supervisor_timeout));
 
     let state = create_app_state(
         Some(pool.clone()),
@@ -450,6 +460,7 @@ pub async fn run(config: Config) -> Result<(), AnyError> {
         sse_store.clone(),
         session_service.clone(),
         Some(rate_limit_state.clone()),
+        Some(stream_supervisor.clone()),
     );
 
     // Create the application router
@@ -505,11 +516,10 @@ fn build_sse_store(config: &Arc<Config>, pool: &PgPool) -> Option<Arc<dyn SsePer
     }
 }
 
-fn build_session_service(config: &Arc<Config>, pool: &PgPool) -> Option<Arc<SessionService>> {
-    config
-        .features
-        .auth_v1
-        .then(|| Arc::new(SessionService::new(pool.clone(), config.clone())))
+fn build_session_service(config: &Arc<Config>, pool: &PgPool) -> Option<Arc<dyn SessionManager>> {
+    config.features.auth_v1.then(|| {
+        Arc::new(SessionService::new(pool.clone(), config.clone())) as Arc<dyn SessionManager>
+    })
 }
 
 async fn initialize_rate_limiting(config: &Arc<Config>, pool: &PgPool) -> Arc<RateLimitState> {

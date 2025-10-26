@@ -154,6 +154,7 @@ mod tests {
             sse_store: None,
             sessions: None,
             rate_limits: None,
+            streams: None,
         });
 
         let app = create_health_router().with_state(state);
@@ -189,6 +190,7 @@ mod tests {
             sse_store: None,
             sessions: None,
             rate_limits: None,
+            streams: None,
         });
 
         let app = create_health_router().with_state(state);
