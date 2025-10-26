@@ -1,45 +1,74 @@
 # Local Development
 
-> TL;DR – Configure environment variables, run the server, CLI, and web client together, and tighten the feedback loop with watch commands.
+> TL;DR – keep `config.toml` in sync with your environment, use `just dev` for paired watchers, and rely on the CLI for quick
+> smoke tests of authentication and streaming.
 
-## Environment Setup
+## Environment configuration
 
-Copy the sample configuration and customise secrets for local use:
+All binaries load configuration through `rustygpt-shared::config::server::Config`. The loader merges:
+
+1. Built-in defaults selected by the active profile (Dev/Test/Prod)
+2. Optional `config.toml` / `config.yaml` / `config.json`
+3. Environment variables such as `RUSTYGPT__SERVER__PORT=9000`
+4. CLI overrides (e.g. `cargo run -p rustygpt-server -- serve --port 9000`)
+
+Keep secrets out of the repo—override them with environment variables or a private `config.toml`. See
+[Configuration](../reference/config.md) for the full key list.
+
+## Watcher workflows
+
+The [`Justfile`](../../Justfile) orchestrates the common flows:
 
 ```bash
-cp config.example.toml config.toml
-```
-
-Set `DATABASE_URL`, `OPENAI_API_KEY` (if required), and optional SMTP credentials in your shell or using `.env`. Refer to [Configuration](../reference/config.md) for the full list of supported keys.
-
-## Run Watchers
-
-Use `just` to orchestrate simultaneous watchers:
-
-```bash
+# Run server + web watchers together (uses rustygpt-tools/confuse)
 just dev
+
+# Backend only hot-reload
+just watch-server
+
+# Run fmt, check, and clippy
+just check
 ```
 
-This spawns an auto-reloading backend (`rustygpt-server`) and a Trunk-powered Yew frontend. Logs route to stdout, and the SSE stream is available at `http://localhost:8080/api/chat/stream`.
+`just dev` spawns two subprocesses:
 
-For targeted backend iterations, run:
+- `rustygpt-server` via `cargo watch -x 'run -- serve --port 8080'`
+- `rustygpt-web` via `trunk watch`
+
+Logs stream to stdout so you can confirm when migrations finish (`db_bootstrap_*` metrics) and when the SSE hub accepts
+connections.
+
+## CLI smoke tests
+
+The CLI binary lives at `rustygpt-cli`. Useful commands while iterating:
 
 ```bash
-cargo watch -x 'test -p rustygpt-server'
+# Launch the server directly from the CLI crate
+cargo run -p rustygpt-cli -- serve --port 8080
+
+# Generate the OpenAPI spec
+cargo run -p rustygpt-cli -- spec openapi.yaml
+
+# Generate config skeletons
+cargo run -p rustygpt-cli -- config --format toml
+
+# Manage sessions
+cargo run -p rustygpt-cli -- login
+cargo run -p rustygpt-cli -- me
+cargo run -p rustygpt-cli -- logout
 ```
 
-## CLI Tooling
+CLI commands reuse the same cookie jar as the web client. Cookies are stored under `~/.config/rustygpt/session.cookies` by
+default (see `[cli]` in the configuration schema).
 
-Build the CLI for quick smoke tests:
+## Debugging tips
 
-```bash
-cargo run -p rustygpt-cli -- chat "Summarise deployment state"
-```
+- Enable verbose tracing: `RUST_LOG=rustygpt_server=debug,tower_http=info just run-server`
+- Inspect SSE payloads: `curl -N http://127.0.0.1:8080/api/stream/conversations/<conversation-id>` (requires an authenticated
+  session and `features.sse_v1 = true`)
+- Verify configuration resolution: `cargo run -p rustygpt-cli -- config --format json` and inspect the generated file
+- Regenerate database bindings or seed data by restarting the server; bootstrap scripts rerun automatically when the process
+  starts
+- Use `docker compose logs postgres` if migrations fail during bootstrap
 
-The CLI shares configuration parsing with the server, so ensure the same `.env` is loaded. Inspect token accounting and stream behaviour in [Streaming Delivery](../architecture/streaming.md).
-
-## Debugging
-
-- View tracing spans by setting `RUST_LOG=rustygpt=debug,tower_http=info`.
-- Inspect SSE payloads with `curl -N http://localhost:8080/api/chat/stream`.
-- When debugging auth issues, follow the runbook in [Rotate Secrets](../howto/rotate-secrets.md).
+For operational playbooks (e.g. Docker deployment or rotating secrets) see the [How-to](../howto/index.md) section.

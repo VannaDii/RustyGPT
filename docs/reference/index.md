@@ -1,11 +1,10 @@
 # Reference Overview
 
-> TL;DR – Authoritative details for RustyGPT’s public surfaces: authentication, REST endpoints, and configuration keys.
+Authoritative details for RustyGPT’s public surfaces:
 
-## Quick Navigation
+- [Authentication](authentication.md) – session cookies, setup flow, and rotation behaviour
+- [REST API](api.md) – endpoint catalogue grouped by feature area
+- [Configuration](config.md) – `config.toml` structure and environment overrides
 
-- [Authentication](authentication.md) – session lifecycle, CSRF, and metrics.
-- [REST API](api.md) – endpoint catalogue for clients and tools.
-- [Configuration](config.md) – environment variables and TOML structure.
-
-Reference pages favour precision over storytelling. For workflows that combine these primitives, consult the [How-to](../howto/index.md) section. When architecture informs an interface contract, the relevant page links back to [Architecture](../architecture/index.md).
+For operational workflows see [How-to](../howto/index.md); for high-level design context visit the
+[Architecture](../architecture/index.md) section.

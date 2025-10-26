@@ -1,24 +1,28 @@
 # RustyGPT Documentation
 
-> TL;DR – Everything you need to build, run, and extend RustyGPT with a pure Rust toolchain. Start with Quickstart, then dive into Concepts and Architecture for deeper system insight.
+Welcome! This mdBook describes the RustyGPT workspace in depth: how the server and clients are structured, how the
+PostgreSQL-backed features behave, and how to operate the platform locally or in shared environments.
 
-Welcome to the RustyGPT docs. This site is:
+*Start with the guides to get a local environment running, then dive into the reference and architecture chapters for precise
+APIs and design notes.*
 
-- **Rust-native**: powered by mdBook with Rust preprocessors
-- **Versioned**: each release is immutable; `latest` tracks `main`
-- **Machine-friendly**: LLM manifests are published beside the book
+## Quick navigation
 
-## Fast Links
+- [Quickstart](guide/quickstart.md) – configure and launch the server, web client, and CLI.
+- [Local development](guide/local-dev.md) – watcher workflows, debugging tools, and environment variables.
+- [REST API](reference/api.md) – endpoint catalogue for conversations, streaming, authentication, and admin features.
+- [Service topology](architecture/service-topology.md) – how the Axum server, Yew SPA, PostgreSQL, and SSE stream hub fit together.
 
-- [Quickstart](guide/quickstart.md)
-- [Local Development](guide/local-dev.md)
-- [Streaming Delivery](architecture/streaming.md)
-- [REST API](reference/api.md)
+## What RustyGPT ships today
 
-## About RustyGPT
+RustyGPT focuses on a cohesive Rust stack:
 
-RustyGPT is a modular chat platform composed of a Rust backend, CLI tools, and a Yew-powered web client. The project emphasises deterministic reasoning, low-latency streaming, and reproducible deployments. For system context, read [Service Topology](architecture/service-topology.md) and the shared [Reasoning DAG](concepts/reasoning-dag.md).
+- `rustygpt-server` exposes REST + SSE endpoints with cookie-based auth (`handlers/auth.rs`), rate limiting
+  (`middleware/rate_limit.rs`), and OpenAPI documentation (`openapi.rs`).
+- `rustygpt-web` is a Yew SPA that consumes the server API via `src/api.rs` and renders threaded conversations, presence, and
+  typing indicators.
+- `rustygpt-cli` shares the same models as the server, providing commands for login, conversation inspection, SSE following, and
+  OpenAPI generation (`src/commands`).
+- `rustygpt-shared` houses configuration loading, llama.cpp bindings, and the data transfer objects used across all crates.
 
-## Governance & Support
-
-Documentation changes follow the [docs review checklist](../CONTRIBUTING.md) and this repository’s [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md). Open issues and proposals in the `docs` label so we can triage them efficiently.
+Each documentation section links back to the relevant modules so you can cross-reference behaviour with the implementation.

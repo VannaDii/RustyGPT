@@ -1,11 +1,9 @@
 # Architecture Overview
 
-> TL;DR – System-level views of RustyGPT services, data flows, and cross-cutting behaviours such as streaming and rate limiting.
+These chapters document the runtime architecture of RustyGPT: how the Axum server is composed, how the SSE stream hub works,
+and how rate limiting integrates with PostgreSQL. Use them alongside the [concepts](../concepts/index.md) and
+[reference](../reference/index.md) sections when exploring the code.
 
-## What’s Inside
-
-- [Service Topology](service-topology.md) maps runtime components and communication paths.
-- [Streaming Delivery](streaming.md) details the SSE fan-out model.
-- [Rate-Limit Architecture](rate-limits.md) covers runtime throttling against Postgres-backed profiles.
-
-Pair these diagrams with conceptual background from [Concepts](../concepts/index.md) and operational runbooks in [How-to](../howto/index.md).
+- [Service topology](service-topology.md)
+- [Streaming delivery](streaming.md)
+- [Rate-limit architecture](rate-limits.md)
