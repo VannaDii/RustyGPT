@@ -1,0 +1,7559 @@
+# RustyGPT — Multi‑User Threaded AI Group Chat
+**Hyper‑Detailed Engineering Specification (Pure Markdown, Downloadable)**  
+**APIs:** Internal REST + SSE; OpenAI‑compatible `/v1` (Copilot excluded)  
+**Stack:** Rust (Axum), Yew, Postgres (Stored Procedures only), SSE streaming, llama.cpp  
+**Document ID:** RUSTY‑SPEC‑GROUPCHAT‑HYPER  
+**Generated:** 2025-10-26T01:17:15.161749Z  
+
+---
+
+## 0. Scope, Non‑Goals, and Global Invariants
+### 0.1 Scope
+- Deliver a **robust multi‑user, threaded group chat** with LLM streaming, deterministic threading, and full Web/CLI parity.
+- Guarantee **security** (Argon2id, rotating opaque cookies, CSRF for cookie flows, strict RBAC with invites, RLS everywhere).
+- Provide **OpenAI‑compatible `/v1`** endpoints (stateless by default, optional stateful threading via metadata extension).
+- Implement **SSE replay** for ephemeral events (presence, typing, unread, membership) interleaved with message chunk replay.
+- Implement **unread semantics** via watermarks; **presence/typing** with TTL; **dynamic rate‑limits** with live admin; **cancellation/timeouts**.
+- Finish with **observability** (Prometheus/Grafana) and **complete documentation**; every unit of work includes **explicit automated tests**.
+
+### 0.2 Non‑Goals
+- Copilot‑specific API extensions.
+- Image/multimodal streaming.
+- Alternative databases (non‑Postgres).
+
+### 0.3 Global Invariants (Normative)
+- **SP‑only DB access.** No embedded SQL in server code; all reads/writes use stored procedures.
+- **RLS on user‑visible tables.** Policies must restrict to active participants; writes role‑gated.
+- **OpenAI delta streaming.** First assistant delta includes `role`; subsequent deltas omit `role`; terminal includes `finish_reason`; stream ends with `data: [DONE]`.
+- **Idempotency.** `(message_id, idx)` uniqueness enforced; replay never duplicates application state.
+- **RBAC everywhere.** Routes and SPs verify membership; SSE requires membership.
+- **Rate‑limit headers.** On 429, return `Retry‑After`, `X‑RateLimit‑Limit`, `X‑RateLimit‑Remaining`.
+- **Error taxonomy.** 401 `RGP.AUTH.*`; 403 `RGP.AUTH.CSRF` or `RGP.RBAC.FORBIDDEN`; 404 `RGP.NOT_FOUND`; 429 `RGP.RATE_LIMITED`; 500 `RGP.INTERNAL`.
+- **SSE resume.** Composite `Last-Event-ID` + optional `since` timestamp; server replays chunks and ephemeral events in chronological order.
+
+---
+
+## Phase A — Foundational Bootstrap & Config Convergence
+
+### Purpose
+Establish deterministic database bootstrap order and a complete configuration surface so later phases are stable and repeatable.
+
+### Completion Criteria
+- All schemas and SPs through threads and limits are applied and recorded in the bootstrap ledger.
+- `/readyz` remains unhealthy until all mandatory stages are applied; `/healthz` remains fast.
+- All configuration keys required by later phases exist with defaults, ranges, and hot‑reload behavior documented.
+
+### Implementation Details (Authoritative)
+- Create **ledger table** `bootstrap_applied(stage TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL)`.
+- Apply SQL in **strict order**: (1) `schema/010_auth.sql`; (2) `procs/010_auth.sql`; (3) `schema/020_conversations_threads.sql`; (4) `procs/020_threads.sql`; (5) `schema/040_rate_limits.sql`; (6) `seed/002_rate_limits.sql`; (7) `procs/034_limits.sql`.
+- All scripts SHALL be **idempotent**, produce the same end state across re‑runs, and **never** depend on non‑prior stages.
+- Add **readiness gate**: `/readyz` returns `{ready:false, missing:[...]}` until all stages logged; only `{ready:true}` once complete.
+- Augment `config.example.toml` with: `[auth] idle_seconds:int, absolute_seconds:int, csrf:bool, suspicious_check:bool`; `[limits] enabled:bool, default_profile:string`; `[api] openai_compat:bool`; `[sse] replay_retention_seconds:int, max_backfill_events:int`.
+- Document **defaults**, **accepted ranges**, **validation errors**, and **hot‑reload** behavior for each key.
+
+### Unit Test Requirements
+- bootstrap_orders_stages_in_strict_sequence: runner on empty DB applies stages in the exact specified order; ledger matches.
+- bootstrap_is_idempotent: second run yields zero changes; ledger unchanged; no duplicate rows.
+- config_keys_present_with_defaults: load config; validate existence and type of each key; defaults populated.
+- config_range_validation_errors: invalid values prevent start with clear diagnostics.
+
+### DB Integration Tests
+- ledger_populated_with_all_stages: after bootstrap, select ledger shows all mandatory stages with timestamps.
+- schemas_and_procs_exist: `information_schema` enumerations match expected objects and signatures.
+
+### Server Integration Tests
+- readyz_false_until_complete_true_after: simulate missing stage → `/readyz` false; once applied → `/readyz` true.
+
+### Engineering Notes
+- Why a ledger? Deterministic re‑application and clear visibility into which migrations executed.
+- Why strict ordering? To avoid undefined dependency interactions between schema and SP creation.
+
+---
+
+## Phase B — Trustworthy Sessions, Rotation & CSRF
+
+### Purpose
+Users authenticate via password; opaque `sid` cookies rotate on idle/privilege change; CSRF enforced for cookie flows; Web/CLI wire to endpoints.
+
+### Completion Criteria
+- `/api/auth/login|logout|refresh` behave per contract with correct cookie attributes and CSRF issuance.
+- Idle and absolute session windows enforced; rotation header `X‑Session‑Rotated: 1` included on refresh/forced rotation.
+- All non‑GET routes outside `/api/auth/*` require `X‑CSRF‑Token` for cookie sessions; SSE GET is exempt.
+
+### Implementation Details (Authoritative)
+- **Routes**:
+- • `POST /api/auth/login` request `{email, password}`; success sets `sid` cookie (HttpOnly; Secure; SameSite=Lax; Path=/; Max‑Age=idle_seconds) and returns `{user, session:{issued_at,expires_at,absolute_expires_at}, csrf_token}`; `401` invalid creds; `423` disabled.
+- • `POST /api/auth/logout` invalidates session; clears cookie; returns `{ok:true}`.
+- • `POST /api/auth/refresh` rotates if within idle and under absolute; sets new cookie, returns new session + `csrf_token`; `401` if ineligible; include `X‑Session‑Rotated: 1`.
+- **Session Rules**: Idle/sliding extension on access; absolute cap hard limit; privilege change forces rotation next request; optional suspicious UA/IP check returns `401` with `WWW‑Authenticate: refresh`.
+- **CSRF**: All non‑GET outside `/api/auth/*` require `X‑CSRF‑Token`; failure → `403 RGP.AUTH.CSRF`. SSE GET exempt.
+- **Metrics**: `rustygpt_auth_logins_total{result}`, `rustygpt_auth_session_rotations_total{reason}`, `rustygpt_auth_active_sessions{role}`.
+
+### Unit Test Requirements
+- login_sets_cookie_and_csrf_exact_values.
+- refresh_rotates_cookie_and_sets_X_Session_Rotated.
+- csrf_required_for_mutations_cookie_flows (POST/PUT/PATCH/DELETE).
+- privilege_change_forces_rotation_on_next_request.
+- suspicious_ua_ip_triggers_refresh_if_enabled.
+
+### Server Integration Tests
+- login_then_mutation_with_csrf_succeeds.
+- idle_expiry_then_refresh_then_retry_original_request_succeeds.
+- absolute_expiry_then_refresh_fails_401_and_requires_login.
+
+### Web E2E Tests
+- web_login_flow_sets_cookie_and_csrf_and_allows_mutations.
+- web_auto_refresh_near_idle_boundary_single_retry.
+- web_logout_clears_state_and_blocks_mutations.
+
+### CLI Integration Tests
+- cli_session_login_persists_cookie_jar_and_csrf_header_on_mutations.
+- cli_handles_401_with_single_refresh_retry_then_success.
+- cli_session_logout_clears_cookie_jar.
+
+### Engineering Notes
+- Opaque server‑stored sessions avoid JWT pitfalls and allow immediate revocation; rotation thwarts fixation.
+
+---
+
+## Phase C — Conversation Membership & RBAC Enforcement
+
+### Purpose
+Conversations are shared by explicit membership with roles; invite lifecycle implemented; all reads/writes and SSE subscription enforce membership.
+
+### Completion Criteria
+- Owner/Admin can add/remove participants; invites can be created, accepted, revoked with TTL.
+- Non‑members receive `403` on conversation/thread/message routes and SSE subscribe.
+- Membership changes broadcast `membership.changed` events.
+
+### Implementation Details (Authoritative)
+- **SPs**:
+- • `sp_add_participant(p_conv,p_user,p_role)` Owner/Admin only; idempotent on active row; audit entry.
+- • `sp_remove_participant(p_conv,p_user)` Owner/Admin; prevent removing last owner; set `left_at`.
+- • `sp_create_invite(p_conv,p_email,p_role,p_ttl_secs)` unique active invite per (email,role); returns token; store hash if persisted.
+- • `sp_accept_invite(p_token,p_user)` validates token/TTL; adds participant; returns conversation_id.
+- • `sp_revoke_invite(p_token)` Owner/Admin; marks revoked.
+- • `sp_user_can_access(p_user,p_conv)` returns BOOL; used by **all** conversation SPs.
+- **RLS**: Active participants only; writes `WITH CHECK` require role permissions.
+- **Routes**:
+- • `POST /api/conversations/:id/participants` `{user_id,role}` → add.
+- • `DELETE /api/conversations/:id/participants/:user_id` → remove.
+- • `POST /api/conversations/:id/invites` `{email,role,ttl_secs}` → create invite.
+- • `POST /api/invites/accept` `{token}` → accept.
+- • `POST /api/invites/:token/revoke` → revoke.
+- **SSE**: emit `membership.changed {user_id,role,action}` on add/remove/role_change to all members.
+
+### Unit Test Requirements
+- cannot_remove_last_owner_domain_error.
+- accept_invite_once_only_second_attempt_rejected.
+- expired_or_revoked_invite_rejected.
+- sp_user_can_access_false_for_non_member.
+
+### DB Integration Tests
+- rls_blocks_non_member_select_insert_update_delete.
+- owner_adds_member_member_gains_access_immediately.
+
+### Server Integration Tests
+- membership_changed_event_fanned_out_to_all_subscribers.
+
+### Web/CLI Tests
+- web_invite_modal_create_accept_revoke.
+- cli_members_add_remove_list_and_invite_accept_revoke.
+
+### Engineering Notes
+- SP‑level checks + RLS provide defense‑in‑depth and consistent error mapping.
+
+---
+
+## Phase D — OpenAI‑Compatible `/v1` API (Stateless by Default)
+
+### Purpose
+Expose `/v1/chat/completions` and models endpoints compatible with OpenAI. Default behavior is stateless; optional metadata enables stateful threading for RustyGPT.
+
+### Completion Criteria
+- Generic OpenAI clients stream deltas successfully; first delta includes `role`; terminal `[DONE]` observed.
+- `usage` fields present; fields not supported are ignored and reported in `warnings`.
+- Optional `metadata.rustygpt` enables stateful persistence into a conversation thread.
+
+### Implementation Details (Authoritative)
+- **Endpoints**:
+- • `POST /v1/chat/completions` — Accept cookie **or** Bearer; accepted request fields: `model, messages[], temperature, top_p, max_tokens, stop, presence_penalty, frequency_penalty, user, stream, metadata` (all others ignored with `warnings`).
+- • `GET /v1/models` — Return array of models `{id,object:'model',created,owned_by}`.
+- • `GET /v1/models/{id}` — Return single model metadata.
+- **Behavior**:
+- • **Stateless default**: do not persist; prompt from `messages[]`; stream OpenAI delta; include `usage` at end.
+- • **Stateful extension**: if `metadata.rustygpt={conversation_id,parent_message_id}`, verify membership; persist a user message and assistant message within thread; stream and append `message_chunks`; send `message.done` with `usage`.
+- **API Keys** (optional): `api_keys` table; `sp_api_key_create/revoke/list`; tokens hashed (SHA‑256) and revealed once; Bearer requests **exempt** from CSRF.
+- **Rate‑limit**: `/v1/chat/completions` subject to limits; on `429` return headers per invariants.
+- **Errors**: JSON `{error:{message,type,param,code}}` with taxonomy mapping (401/403/404/429/500).
+
+### Unit Test Requirements
+- delta_first_chunk_includes_role_then_omits_in_others.
+- terminal_done_and_finish_reason_emitted.
+- usage_fields_present_and_consistent_with_provider.
+- ignored_request_fields_listed_in_warnings.
+
+### Server Integration Tests
+- cookie_auth_and_bearer_auth_both_work_for_v1.
+- revoked_api_key_rejected_with_401.
+- stateless_mode_no_db_writes_stateful_mode_persists_messages_and_chunks.
+
+### Engineering Notes
+- Stateless default maximizes compatibility; metadata extension adds threading seamlessly when clients opt‑in.
+
+---
+
+## Phase E — Durable SSE Backfill for Ephemeral Events
+
+### Purpose
+Persist and replay presence/typing/unread/membership events; interleave replay with message chunk replay in chronological order.
+
+### Completion Criteria
+- On reconnect, clients receive missed ephemeral events and message chunks strictly ordered by time.
+- Event‑log pruning keeps storage bounded; backfill meets retention limits.
+
+### Implementation Details (Authoritative)
+- **DB**: Table `sse_event_log(id BIGSERIAL PK, conversation_id UUID, root_message_id UUID NULL, event_type TEXT in {'presence.update','typing.update','unread.update','membership.changed'}, payload JSONB, created_at TIMESTAMPTZ default now())`; index `(conversation_id, created_at)`.
+- SPs: `sp_sse_log_event(p_conversation,p_root,p_type,p_payload)`, `sp_sse_replay(p_conversation,p_since TIMESTAMPTZ)` return rows ordered by `created_at`.
+- **Server**: When emitting any ephemeral event, also call `sp_sse_log_event`. On SSE connect: accept `Last-Event-ID` and `?since`; replay message chunks and event log rows since `since`, interleaving by ascending `created_at`. Background pruning deletes rows older than `sse.replay_retention_seconds`.
+- **Metrics**: `rustygpt_sse_replay_events_total{type}`, `rustygpt_sse_replay_duration_ms` histogram.
+
+### Unit Test Requirements
+- sse_log_event_type_whitelist_enforced.
+- sse_replay_returns_strict_time_order.
+
+### Server Integration Tests
+- disconnect_emit_events_reconnect_receives_backfill_and_no_duplicates.
+- interleaving_with_message_chunks_preserves_causality.
+
+### Engineering Notes
+- Time‑ordered interleaving avoids visual glitches and semantic reordering on clients.
+
+---
+
+## Phase F — Deterministic Unread Semantics (Watermarks & Events)
+
+### Purpose
+Accurate per‑user unread counts per thread with live updates and correct replay after reconnects.
+
+### Completion Criteria
+- Unread badges are correct in multi‑user interleaved scenarios and across reconnects.
+- Mark‑read operations are idempotent and strictly monotonic (never regress).
+
+### Implementation Details (Authoritative)
+- **DB**: Table `message_read_watermarks(conversation_id,user_id,root_message_id,last_read_path,last_read_at)` UNIQUE `(conversation_id,user_id,root_message_id)`.
+- SPs: `sp_mark_thread_read(p_conv,p_root,p_user,p_path)` (advance to `p_path` or latest in subtree); `sp_get_unread_summary(p_conv,p_user)` returns `(root_id, unread)` counting `messages.path > last_read_path`.
+- **Server**: `POST /api/threads/:root_id/read` `{path}` → mark; returns `{root_id, unread}`; emit `unread.update` on post and on mark‑read; persist via `sse_event_log`.
+- **Clients**: Web marks read on thread focus using last rendered path; CLI exposes `chat unread`/`chat read`.
+
+### Unit Test Requirements
+- watermark_never_moves_backward.
+- unread_counts_correct_in_branching_trees (policy may exclude system/tool/deleted).
+
+### DB Integration Tests
+- interleaved_writers_maintain_correct_counts_across_threads.
+
+### Server Integration Tests
+- mark_read_updates_counts_and_emits_unread_update_event.
+
+### Engineering Notes
+- Path comparison avoids clock skew; LTREE preferred; TEXT fallback must zero‑pad segments to preserve lexical DFS order.
+
+---
+
+## Phase G — Reliable Presence & Typing with TTLs
+
+### Purpose
+Presence (online/away/offline) and typing indicators with deterministic expiries; robust against disconnects; replay supported.
+
+### Completion Criteria
+- Presence transitions online→away→offline per heartbeat rules; typing expires at `expires_at` unless refreshed.
+- Replays after reconnect restore the correct collaboration state.
+
+### Implementation Details (Authoritative)
+- **DB**: `presence(user_id PK, last_seen_at, status ENUM('online','away','offline'))`, `typing_states(conversation_id,root_message_id,user_id,started_at,expires_at)` with PK `(conversation_id,root_message_id,user_id)`.
+- SPs: `sp_presence_heartbeat(p_user,p_status)`; `sp_set_typing(p_conv,p_root,p_user,p_secs)` with server‑side cap.
+- **Server**: Routes: `POST /api/presence/heartbeat {status}`; `POST /api/typing {conversation_id,root_id,seconds}`. Emit `presence.update` and `typing.update`; persist via `sse_event_log`. On SSE disconnect: emit `away` after grace; `offline` after prolonged silence without heartbeat.
+- **Clients**: Web sends heartbeat every 30s; throttles typing updates; clears local typing indicator at `expires_at` without refresh.
+
+### Unit Test Requirements
+- typing_seconds_capped_at_config_max.
+- presence_heartbeat_upsert_and_status_transitions.
+
+### Server Integration Tests
+- no_heartbeat_transitions_to_away_then_offline.
+- typing_expires_without_refresh_and_replays_correctly.
+
+### Engineering Notes
+- Debounce disconnects to `away` first to avoid brief network jitter flapping to `offline`.
+
+---
+
+## Phase H — Dynamic Rate‑Limit Profiles & Live Assignment
+
+### Purpose
+Editable GCRA profiles and route assignments applied immediately without restart.
+
+### Completion Criteria
+- Admins can create/update/delete profiles and assign them to (method,path_template).
+- Middleware hot‑reloads assignments on DB NOTIFY; 429 responses carry required headers.
+
+### Implementation Details (Authoritative)
+- **DB/SPs**: `sp_limits_list_profiles`, `sp_limits_create_profile(p_name,p_algo,p_params)`, `sp_limits_update_profile(p_id,p_params)`, `sp_limits_delete_profile(p_id)` (fail if assigned), `sp_limits_assign_route(p_profile_id,p_method,p_path_template)`, `sp_limits_list_assignments`, `sp_limits_delete_assignment(p_assignment_id)`; all write SPs `NOTIFY limits_changed`.
+- **Server**: Admin routes (Owner/Admin) for CRUD and assignment; middleware `LISTEN limits_changed` and atomically swaps in‑memory map on notification.
+- **Headers & Metrics**: On 429 set `Retry‑After`, `X‑RateLimit‑Limit`, `X‑RateLimit‑Remaining`; export `http_rate_limit_requests_total{route,decision}`, `rustygpt_limits_profiles{count}`, `rustygpt_limits_assignments{count}`.
+
+### Unit Test Requirements
+- delete_assigned_profile_fails_with_domain_error.
+- assignments_roundtrip_create_list_delete.
+- runtime_update_changes_behavior_immediately.
+
+### Server Integration Tests
+- 429_headers_present_and_values_consistent_with_profile.
+- route_template_matching_applies_correct_profile.
+
+### Engineering Notes
+- DB‑driven controls let operations tune fairness without rebuilds or restarts.
+
+---
+
+## Phase I — Cancellable & Deadline‑Bound Streaming
+
+### Purpose
+Reliable cancellations and per‑request deadlines that end streams predictably with explicit terminal events and cleanup.
+
+### Completion Criteria
+- `POST /api/messages/:id/cancel` is idempotent; in‑flight generations terminate with `message.done {finish_reason:'cancelled'}` and no subsequent deltas.
+- Deadline expiry terminates the stream with `finish_reason:'timeout'` and a structured `error` event; resources are released.
+
+### Implementation Details (Authoritative)
+- Route `POST /api/messages/:id/cancel` MAY be called repeatedly; server MUST handle duplicate cancels gracefully.
+- On timeout: stop provider, emit terminal then error event (order is **terminal then error**), persist as applicable.
+- Metrics: `rustygpt_stream_cancels_total`, `rustygpt_stream_timeouts_total`, `rustygpt_stream_cancel_latency_ms` histogram.
+
+### Unit Test Requirements
+- cancel_idempotent_multiple_calls_same_terminal.
+- timeout_emits_terminal_then_error_and_releases_handles.
+
+### Server Integration Tests
+- cancel_mid_stream_finishes_under_configured_bound_without_resource_leak.
+
+### Engineering Notes
+- Terminal‑then‑error ordering preserves client state machine while still conveying failure context.
+
+---
+
+## Phase J — Client Parity & Seamless SSE Resume
+
+### Purpose
+Web and CLI behave identically for auth, refresh, SSE reconnect/resume, unread, presence/typing, and message streaming.
+
+### Completion Criteria
+- Web and CLI reconnect with composite `Last-Event-ID` and receive replay without duplication.
+- Unread and presence states remain correct across reconnects; single refresh retry on 401.
+
+### Implementation Details (Authoritative)
+- **Resume Contract**: `Last-Event-ID = <root_id>:<message_id>:<idx>:<unix_ts_ms>`; on reconnect, replay `message_chunks` from `idx+1` and `sse_event_log` since `unix_ts_ms`, both in chronological order.
+- **Web**: Single automatic refresh retry on 401; EventSource reconnect attaches `Last-Event-ID`; UI mutates only via deltas/replay (no ad‑hoc rebuilding).
+- **CLI**: Mirrors Web logic; `follow` mode prints deltas and events in strict order; includes `Last-Event-ID` on reconnect.
+
+### Unit Test Requirements
+- last_event_id_parse_validate_and_reject_malformed.
+- duplicate_prevention_on_replay (idempotency via (message_id,idx)).
+
+### Web E2E Tests
+- two_users_conversation_reconnect_mid_stream_no_duplicate_bubbles.
+- unread_and_presence_correct_after_reconnect_with_backfill.
+
+### CLI Integration Tests
+- cli_follow_reconnects_and_orders_events_identically_to_web.
+
+### Engineering Notes
+- Composite ID enables precise resume point and aligns event replay with chunk timestamps.
+
+---
+
+## Phase K — Operational Observability & Runbooks
+
+### Purpose
+Dashboards and documentation that reflect real‑time health and provide clear operator guidance.
+
+### Completion Criteria
+- Grafana dashboards expose auth/session health, streaming performance, replay rates, and rate‑limit behavior.
+- Documentation covers auth, limits, SSE events, and OpenAI API compatibility; all routes and config keys are referenced.
+
+### Implementation Details (Authoritative)
+- **Dashboards**: Auth (logins by result; rotations by reason; active sessions by role). Streaming (active streams, tokens/s, latency p95/99, cancels/timeouts, replay counts/durations by type). Limits (429s by route; profile/assignment counts).
+- **Docs**:
+- • `docs/operations/auth.md` — cookie attributes, CSRF, rotation rules, lifetimes, suspicious checks.
+- • `docs/operations/rate_limits.md` — profile CRUD, assignment, headers, runtime reload behavior.
+- • `docs/clients/sse_events.md` — event schemas, `Last-Event-ID` grammar, replay rules, error events.
+- • `docs/api/openai.md` — accepted/ignored fields; metadata threading extension; error mapping; streaming/non‑streaming examples.
+
+### Ops Smoke Tests
+- metrics_nonzero_under_synthetic_load.
+- dashboards_render_expected_series.
+- docs_link_check_and_route_key_presence_verification.
+
+### Engineering Notes
+- Observe first; change second. Dashboards anchor operational discipline.
+
+---
+
+## Appendix A — Data Models, Constraints, and Validation Rules (Authoritative)
+### A.users
+- **id**: `UUID` — PRIMARY KEY
+- **email**: `CITEXT` — UNIQUE; RFC5322; lowercased; verified
+- **password_hash**: `BYTEA` — Argon2id; per‑user salt
+- **display_name**: `TEXT` — 1..128 chars
+- **disabled_at**: `TIMESTAMPTZ` — nullable
+- **created_at**: `TIMESTAMPTZ` — default now()
+
+### A.conversations
+- **id**: `UUID` — PRIMARY KEY
+- **title**: `TEXT` — 1..256 chars; trim whitespace; collapse internal consecutive spaces
+- **is_group**: `BOOL` — default true
+- **created_by**: `UUID` — FK -> users.id
+- **created_at**: `TIMESTAMPTZ` — default now()
+- **archived_at**: `TIMESTAMPTZ` — nullable; write‑once
+
+### A.conversation_participants
+- **conversation_id**: `UUID` — FK -> conversations.id ON DELETE CASCADE
+- **user_id**: `UUID` — FK -> users.id ON DELETE CASCADE
+- **role**: `TEXT` — ENUM{'owner','admin','member','viewer'}
+- **joined_at**: `TIMESTAMPTZ` — default now()
+- **left_at**: `TIMESTAMPTZ` — nullable
+- **UNIQUE**: `(conversation_id,user_id)` — WHERE left_at IS NULL
+
+### A.messages
+- **id**: `UUID` — PRIMARY KEY
+- **conversation_id**: `UUID` — FK -> conversations.id ON DELETE CASCADE
+- **parent_message_id**: `UUID` — FK -> messages.id; NULL for roots
+- **root_message_id**: `UUID` — FK -> messages.id; equals id for roots
+- **author_user_id**: `UUID` — FK -> users.id; NULL for assistant/system/tool
+- **role**: `TEXT` — ENUM{'user','assistant','system','tool'}
+- **content**: `TEXT` — final content non‑empty unless role='tool'
+- **path**: `LTREE|TEXT` — for TEXT fallback: zero‑pad 8‑char hex segments
+- **depth**: `INT` — = nlevel(path) if LTREE; else computed on write
+- **created_at**: `TIMESTAMPTZ` — default now()
+- **deleted_at**: `TIMESTAMPTZ` — nullable
+- **edited_at**: `TIMESTAMPTZ` — nullable
+
+### A.message_chunks
+- **id**: `UUID` — PRIMARY KEY
+- **message_id**: `UUID` — FK -> messages.id ON DELETE CASCADE
+- **idx**: `INT` — >=0; UNIQUE with (message_id)
+- **content**: `TEXT` — may be empty (control frames)
+- **created_at**: `TIMESTAMPTZ` — default now()
+
+### A.presence
+- **user_id**: `UUID` — PRIMARY KEY
+- **last_seen_at**: `TIMESTAMPTZ` — non‑null
+- **status**: `TEXT` — ENUM{'online','away','offline'}
+
+### A.typing_states
+- **conversation_id**: `UUID` — FK -> conversations.id
+- **root_message_id**: `UUID` — FK -> messages.id
+- **user_id**: `UUID` — FK -> users.id
+- **started_at**: `TIMESTAMPTZ` — default now()
+- **expires_at**: `TIMESTAMPTZ` — non‑null; > now()
+- **PRIMARY KEY**: `(conversation_id,root_message_id,user_id)` — 
+
+### A.message_read_watermarks
+- **conversation_id**: `UUID` — FK -> conversations.id
+- **user_id**: `UUID` — FK -> users.id
+- **root_message_id**: `UUID` — FK -> messages.id
+- **last_read_path**: `LTREE|TEXT` — non‑null
+- **last_read_at**: `TIMESTAMPTZ` — default now()
+- **UNIQUE**: `(conversation_id,user_id,root_message_id)` — 
+
+### A.sse_event_log
+- **id**: `BIGSERIAL` — PRIMARY KEY
+- **conversation_id**: `UUID` — FK -> conversations.id
+- **root_message_id**: `UUID` — FK -> messages.id; nullable
+- **event_type**: `TEXT` — ENUM{'presence.update','typing.update','unread.update','membership.changed'}
+- **payload**: `JSONB` — validated against schemas in Appendix C
+- **created_at**: `TIMESTAMPTZ` — default now()
+- **INDEX**: `(conversation_id, created_at)` — ASC
+
+### A.api_keys
+- **id**: `UUID` — PRIMARY KEY
+- **user_id**: `UUID` — FK -> users.id
+- **name**: `TEXT` — <=128 chars
+- **key_hash**: `BYTEA` — SHA‑256; compare constant‑time
+- **scopes**: `TEXT[]` — subset {'v1.read','v1.write','admin.limits'}
+- **created_at**: `TIMESTAMPTZ` — default now()
+- **revoked_at**: `TIMESTAMPTZ` — nullable
+- **last_used_at**: `TIMESTAMPTZ` — nullable
+
+## Appendix B — Stored Procedure Signatures & Contracts
+### sp_post_root_message
+#### Parameters (All MUST validate)
+- p_conv:UUID
+- p_author:UUID
+- p_role:TEXT in {'user','assistant','system','tool'}
+- p_content:TEXT
+#### Effects
+- Root message created; path=id; root_message_id=id; returns message_id; emits thread.new+thread.activity; rate‑limit msg.create
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.RATE_LIMITED
+- RGP.VALIDATION
+- RGP.NOT_FOUND
+
+### sp_reply_message
+#### Parameters (All MUST validate)
+- p_parent:UUID
+- p_author:UUID
+- p_role:TEXT
+- p_content:TEXT
+#### Effects
+- Reply created; inherits conv+root; path=parent.path+'.'+new_id; returns message_id; emits thread.activity
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.RATE_LIMITED
+- RGP.VALIDATION
+- RGP.NOT_FOUND
+
+### sp_get_thread_subtree
+#### Parameters (All MUST validate)
+- p_root:UUID
+- p_cursor_path:TEXT|NULL
+- p_limit:INT>0
+#### Effects
+- DFS order by path asc; returns slice; stable pagination
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.VALIDATION
+- RGP.NOT_FOUND
+
+### sp_list_threads
+#### Parameters (All MUST validate)
+- p_conv:UUID
+- p_after:TIMESTAMPTZ|NULL
+- p_limit:INT>0
+#### Effects
+- Returns (root_id,root_excerpt,root_author,created_at,last_activity_at,message_count,participant_count)
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.VALIDATION
+- RGP.NOT_FOUND
+
+### sp_mark_thread_read
+#### Parameters (All MUST validate)
+- p_conv:UUID
+- p_root:UUID
+- p_user:UUID
+- p_path:TEXT|NULL
+#### Effects
+- Watermark advanced; strictly monotonic
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.VALIDATION
+- RGP.NOT_FOUND
+
+### sp_get_unread_summary
+#### Parameters (All MUST validate)
+- p_conv:UUID
+- p_user:UUID
+#### Effects
+- Per‑root unread counts
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.NOT_FOUND
+
+### sp_presence_heartbeat
+#### Parameters (All MUST validate)
+- p_user:UUID
+- p_status:TEXT in {'online','away','offline'}
+#### Effects
+- Presence upsert with last_seen_at=now()
+#### Errors
+- RGP.VALIDATION
+
+### sp_set_typing
+#### Parameters (All MUST validate)
+- p_conv:UUID
+- p_root:UUID
+- p_user:UUID
+- p_secs:INT [1..max]
+#### Effects
+- Typing upsert; expires_at=now()+cap(p_secs)
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.VALIDATION
+
+### sp_sse_log_event
+#### Parameters (All MUST validate)
+- p_conversation:UUID
+- p_root:UUID|NULL
+- p_type:TEXT (whitelist)
+- p_payload:JSONB
+#### Effects
+- Insert into sse_event_log
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.VALIDATION
+
+### sp_sse_replay
+#### Parameters (All MUST validate)
+- p_conversation:UUID
+- p_since:TIMESTAMPTZ
+#### Effects
+- Return rows created_at>=p_since ordered asc
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.VALIDATION
+
+### sp_auth_login
+#### Parameters (All MUST validate)
+- p_email:CITEXT
+- p_password:TEXT
+- p_client_meta:JSONB
+#### Effects
+- Verify Argon2id; create session with idle+absolute; returns session fields
+#### Errors
+- RGP.AUTH.INVALID_CREDENTIALS
+- RGP.AUTH.DISABLED
+
+### sp_auth_refresh
+#### Parameters (All MUST validate)
+- p_session_id:UUID
+#### Effects
+- Rotate within idle; deny beyond absolute
+#### Errors
+- RGP.AUTH.EXPIRED
+
+### sp_auth_logout
+#### Parameters (All MUST validate)
+- p_session_id:UUID
+#### Effects
+- Invalidate session; idempotent
+#### Errors
+- None
+
+### sp_api_key_create
+#### Parameters (All MUST validate)
+- p_user:UUID
+- p_name:TEXT
+- p_scopes:TEXT[]
+#### Effects
+- Create key; return plaintext once; store hash only
+#### Errors
+- RGP.RBAC.FORBIDDEN
+- RGP.VALIDATION
+
+### sp_limits_create_profile
+#### Parameters (All MUST validate)
+- p_name:TEXT
+- p_algo:TEXT in {'GCRA'}
+- p_params:JSONB requires {'burst','tau_ms'}
+#### Effects
+- Create profile; NOTIFY limits_changed
+#### Errors
+- RGP.VALIDATION
+
+## Appendix C — HTTP & SSE Contracts
+### C.1 Auth Endpoints
+- `POST /api/auth/login` request: `{email:string, password:string}`; response: `{user, session, csrf_token}`; sets cookie `sid`.
+- `POST /api/auth/logout` invalidates session; clears cookie.
+- `POST /api/auth/refresh` rotates session; returns new session + csrf_token; header `X-Session-Rotated: 1`.
+
+### C.2 Conversations, Threads, Messages
+- `POST /api/threads/:conv_id/root` body `{content, role?}` → `201 {message_id}`.
+- `POST /api/messages/:parent_id/reply` body `{content, role?}` → `201 {message_id, root_id}`.
+- `GET /api/threads/:root_id/tree?cursor_path&limit` → DFS slice.
+- `GET /api/messages/:id/chunks?from&limit` → chunk range for replay.
+
+### C.3 SSE Events
+#### message.delta
+```json
+{
+  "id": "string",
+  "object": "chat.completion.chunk",
+  "root_id": "uuid",
+  "message_id": "uuid",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {
+        "role?": "assistant",
+        "content?": "string"
+      },
+      "finish_reason": null
+    }
+  ]
+}
+```
+
+#### message.done
+```json
+{
+  "message_id": "uuid",
+  "root_id": "uuid",
+  "finish_reason": "stop|length|cancelled|timeout|error",
+  "usage?": {
+    "prompt_tokens": "int",
+    "completion_tokens": "int",
+    "total_tokens": "int"
+  }
+}
+```
+
+#### presence.update
+```json
+{
+  "user_id": "uuid",
+  "status": "online|away|offline",
+  "last_seen_at": "RFC3339"
+}
+```
+
+#### typing.update
+```json
+{
+  "root_id": "uuid",
+  "user_id": "uuid",
+  "expires_at": "RFC3339"
+}
+```
+
+#### unread.update
+```json
+{
+  "root_id": "uuid",
+  "unread": "int>=0"
+}
+```
+
+#### membership.changed
+```json
+{
+  "user_id": "uuid",
+  "role": "owner|admin|member|viewer",
+  "action": "added|removed|role_updated"
+}
+```
+
+#### error
+```json
+{
+  "code": "string",
+  "message": "string"
+}
+```
+
+### C.4 Resume Semantics
+- `Last-Event-ID` composite: `<root_id>:<message_id>:<idx>:<unix_ts_ms>`.
+- On reconnect, server replays chunks from `idx+1` **and** all `sse_event_log` rows since `unix_ts_ms`, ordered by `created_at` across both streams.
+## Appendix D — Required Prometheus Metrics
+- rustygpt_auth_logins_total{result}
+- rustygpt_auth_session_rotations_total{reason}
+- rustygpt_auth_active_sessions{role}
+- http_rate_limit_requests_total{route,decision}
+- rustygpt_limits_profiles{count}
+- rustygpt_limits_assignments{count}
+- rustygpt_sse_replay_events_total{type}
+- rustygpt_sse_replay_duration_ms
+- rustygpt_stream_cancels_total
+- rustygpt_stream_timeouts_total
+- rustygpt_stream_cancel_latency_ms
+## Appendix E — Exhaustive Test Matrices
+### E.1 CSRF Enforcement Matrix (Cookie flows)
+- [B-CSRF-0001] Method=POST, TokenCase=valid → 200; verify no side effects.
+- [B-CSRF-0002] Method=POST, TokenCase=missing → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0003] Method=POST, TokenCase=empty → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0004] Method=POST, TokenCase=whitespace → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0005] Method=POST, TokenCase=mismatch → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0006] Method=POST, TokenCase=valid-but-old → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0007] Method=POST, TokenCase=with-trailing-space → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0008] Method=POST, TokenCase=uppercase-header → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0009] Method=POST, TokenCase=duplicate-headers → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0010] Method=POST, TokenCase=wrong-case → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0011] Method=POST, TokenCase=unicode → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0012] Method=POST, TokenCase=too-long → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0013] Method=POST, TokenCase=too-short → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0014] Method=PUT, TokenCase=valid → 200; verify no side effects.
+- [B-CSRF-0015] Method=PUT, TokenCase=missing → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0016] Method=PUT, TokenCase=empty → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0017] Method=PUT, TokenCase=whitespace → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0018] Method=PUT, TokenCase=mismatch → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0019] Method=PUT, TokenCase=valid-but-old → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0020] Method=PUT, TokenCase=with-trailing-space → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0021] Method=PUT, TokenCase=uppercase-header → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0022] Method=PUT, TokenCase=duplicate-headers → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0023] Method=PUT, TokenCase=wrong-case → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0024] Method=PUT, TokenCase=unicode → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0025] Method=PUT, TokenCase=too-long → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0026] Method=PUT, TokenCase=too-short → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0027] Method=PATCH, TokenCase=valid → 200; verify no side effects.
+- [B-CSRF-0028] Method=PATCH, TokenCase=missing → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0029] Method=PATCH, TokenCase=empty → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0030] Method=PATCH, TokenCase=whitespace → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0031] Method=PATCH, TokenCase=mismatch → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0032] Method=PATCH, TokenCase=valid-but-old → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0033] Method=PATCH, TokenCase=with-trailing-space → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0034] Method=PATCH, TokenCase=uppercase-header → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0035] Method=PATCH, TokenCase=duplicate-headers → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0036] Method=PATCH, TokenCase=wrong-case → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0037] Method=PATCH, TokenCase=unicode → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0038] Method=PATCH, TokenCase=too-long → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0039] Method=PATCH, TokenCase=too-short → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0040] Method=DELETE, TokenCase=valid → 200; verify no side effects.
+- [B-CSRF-0041] Method=DELETE, TokenCase=missing → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0042] Method=DELETE, TokenCase=empty → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0043] Method=DELETE, TokenCase=whitespace → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0044] Method=DELETE, TokenCase=mismatch → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0045] Method=DELETE, TokenCase=valid-but-old → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0046] Method=DELETE, TokenCase=with-trailing-space → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0047] Method=DELETE, TokenCase=uppercase-header → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0048] Method=DELETE, TokenCase=duplicate-headers → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0049] Method=DELETE, TokenCase=wrong-case → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0050] Method=DELETE, TokenCase=unicode → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0051] Method=DELETE, TokenCase=too-long → 403 RGP.AUTH.CSRF; verify no side effects.
+- [B-CSRF-0052] Method=DELETE, TokenCase=too-short → 403 RGP.AUTH.CSRF; verify no side effects.
+### E.2 Session Rotation & Expiry Matrix
+- [B-ROT-0001] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0002] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0003] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0004] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0005] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0006] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0007] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0008] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0009] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0010] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0011] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0012] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0013] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0014] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0015] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0016] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0017] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0018] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0019] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0020] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0021] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0022] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0023] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0024] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0025] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0026] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0027] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0028] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0029] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0030] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0031] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0032] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0033] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0034] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0035] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0036] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0037] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0038] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0039] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0040] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0041] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0042] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0043] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0044] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0045] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0046] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0047] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0048] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0049] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0050] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0051] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0052] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0053] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0054] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0055] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0056] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0057] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0058] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0059] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0060] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0061] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0062] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0063] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0064] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0065] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0066] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0067] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0068] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0069] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0070] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0071] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0072] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0073] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0074] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0075] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0076] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0077] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0078] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0079] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0080] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0081] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0082] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0083] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0084] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0085] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0086] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0087] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0088] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0089] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0090] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0091] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0092] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0093] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0094] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0095] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0096] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0097] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0098] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0099] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0100] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0101] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0102] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0103] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0104] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0105] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0106] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0107] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0108] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0109] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0110] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0111] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0112] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0113] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0114] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0115] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0116] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0117] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0118] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0119] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0120] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0121] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0122] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0123] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0124] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0125] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0126] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0127] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0128] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0129] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0130] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0131] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0132] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0133] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0134] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0135] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0136] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0137] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0138] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0139] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0140] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0141] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0142] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0143] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0144] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0145] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0146] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0147] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0148] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0149] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0150] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0151] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0152] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0153] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0154] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0155] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0156] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0157] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0158] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0159] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0160] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0161] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0162] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0163] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0164] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0165] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0166] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0167] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0168] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0169] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0170] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0171] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0172] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0173] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0174] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0175] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0176] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0177] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0178] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0179] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0180] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0181] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0182] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0183] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0184] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0185] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0186] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0187] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0188] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0189] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0190] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0191] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0192] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0193] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0194] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0195] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0196] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0197] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0198] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0199] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0200] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0201] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0202] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0203] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0204] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0205] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0206] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0207] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0208] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0209] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0210] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0211] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0212] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0213] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0214] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0215] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0216] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0217] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0218] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0219] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0220] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0221] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0222] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0223] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0224] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0225] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0226] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0227] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0228] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0229] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0230] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0231] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0232] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0233] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0234] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0235] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0236] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0237] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0238] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0239] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0240] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0241] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0242] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0243] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0244] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0245] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0246] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0247] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0248] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0249] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0250] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0251] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0252] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0253] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0254] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0255] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0256] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0257] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0258] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0259] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0260] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0261] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0262] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0263] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0264] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0265] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0266] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0267] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0268] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0269] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0270] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0271] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0272] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0273] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0274] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0275] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0276] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0277] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0278] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0279] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0280] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0281] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0282] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0283] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0284] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0285] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0286] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0287] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0288] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0289] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0290] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0291] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0292] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0293] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0294] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0295] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0296] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0297] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0298] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0299] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0300] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0301] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0302] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0303] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0304] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0305] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0306] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0307] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0308] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0309] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0310] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0311] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0312] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0313] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0314] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0315] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0316] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0317] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0318] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0319] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0320] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0321] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0322] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0323] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0324] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0325] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0326] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0327] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0328] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0329] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0330] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0331] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0332] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0333] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0334] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0335] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0336] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0337] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0338] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0339] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0340] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0341] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0342] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0343] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0344] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0345] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0346] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0347] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0348] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0349] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0350] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0351] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0352] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0353] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0354] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0355] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0356] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0357] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0358] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0359] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0360] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0361] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0362] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0363] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0364] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0365] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0366] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0367] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0368] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0369] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0370] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0371] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0372] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0373] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0374] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0375] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0376] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0377] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0378] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0379] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0380] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0381] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0382] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0383] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0384] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0385] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0386] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0387] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0388] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0389] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0390] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0391] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0392] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0393] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0394] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0395] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0396] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0397] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0398] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0399] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0400] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0401] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0402] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0403] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0404] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0405] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0406] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0407] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0408] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0409] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0410] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0411] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0412] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0413] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0414] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0415] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0416] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0417] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0418] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0419] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0420] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0421] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0422] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0423] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0424] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0425] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0426] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0427] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0428] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0429] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0430] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0431] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0432] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0433] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0434] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0435] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0436] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0437] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0438] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0439] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0440] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0441] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0442] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0443] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0444] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0445] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0446] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0447] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0448] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0449] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0450] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0451] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0452] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0453] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0454] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0455] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0456] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0457] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0458] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0459] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0460] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0461] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0462] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0463] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0464] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0465] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0466] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0467] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0468] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0469] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0470] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0471] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0472] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0473] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0474] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0475] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0476] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0477] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0478] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0479] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0480] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0481] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0482] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0483] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0484] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0485] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0486] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0487] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0488] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0489] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0490] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0491] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0492] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0493] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0494] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0495] Scenario=idle_within_window — Expect rotate+extend
+- [B-ROT-0496] Scenario=idle_just_after_window — Expect 401→refresh→retry
+- [B-ROT-0497] Scenario=absolute_expired — Expect 401 deny refresh
+- [B-ROT-0498] Scenario=privilege_change — Expect forced rotation next request
+- [B-ROT-0499] Scenario=suspicious_ua_change — Expect 401 refresh if enabled
+- [B-ROT-0500] Scenario=idle_within_window — Expect rotate+extend
+### E.3 Membership & Invites Matrix
+- [C-INV-0001] valid_token_second_time → reject domain error
+- [C-INV-0002] expired_token → reject with error
+- [C-INV-0003] revoked_token → reject with error
+- [C-INV-0004] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0005] remove_last_owner → reject
+- [C-INV-0006] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0007] valid_token_second_time → reject domain error
+- [C-INV-0008] expired_token → reject with error
+- [C-INV-0009] revoked_token → reject with error
+- [C-INV-0010] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0011] remove_last_owner → reject
+- [C-INV-0012] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0013] valid_token_second_time → reject domain error
+- [C-INV-0014] expired_token → reject with error
+- [C-INV-0015] revoked_token → reject with error
+- [C-INV-0016] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0017] remove_last_owner → reject
+- [C-INV-0018] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0019] valid_token_second_time → reject domain error
+- [C-INV-0020] expired_token → reject with error
+- [C-INV-0021] revoked_token → reject with error
+- [C-INV-0022] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0023] remove_last_owner → reject
+- [C-INV-0024] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0025] valid_token_second_time → reject domain error
+- [C-INV-0026] expired_token → reject with error
+- [C-INV-0027] revoked_token → reject with error
+- [C-INV-0028] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0029] remove_last_owner → reject
+- [C-INV-0030] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0031] valid_token_second_time → reject domain error
+- [C-INV-0032] expired_token → reject with error
+- [C-INV-0033] revoked_token → reject with error
+- [C-INV-0034] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0035] remove_last_owner → reject
+- [C-INV-0036] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0037] valid_token_second_time → reject domain error
+- [C-INV-0038] expired_token → reject with error
+- [C-INV-0039] revoked_token → reject with error
+- [C-INV-0040] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0041] remove_last_owner → reject
+- [C-INV-0042] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0043] valid_token_second_time → reject domain error
+- [C-INV-0044] expired_token → reject with error
+- [C-INV-0045] revoked_token → reject with error
+- [C-INV-0046] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0047] remove_last_owner → reject
+- [C-INV-0048] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0049] valid_token_second_time → reject domain error
+- [C-INV-0050] expired_token → reject with error
+- [C-INV-0051] revoked_token → reject with error
+- [C-INV-0052] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0053] remove_last_owner → reject
+- [C-INV-0054] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0055] valid_token_second_time → reject domain error
+- [C-INV-0056] expired_token → reject with error
+- [C-INV-0057] revoked_token → reject with error
+- [C-INV-0058] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0059] remove_last_owner → reject
+- [C-INV-0060] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0061] valid_token_second_time → reject domain error
+- [C-INV-0062] expired_token → reject with error
+- [C-INV-0063] revoked_token → reject with error
+- [C-INV-0064] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0065] remove_last_owner → reject
+- [C-INV-0066] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0067] valid_token_second_time → reject domain error
+- [C-INV-0068] expired_token → reject with error
+- [C-INV-0069] revoked_token → reject with error
+- [C-INV-0070] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0071] remove_last_owner → reject
+- [C-INV-0072] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0073] valid_token_second_time → reject domain error
+- [C-INV-0074] expired_token → reject with error
+- [C-INV-0075] revoked_token → reject with error
+- [C-INV-0076] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0077] remove_last_owner → reject
+- [C-INV-0078] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0079] valid_token_second_time → reject domain error
+- [C-INV-0080] expired_token → reject with error
+- [C-INV-0081] revoked_token → reject with error
+- [C-INV-0082] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0083] remove_last_owner → reject
+- [C-INV-0084] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0085] valid_token_second_time → reject domain error
+- [C-INV-0086] expired_token → reject with error
+- [C-INV-0087] revoked_token → reject with error
+- [C-INV-0088] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0089] remove_last_owner → reject
+- [C-INV-0090] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0091] valid_token_second_time → reject domain error
+- [C-INV-0092] expired_token → reject with error
+- [C-INV-0093] revoked_token → reject with error
+- [C-INV-0094] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0095] remove_last_owner → reject
+- [C-INV-0096] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0097] valid_token_second_time → reject domain error
+- [C-INV-0098] expired_token → reject with error
+- [C-INV-0099] revoked_token → reject with error
+- [C-INV-0100] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0101] remove_last_owner → reject
+- [C-INV-0102] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0103] valid_token_second_time → reject domain error
+- [C-INV-0104] expired_token → reject with error
+- [C-INV-0105] revoked_token → reject with error
+- [C-INV-0106] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0107] remove_last_owner → reject
+- [C-INV-0108] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0109] valid_token_second_time → reject domain error
+- [C-INV-0110] expired_token → reject with error
+- [C-INV-0111] revoked_token → reject with error
+- [C-INV-0112] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0113] remove_last_owner → reject
+- [C-INV-0114] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0115] valid_token_second_time → reject domain error
+- [C-INV-0116] expired_token → reject with error
+- [C-INV-0117] revoked_token → reject with error
+- [C-INV-0118] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0119] remove_last_owner → reject
+- [C-INV-0120] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0121] valid_token_second_time → reject domain error
+- [C-INV-0122] expired_token → reject with error
+- [C-INV-0123] revoked_token → reject with error
+- [C-INV-0124] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0125] remove_last_owner → reject
+- [C-INV-0126] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0127] valid_token_second_time → reject domain error
+- [C-INV-0128] expired_token → reject with error
+- [C-INV-0129] revoked_token → reject with error
+- [C-INV-0130] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0131] remove_last_owner → reject
+- [C-INV-0132] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0133] valid_token_second_time → reject domain error
+- [C-INV-0134] expired_token → reject with error
+- [C-INV-0135] revoked_token → reject with error
+- [C-INV-0136] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0137] remove_last_owner → reject
+- [C-INV-0138] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0139] valid_token_second_time → reject domain error
+- [C-INV-0140] expired_token → reject with error
+- [C-INV-0141] revoked_token → reject with error
+- [C-INV-0142] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0143] remove_last_owner → reject
+- [C-INV-0144] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0145] valid_token_second_time → reject domain error
+- [C-INV-0146] expired_token → reject with error
+- [C-INV-0147] revoked_token → reject with error
+- [C-INV-0148] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0149] remove_last_owner → reject
+- [C-INV-0150] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0151] valid_token_second_time → reject domain error
+- [C-INV-0152] expired_token → reject with error
+- [C-INV-0153] revoked_token → reject with error
+- [C-INV-0154] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0155] remove_last_owner → reject
+- [C-INV-0156] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0157] valid_token_second_time → reject domain error
+- [C-INV-0158] expired_token → reject with error
+- [C-INV-0159] revoked_token → reject with error
+- [C-INV-0160] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0161] remove_last_owner → reject
+- [C-INV-0162] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0163] valid_token_second_time → reject domain error
+- [C-INV-0164] expired_token → reject with error
+- [C-INV-0165] revoked_token → reject with error
+- [C-INV-0166] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0167] remove_last_owner → reject
+- [C-INV-0168] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0169] valid_token_second_time → reject domain error
+- [C-INV-0170] expired_token → reject with error
+- [C-INV-0171] revoked_token → reject with error
+- [C-INV-0172] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0173] remove_last_owner → reject
+- [C-INV-0174] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0175] valid_token_second_time → reject domain error
+- [C-INV-0176] expired_token → reject with error
+- [C-INV-0177] revoked_token → reject with error
+- [C-INV-0178] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0179] remove_last_owner → reject
+- [C-INV-0180] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0181] valid_token_second_time → reject domain error
+- [C-INV-0182] expired_token → reject with error
+- [C-INV-0183] revoked_token → reject with error
+- [C-INV-0184] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0185] remove_last_owner → reject
+- [C-INV-0186] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0187] valid_token_second_time → reject domain error
+- [C-INV-0188] expired_token → reject with error
+- [C-INV-0189] revoked_token → reject with error
+- [C-INV-0190] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0191] remove_last_owner → reject
+- [C-INV-0192] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0193] valid_token_second_time → reject domain error
+- [C-INV-0194] expired_token → reject with error
+- [C-INV-0195] revoked_token → reject with error
+- [C-INV-0196] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0197] remove_last_owner → reject
+- [C-INV-0198] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0199] valid_token_second_time → reject domain error
+- [C-INV-0200] expired_token → reject with error
+- [C-INV-0201] revoked_token → reject with error
+- [C-INV-0202] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0203] remove_last_owner → reject
+- [C-INV-0204] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0205] valid_token_second_time → reject domain error
+- [C-INV-0206] expired_token → reject with error
+- [C-INV-0207] revoked_token → reject with error
+- [C-INV-0208] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0209] remove_last_owner → reject
+- [C-INV-0210] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0211] valid_token_second_time → reject domain error
+- [C-INV-0212] expired_token → reject with error
+- [C-INV-0213] revoked_token → reject with error
+- [C-INV-0214] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0215] remove_last_owner → reject
+- [C-INV-0216] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0217] valid_token_second_time → reject domain error
+- [C-INV-0218] expired_token → reject with error
+- [C-INV-0219] revoked_token → reject with error
+- [C-INV-0220] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0221] remove_last_owner → reject
+- [C-INV-0222] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0223] valid_token_second_time → reject domain error
+- [C-INV-0224] expired_token → reject with error
+- [C-INV-0225] revoked_token → reject with error
+- [C-INV-0226] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0227] remove_last_owner → reject
+- [C-INV-0228] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0229] valid_token_second_time → reject domain error
+- [C-INV-0230] expired_token → reject with error
+- [C-INV-0231] revoked_token → reject with error
+- [C-INV-0232] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0233] remove_last_owner → reject
+- [C-INV-0234] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0235] valid_token_second_time → reject domain error
+- [C-INV-0236] expired_token → reject with error
+- [C-INV-0237] revoked_token → reject with error
+- [C-INV-0238] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0239] remove_last_owner → reject
+- [C-INV-0240] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0241] valid_token_second_time → reject domain error
+- [C-INV-0242] expired_token → reject with error
+- [C-INV-0243] revoked_token → reject with error
+- [C-INV-0244] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0245] remove_last_owner → reject
+- [C-INV-0246] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0247] valid_token_second_time → reject domain error
+- [C-INV-0248] expired_token → reject with error
+- [C-INV-0249] revoked_token → reject with error
+- [C-INV-0250] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0251] remove_last_owner → reject
+- [C-INV-0252] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0253] valid_token_second_time → reject domain error
+- [C-INV-0254] expired_token → reject with error
+- [C-INV-0255] revoked_token → reject with error
+- [C-INV-0256] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0257] remove_last_owner → reject
+- [C-INV-0258] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0259] valid_token_second_time → reject domain error
+- [C-INV-0260] expired_token → reject with error
+- [C-INV-0261] revoked_token → reject with error
+- [C-INV-0262] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0263] remove_last_owner → reject
+- [C-INV-0264] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0265] valid_token_second_time → reject domain error
+- [C-INV-0266] expired_token → reject with error
+- [C-INV-0267] revoked_token → reject with error
+- [C-INV-0268] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0269] remove_last_owner → reject
+- [C-INV-0270] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0271] valid_token_second_time → reject domain error
+- [C-INV-0272] expired_token → reject with error
+- [C-INV-0273] revoked_token → reject with error
+- [C-INV-0274] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0275] remove_last_owner → reject
+- [C-INV-0276] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0277] valid_token_second_time → reject domain error
+- [C-INV-0278] expired_token → reject with error
+- [C-INV-0279] revoked_token → reject with error
+- [C-INV-0280] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0281] remove_last_owner → reject
+- [C-INV-0282] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0283] valid_token_second_time → reject domain error
+- [C-INV-0284] expired_token → reject with error
+- [C-INV-0285] revoked_token → reject with error
+- [C-INV-0286] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0287] remove_last_owner → reject
+- [C-INV-0288] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0289] valid_token_second_time → reject domain error
+- [C-INV-0290] expired_token → reject with error
+- [C-INV-0291] revoked_token → reject with error
+- [C-INV-0292] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0293] remove_last_owner → reject
+- [C-INV-0294] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0295] valid_token_second_time → reject domain error
+- [C-INV-0296] expired_token → reject with error
+- [C-INV-0297] revoked_token → reject with error
+- [C-INV-0298] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0299] remove_last_owner → reject
+- [C-INV-0300] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0301] valid_token_second_time → reject domain error
+- [C-INV-0302] expired_token → reject with error
+- [C-INV-0303] revoked_token → reject with error
+- [C-INV-0304] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0305] remove_last_owner → reject
+- [C-INV-0306] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0307] valid_token_second_time → reject domain error
+- [C-INV-0308] expired_token → reject with error
+- [C-INV-0309] revoked_token → reject with error
+- [C-INV-0310] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0311] remove_last_owner → reject
+- [C-INV-0312] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0313] valid_token_second_time → reject domain error
+- [C-INV-0314] expired_token → reject with error
+- [C-INV-0315] revoked_token → reject with error
+- [C-INV-0316] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0317] remove_last_owner → reject
+- [C-INV-0318] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0319] valid_token_second_time → reject domain error
+- [C-INV-0320] expired_token → reject with error
+- [C-INV-0321] revoked_token → reject with error
+- [C-INV-0322] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0323] remove_last_owner → reject
+- [C-INV-0324] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0325] valid_token_second_time → reject domain error
+- [C-INV-0326] expired_token → reject with error
+- [C-INV-0327] revoked_token → reject with error
+- [C-INV-0328] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0329] remove_last_owner → reject
+- [C-INV-0330] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0331] valid_token_second_time → reject domain error
+- [C-INV-0332] expired_token → reject with error
+- [C-INV-0333] revoked_token → reject with error
+- [C-INV-0334] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0335] remove_last_owner → reject
+- [C-INV-0336] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0337] valid_token_second_time → reject domain error
+- [C-INV-0338] expired_token → reject with error
+- [C-INV-0339] revoked_token → reject with error
+- [C-INV-0340] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0341] remove_last_owner → reject
+- [C-INV-0342] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0343] valid_token_second_time → reject domain error
+- [C-INV-0344] expired_token → reject with error
+- [C-INV-0345] revoked_token → reject with error
+- [C-INV-0346] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0347] remove_last_owner → reject
+- [C-INV-0348] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0349] valid_token_second_time → reject domain error
+- [C-INV-0350] expired_token → reject with error
+- [C-INV-0351] revoked_token → reject with error
+- [C-INV-0352] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0353] remove_last_owner → reject
+- [C-INV-0354] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0355] valid_token_second_time → reject domain error
+- [C-INV-0356] expired_token → reject with error
+- [C-INV-0357] revoked_token → reject with error
+- [C-INV-0358] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0359] remove_last_owner → reject
+- [C-INV-0360] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0361] valid_token_second_time → reject domain error
+- [C-INV-0362] expired_token → reject with error
+- [C-INV-0363] revoked_token → reject with error
+- [C-INV-0364] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0365] remove_last_owner → reject
+- [C-INV-0366] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0367] valid_token_second_time → reject domain error
+- [C-INV-0368] expired_token → reject with error
+- [C-INV-0369] revoked_token → reject with error
+- [C-INV-0370] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0371] remove_last_owner → reject
+- [C-INV-0372] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0373] valid_token_second_time → reject domain error
+- [C-INV-0374] expired_token → reject with error
+- [C-INV-0375] revoked_token → reject with error
+- [C-INV-0376] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0377] remove_last_owner → reject
+- [C-INV-0378] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0379] valid_token_second_time → reject domain error
+- [C-INV-0380] expired_token → reject with error
+- [C-INV-0381] revoked_token → reject with error
+- [C-INV-0382] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0383] remove_last_owner → reject
+- [C-INV-0384] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0385] valid_token_second_time → reject domain error
+- [C-INV-0386] expired_token → reject with error
+- [C-INV-0387] revoked_token → reject with error
+- [C-INV-0388] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0389] remove_last_owner → reject
+- [C-INV-0390] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0391] valid_token_second_time → reject domain error
+- [C-INV-0392] expired_token → reject with error
+- [C-INV-0393] revoked_token → reject with error
+- [C-INV-0394] duplicate_active_invite_same_email_role → reject on create
+- [C-INV-0395] remove_last_owner → reject
+- [C-INV-0396] valid_token_first_time → member + SSE membership.changed
+- [C-INV-0397] valid_token_second_time → reject domain error
+- [C-INV-0398] expired_token → reject with error
+- [C-INV-0399] revoked_token → reject with error
+- [C-INV-0400] duplicate_active_invite_same_email_role → reject on create
+### E.4 Threads DFS Ordering
+- [T-DFS-0001] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0002] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0003] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0004] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0005] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0006] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0007] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0008] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0009] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0010] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0011] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0012] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0013] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0014] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0015] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0016] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0017] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0018] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0019] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0020] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0021] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0022] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0023] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0024] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0025] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0026] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0027] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0028] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0029] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0030] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0031] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0032] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0033] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0034] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0035] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0036] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0037] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0038] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0039] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0040] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0041] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0042] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0043] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0044] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0045] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0046] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0047] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0048] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0049] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0050] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0051] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0052] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0053] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0054] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0055] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0056] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0057] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0058] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0059] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0060] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0061] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0062] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0063] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0064] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0065] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0066] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0067] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0068] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0069] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0070] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0071] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0072] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0073] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0074] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0075] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0076] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0077] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0078] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0079] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0080] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0081] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0082] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0083] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0084] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0085] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0086] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0087] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0088] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0089] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0090] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0091] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0092] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0093] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0094] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0095] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0096] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0097] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0098] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0099] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0100] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0101] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0102] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0103] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0104] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0105] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0106] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0107] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0108] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0109] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0110] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0111] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0112] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0113] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0114] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0115] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0116] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0117] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0118] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0119] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0120] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0121] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0122] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0123] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0124] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0125] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0126] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0127] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0128] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0129] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0130] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0131] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0132] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0133] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0134] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0135] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0136] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0137] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0138] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0139] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0140] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0141] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0142] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0143] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0144] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0145] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0146] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0147] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0148] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0149] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0150] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0151] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0152] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0153] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0154] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0155] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0156] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0157] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0158] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0159] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0160] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0161] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0162] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0163] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0164] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0165] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0166] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0167] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0168] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0169] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0170] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0171] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0172] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0173] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0174] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0175] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0176] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0177] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0178] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0179] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0180] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0181] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0182] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0183] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0184] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0185] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0186] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0187] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0188] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0189] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0190] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0191] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0192] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0193] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0194] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0195] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0196] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0197] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0198] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0199] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0200] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0201] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0202] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0203] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0204] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0205] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0206] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0207] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0208] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0209] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0210] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0211] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0212] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0213] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0214] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0215] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0216] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0217] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0218] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0219] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0220] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0221] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0222] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0223] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0224] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0225] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0226] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0227] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0228] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0229] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0230] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0231] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0232] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0233] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0234] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0235] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0236] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0237] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0238] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0239] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0240] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0241] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0242] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0243] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0244] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0245] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0246] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0247] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0248] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0249] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0250] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0251] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0252] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0253] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0254] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0255] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0256] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0257] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0258] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0259] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0260] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0261] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0262] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0263] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0264] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0265] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0266] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0267] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0268] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0269] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0270] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0271] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0272] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0273] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0274] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0275] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0276] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0277] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0278] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0279] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0280] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0281] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0282] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0283] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0284] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0285] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0286] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0287] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0288] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0289] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0290] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0291] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0292] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0293] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0294] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0295] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0296] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0297] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0298] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0299] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0300] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0301] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0302] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0303] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0304] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0305] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0306] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0307] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0308] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0309] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0310] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0311] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0312] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0313] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0314] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0315] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0316] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0317] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0318] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0319] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0320] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0321] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0322] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0323] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0324] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0325] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0326] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0327] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0328] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0329] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0330] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0331] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0332] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0333] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0334] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0335] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0336] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0337] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0338] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0339] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0340] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0341] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0342] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0343] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0344] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0345] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0346] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0347] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0348] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0349] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0350] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0351] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0352] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0353] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0354] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0355] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0356] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0357] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0358] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0359] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0360] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0361] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0362] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0363] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0364] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0365] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0366] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0367] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0368] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0369] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0370] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0371] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0372] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0373] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0374] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0375] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0376] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0377] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0378] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0379] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0380] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0381] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0382] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0383] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0384] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0385] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0386] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0387] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0388] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0389] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0390] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0391] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0392] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0393] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0394] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0395] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0396] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0397] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0398] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0399] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0400] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0401] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0402] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0403] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0404] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0405] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0406] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0407] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0408] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0409] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0410] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0411] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0412] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0413] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0414] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0415] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0416] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0417] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0418] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0419] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0420] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0421] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0422] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0423] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0424] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0425] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0426] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0427] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0428] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0429] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0430] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0431] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0432] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0433] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0434] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0435] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0436] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0437] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0438] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0439] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0440] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0441] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0442] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0443] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0444] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0445] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0446] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0447] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0448] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0449] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0450] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0451] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0452] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0453] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0454] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0455] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0456] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0457] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0458] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0459] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0460] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0461] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0462] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0463] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0464] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0465] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0466] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0467] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0468] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0469] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0470] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0471] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0472] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0473] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0474] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0475] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0476] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0477] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0478] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0479] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0480] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0481] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0482] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0483] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0484] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0485] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0486] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0487] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0488] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0489] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0490] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0491] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0492] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0493] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0494] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0495] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0496] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0497] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0498] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0499] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0500] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0501] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0502] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0503] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0504] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0505] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0506] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0507] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0508] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0509] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0510] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0511] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0512] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0513] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0514] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0515] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0516] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0517] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0518] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0519] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0520] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0521] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0522] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0523] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0524] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0525] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0526] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0527] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0528] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0529] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0530] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0531] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0532] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0533] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0534] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0535] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0536] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0537] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0538] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0539] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0540] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0541] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0542] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0543] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0544] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0545] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0546] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0547] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0548] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0549] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0550] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0551] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0552] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0553] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0554] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0555] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0556] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0557] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0558] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0559] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0560] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0561] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0562] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0563] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0564] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0565] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0566] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0567] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0568] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0569] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0570] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0571] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0572] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0573] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0574] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0575] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0576] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0577] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0578] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0579] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0580] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0581] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0582] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0583] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0584] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0585] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0586] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0587] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0588] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0589] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0590] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0591] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0592] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0593] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0594] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0595] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0596] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0597] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0598] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0599] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0600] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0601] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0602] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0603] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0604] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0605] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0606] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0607] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0608] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0609] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0610] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0611] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0612] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0613] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0614] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0615] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0616] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0617] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0618] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0619] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0620] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0621] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0622] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0623] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0624] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0625] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0626] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0627] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0628] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0629] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0630] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0631] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0632] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0633] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0634] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0635] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0636] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0637] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0638] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0639] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0640] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0641] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0642] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0643] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0644] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0645] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0646] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0647] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0648] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0649] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0650] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0651] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0652] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0653] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0654] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0655] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0656] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0657] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0658] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0659] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0660] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0661] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0662] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0663] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0664] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0665] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0666] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0667] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0668] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0669] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0670] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0671] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0672] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0673] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0674] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0675] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0676] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0677] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0678] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0679] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0680] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0681] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0682] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0683] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0684] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0685] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0686] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0687] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0688] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0689] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0690] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0691] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0692] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0693] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0694] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0695] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0696] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0697] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0698] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0699] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0700] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0701] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0702] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0703] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0704] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0705] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0706] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0707] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0708] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0709] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0710] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0711] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0712] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0713] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0714] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0715] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0716] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0717] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0718] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0719] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0720] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0721] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0722] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0723] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0724] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0725] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0726] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0727] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0728] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0729] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0730] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0731] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0732] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0733] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0734] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0735] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0736] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0737] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0738] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0739] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0740] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0741] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0742] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0743] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0744] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0745] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0746] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0747] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0748] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0749] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0750] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0751] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0752] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0753] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0754] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0755] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0756] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0757] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0758] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0759] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0760] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0761] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0762] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0763] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0764] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0765] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0766] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0767] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0768] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0769] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0770] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0771] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0772] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0773] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0774] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0775] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0776] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0777] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0778] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0779] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0780] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0781] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0782] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0783] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0784] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0785] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0786] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0787] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0788] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0789] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0790] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0791] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0792] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0793] Pattern=single-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0794] Pattern=double-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0795] Pattern=deep-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0796] Pattern=zigzag — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0797] Pattern=wide-branch — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0798] Pattern=fanout-10 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0799] Pattern=fanout-100 — DFS order stable; pagination stable with cursor_path.
+- [T-DFS-0800] Pattern=linear — DFS order stable; pagination stable with cursor_path.
+### E.5 OpenAI Streaming Protocol
+- [D-OPENAI-0001] Stream case 1 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0002] Stream case 2 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0003] Stream case 3 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0004] Stream case 4 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0005] Stream case 5 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0006] Stream case 6 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0007] Stream case 7 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0008] Stream case 8 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0009] Stream case 9 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0010] Stream case 10 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0011] Stream case 11 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0012] Stream case 12 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0013] Stream case 13 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0014] Stream case 14 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0015] Stream case 15 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0016] Stream case 16 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0017] Stream case 17 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0018] Stream case 18 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0019] Stream case 19 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0020] Stream case 20 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0021] Stream case 21 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0022] Stream case 22 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0023] Stream case 23 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0024] Stream case 24 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0025] Stream case 25 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0026] Stream case 26 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0027] Stream case 27 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0028] Stream case 28 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0029] Stream case 29 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0030] Stream case 30 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0031] Stream case 31 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0032] Stream case 32 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0033] Stream case 33 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0034] Stream case 34 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0035] Stream case 35 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0036] Stream case 36 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0037] Stream case 37 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0038] Stream case 38 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0039] Stream case 39 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0040] Stream case 40 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0041] Stream case 41 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0042] Stream case 42 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0043] Stream case 43 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0044] Stream case 44 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0045] Stream case 45 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0046] Stream case 46 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0047] Stream case 47 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0048] Stream case 48 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0049] Stream case 49 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0050] Stream case 50 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0051] Stream case 51 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0052] Stream case 52 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0053] Stream case 53 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0054] Stream case 54 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0055] Stream case 55 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0056] Stream case 56 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0057] Stream case 57 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0058] Stream case 58 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0059] Stream case 59 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0060] Stream case 60 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0061] Stream case 61 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0062] Stream case 62 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0063] Stream case 63 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0064] Stream case 64 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0065] Stream case 65 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0066] Stream case 66 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0067] Stream case 67 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0068] Stream case 68 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0069] Stream case 69 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0070] Stream case 70 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0071] Stream case 71 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0072] Stream case 72 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0073] Stream case 73 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0074] Stream case 74 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0075] Stream case 75 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0076] Stream case 76 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0077] Stream case 77 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0078] Stream case 78 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0079] Stream case 79 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0080] Stream case 80 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0081] Stream case 81 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0082] Stream case 82 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0083] Stream case 83 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0084] Stream case 84 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0085] Stream case 85 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0086] Stream case 86 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0087] Stream case 87 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0088] Stream case 88 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0089] Stream case 89 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0090] Stream case 90 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0091] Stream case 91 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0092] Stream case 92 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0093] Stream case 93 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0094] Stream case 94 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0095] Stream case 95 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0096] Stream case 96 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0097] Stream case 97 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0098] Stream case 98 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0099] Stream case 99 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0100] Stream case 100 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0101] Stream case 101 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0102] Stream case 102 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0103] Stream case 103 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0104] Stream case 104 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0105] Stream case 105 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0106] Stream case 106 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0107] Stream case 107 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0108] Stream case 108 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0109] Stream case 109 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0110] Stream case 110 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0111] Stream case 111 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0112] Stream case 112 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0113] Stream case 113 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0114] Stream case 114 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0115] Stream case 115 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0116] Stream case 116 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0117] Stream case 117 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0118] Stream case 118 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0119] Stream case 119 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0120] Stream case 120 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0121] Stream case 121 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0122] Stream case 122 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0123] Stream case 123 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0124] Stream case 124 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0125] Stream case 125 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0126] Stream case 126 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0127] Stream case 127 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0128] Stream case 128 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0129] Stream case 129 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0130] Stream case 130 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0131] Stream case 131 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0132] Stream case 132 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0133] Stream case 133 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0134] Stream case 134 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0135] Stream case 135 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0136] Stream case 136 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0137] Stream case 137 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0138] Stream case 138 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0139] Stream case 139 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0140] Stream case 140 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0141] Stream case 141 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0142] Stream case 142 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0143] Stream case 143 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0144] Stream case 144 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0145] Stream case 145 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0146] Stream case 146 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0147] Stream case 147 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0148] Stream case 148 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0149] Stream case 149 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0150] Stream case 150 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0151] Stream case 151 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0152] Stream case 152 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0153] Stream case 153 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0154] Stream case 154 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0155] Stream case 155 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0156] Stream case 156 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0157] Stream case 157 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0158] Stream case 158 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0159] Stream case 159 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0160] Stream case 160 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0161] Stream case 161 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0162] Stream case 162 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0163] Stream case 163 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0164] Stream case 164 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0165] Stream case 165 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0166] Stream case 166 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0167] Stream case 167 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0168] Stream case 168 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0169] Stream case 169 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0170] Stream case 170 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0171] Stream case 171 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0172] Stream case 172 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0173] Stream case 173 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0174] Stream case 174 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0175] Stream case 175 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0176] Stream case 176 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0177] Stream case 177 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0178] Stream case 178 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0179] Stream case 179 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0180] Stream case 180 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0181] Stream case 181 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0182] Stream case 182 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0183] Stream case 183 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0184] Stream case 184 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0185] Stream case 185 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0186] Stream case 186 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0187] Stream case 187 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0188] Stream case 188 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0189] Stream case 189 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0190] Stream case 190 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0191] Stream case 191 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0192] Stream case 192 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0193] Stream case 193 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0194] Stream case 194 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0195] Stream case 195 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0196] Stream case 196 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0197] Stream case 197 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0198] Stream case 198 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0199] Stream case 199 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0200] Stream case 200 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0201] Stream case 201 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0202] Stream case 202 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0203] Stream case 203 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0204] Stream case 204 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0205] Stream case 205 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0206] Stream case 206 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0207] Stream case 207 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0208] Stream case 208 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0209] Stream case 209 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0210] Stream case 210 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0211] Stream case 211 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0212] Stream case 212 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0213] Stream case 213 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0214] Stream case 214 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0215] Stream case 215 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0216] Stream case 216 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0217] Stream case 217 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0218] Stream case 218 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0219] Stream case 219 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0220] Stream case 220 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0221] Stream case 221 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0222] Stream case 222 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0223] Stream case 223 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0224] Stream case 224 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0225] Stream case 225 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0226] Stream case 226 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0227] Stream case 227 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0228] Stream case 228 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0229] Stream case 229 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0230] Stream case 230 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0231] Stream case 231 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0232] Stream case 232 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0233] Stream case 233 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0234] Stream case 234 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0235] Stream case 235 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0236] Stream case 236 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0237] Stream case 237 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0238] Stream case 238 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0239] Stream case 239 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0240] Stream case 240 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0241] Stream case 241 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0242] Stream case 242 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0243] Stream case 243 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0244] Stream case 244 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0245] Stream case 245 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0246] Stream case 246 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0247] Stream case 247 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0248] Stream case 248 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0249] Stream case 249 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0250] Stream case 250 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0251] Stream case 251 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0252] Stream case 252 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0253] Stream case 253 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0254] Stream case 254 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0255] Stream case 255 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0256] Stream case 256 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0257] Stream case 257 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0258] Stream case 258 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0259] Stream case 259 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0260] Stream case 260 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0261] Stream case 261 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0262] Stream case 262 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0263] Stream case 263 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0264] Stream case 264 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0265] Stream case 265 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0266] Stream case 266 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0267] Stream case 267 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0268] Stream case 268 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0269] Stream case 269 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0270] Stream case 270 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0271] Stream case 271 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0272] Stream case 272 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0273] Stream case 273 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0274] Stream case 274 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0275] Stream case 275 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0276] Stream case 276 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0277] Stream case 277 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0278] Stream case 278 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0279] Stream case 279 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0280] Stream case 280 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0281] Stream case 281 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0282] Stream case 282 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0283] Stream case 283 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0284] Stream case 284 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0285] Stream case 285 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0286] Stream case 286 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0287] Stream case 287 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0288] Stream case 288 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0289] Stream case 289 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0290] Stream case 290 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0291] Stream case 291 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0292] Stream case 292 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0293] Stream case 293 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0294] Stream case 294 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0295] Stream case 295 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0296] Stream case 296 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0297] Stream case 297 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0298] Stream case 298 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0299] Stream case 299 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0300] Stream case 300 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0301] Stream case 301 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0302] Stream case 302 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0303] Stream case 303 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0304] Stream case 304 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0305] Stream case 305 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0306] Stream case 306 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0307] Stream case 307 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0308] Stream case 308 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0309] Stream case 309 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0310] Stream case 310 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0311] Stream case 311 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0312] Stream case 312 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0313] Stream case 313 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0314] Stream case 314 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0315] Stream case 315 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0316] Stream case 316 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0317] Stream case 317 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0318] Stream case 318 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0319] Stream case 319 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0320] Stream case 320 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0321] Stream case 321 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0322] Stream case 322 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0323] Stream case 323 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0324] Stream case 324 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0325] Stream case 325 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0326] Stream case 326 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0327] Stream case 327 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0328] Stream case 328 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0329] Stream case 329 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0330] Stream case 330 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0331] Stream case 331 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0332] Stream case 332 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0333] Stream case 333 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0334] Stream case 334 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0335] Stream case 335 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0336] Stream case 336 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0337] Stream case 337 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0338] Stream case 338 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0339] Stream case 339 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0340] Stream case 340 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0341] Stream case 341 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0342] Stream case 342 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0343] Stream case 343 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0344] Stream case 344 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0345] Stream case 345 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0346] Stream case 346 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0347] Stream case 347 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0348] Stream case 348 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0349] Stream case 349 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0350] Stream case 350 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0351] Stream case 351 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0352] Stream case 352 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0353] Stream case 353 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0354] Stream case 354 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0355] Stream case 355 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0356] Stream case 356 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0357] Stream case 357 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0358] Stream case 358 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0359] Stream case 359 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0360] Stream case 360 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0361] Stream case 361 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0362] Stream case 362 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0363] Stream case 363 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0364] Stream case 364 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0365] Stream case 365 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0366] Stream case 366 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0367] Stream case 367 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0368] Stream case 368 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0369] Stream case 369 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0370] Stream case 370 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0371] Stream case 371 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0372] Stream case 372 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0373] Stream case 373 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0374] Stream case 374 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0375] Stream case 375 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0376] Stream case 376 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0377] Stream case 377 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0378] Stream case 378 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0379] Stream case 379 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0380] Stream case 380 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0381] Stream case 381 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0382] Stream case 382 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0383] Stream case 383 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0384] Stream case 384 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0385] Stream case 385 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0386] Stream case 386 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0387] Stream case 387 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0388] Stream case 388 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0389] Stream case 389 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0390] Stream case 390 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0391] Stream case 391 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0392] Stream case 392 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0393] Stream case 393 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0394] Stream case 394 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0395] Stream case 395 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0396] Stream case 396 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0397] Stream case 397 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0398] Stream case 398 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0399] Stream case 399 — first delta has role; final emits finish_reason; `[DONE]` present.
+- [D-OPENAI-0400] Stream case 400 — first delta has role; final emits finish_reason; `[DONE]` present.
+### E.6 SSE Replay Ordering Sequences
+- [E-REP-0001] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0002] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0003] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0004] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0005] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0006] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0007] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0008] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0009] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0010] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0011] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0012] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0013] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0014] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0015] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0016] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0017] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0018] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0019] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0020] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0021] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0022] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0023] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0024] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0025] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0026] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0027] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0028] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0029] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0030] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0031] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0032] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0033] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0034] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0035] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0036] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0037] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0038] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0039] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0040] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0041] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0042] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0043] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0044] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0045] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0046] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0047] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0048] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0049] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0050] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0051] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0052] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0053] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0054] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0055] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0056] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0057] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0058] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0059] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0060] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0061] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0062] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0063] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0064] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0065] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0066] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0067] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0068] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0069] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0070] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0071] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0072] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0073] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0074] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0075] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0076] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0077] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0078] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0079] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0080] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0081] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0082] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0083] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0084] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0085] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0086] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0087] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0088] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0089] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0090] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0091] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0092] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0093] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0094] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0095] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0096] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0097] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0098] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0099] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0100] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0101] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0102] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0103] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0104] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0105] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0106] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0107] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0108] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0109] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0110] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0111] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0112] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0113] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0114] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0115] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0116] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0117] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0118] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0119] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0120] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0121] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0122] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0123] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0124] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0125] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0126] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0127] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0128] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0129] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0130] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0131] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0132] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0133] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0134] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0135] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0136] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0137] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0138] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0139] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0140] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0141] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0142] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0143] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0144] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0145] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0146] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0147] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0148] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0149] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0150] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0151] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0152] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0153] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0154] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0155] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0156] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0157] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0158] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0159] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0160] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0161] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0162] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0163] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0164] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0165] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0166] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0167] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0168] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0169] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0170] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0171] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0172] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0173] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0174] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0175] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0176] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0177] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0178] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0179] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0180] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0181] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0182] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0183] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0184] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0185] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0186] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0187] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0188] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0189] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0190] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0191] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0192] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0193] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0194] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0195] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0196] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0197] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0198] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0199] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0200] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0201] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0202] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0203] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0204] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0205] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0206] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0207] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0208] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0209] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0210] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0211] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0212] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0213] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0214] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0215] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0216] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0217] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0218] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0219] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0220] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0221] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0222] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0223] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0224] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0225] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0226] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0227] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0228] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0229] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0230] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0231] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0232] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0233] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0234] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0235] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0236] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0237] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0238] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0239] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0240] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0241] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0242] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0243] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0244] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0245] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0246] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0247] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0248] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0249] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0250] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0251] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0252] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0253] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0254] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0255] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0256] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0257] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0258] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0259] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0260] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0261] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0262] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0263] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0264] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0265] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0266] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0267] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0268] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0269] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0270] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0271] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0272] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0273] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0274] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0275] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0276] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0277] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0278] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0279] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0280] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0281] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0282] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0283] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0284] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0285] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0286] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0287] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0288] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0289] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0290] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0291] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0292] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0293] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0294] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0295] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0296] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0297] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0298] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0299] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0300] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0301] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0302] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0303] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0304] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0305] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0306] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0307] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0308] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0309] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0310] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0311] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0312] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0313] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0314] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0315] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0316] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0317] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0318] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0319] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0320] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0321] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0322] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0323] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0324] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0325] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0326] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0327] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0328] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0329] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0330] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0331] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0332] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0333] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0334] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0335] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0336] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0337] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0338] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0339] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0340] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0341] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0342] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0343] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0344] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0345] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0346] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0347] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0348] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0349] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0350] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0351] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0352] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0353] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0354] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0355] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0356] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0357] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0358] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0359] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0360] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0361] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0362] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0363] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0364] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0365] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0366] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0367] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0368] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0369] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0370] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0371] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0372] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0373] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0374] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0375] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0376] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0377] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0378] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0379] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0380] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0381] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0382] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0383] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0384] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0385] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0386] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0387] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0388] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0389] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0390] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0391] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0392] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0393] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0394] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0395] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0396] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0397] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0398] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0399] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0400] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0401] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0402] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0403] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0404] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0405] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0406] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0407] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0408] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0409] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0410] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0411] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0412] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0413] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0414] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0415] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0416] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0417] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0418] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0419] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0420] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0421] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0422] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0423] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0424] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0425] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0426] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0427] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0428] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0429] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0430] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0431] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0432] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0433] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0434] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0435] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0436] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0437] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0438] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0439] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0440] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0441] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0442] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0443] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0444] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0445] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0446] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0447] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0448] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0449] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0450] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0451] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0452] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0453] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0454] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0455] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0456] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0457] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0458] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0459] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0460] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0461] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0462] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0463] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0464] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0465] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0466] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0467] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0468] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0469] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0470] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0471] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0472] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0473] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0474] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0475] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0476] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0477] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0478] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0479] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0480] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0481] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0482] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0483] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0484] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0485] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0486] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0487] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0488] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0489] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0490] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0491] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0492] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0493] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0494] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0495] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0496] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0497] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0498] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0499] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0500] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0501] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0502] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0503] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0504] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0505] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0506] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0507] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0508] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0509] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0510] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0511] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0512] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0513] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0514] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0515] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0516] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0517] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0518] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0519] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0520] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0521] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0522] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0523] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0524] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0525] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0526] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0527] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0528] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0529] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0530] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0531] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0532] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0533] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0534] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0535] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0536] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0537] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0538] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0539] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0540] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0541] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0542] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0543] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0544] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0545] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0546] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0547] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0548] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0549] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0550] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0551] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0552] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0553] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0554] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0555] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0556] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0557] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0558] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0559] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0560] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0561] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0562] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0563] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0564] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0565] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0566] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0567] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0568] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0569] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0570] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0571] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0572] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0573] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0574] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0575] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0576] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0577] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0578] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0579] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0580] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0581] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0582] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0583] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0584] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0585] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0586] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0587] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0588] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0589] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0590] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0591] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0592] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0593] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0594] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0595] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0596] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0597] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0598] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0599] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0600] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0601] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0602] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0603] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0604] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0605] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0606] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0607] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0608] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0609] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0610] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0611] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0612] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0613] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0614] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0615] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0616] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0617] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0618] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0619] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0620] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0621] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0622] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0623] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0624] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0625] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0626] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0627] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0628] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0629] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0630] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0631] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0632] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0633] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0634] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0635] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0636] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0637] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0638] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0639] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0640] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0641] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0642] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0643] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0644] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0645] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0646] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0647] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0648] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0649] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0650] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0651] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0652] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0653] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0654] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0655] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0656] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0657] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0658] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0659] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0660] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0661] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0662] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0663] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0664] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0665] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0666] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0667] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0668] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0669] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0670] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0671] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0672] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0673] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0674] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0675] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0676] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0677] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0678] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0679] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0680] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0681] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0682] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0683] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0684] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0685] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0686] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0687] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0688] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0689] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0690] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0691] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0692] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0693] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0694] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0695] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0696] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0697] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+- [E-REP-0698] typing.update refresh → expire → unread.update → message.delta → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0699] presence.update → message.delta idx0..N → typing.update → unread.update → message.done — Verify chronological order preserved and no duplication.
+- [E-REP-0700] message.delta idx0..i5 → disconnect → presence.update → reconnect → replay idx6..N → membership.changed — Verify chronological order preserved and no duplication.
+### E.7 Unread Counting in Branched Threads
+- [F-UNR-0001] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0002] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0003] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0004] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0005] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0006] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0007] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0008] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0009] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0010] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0011] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0012] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0013] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0014] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0015] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0016] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0017] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0018] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0019] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0020] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0021] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0022] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0023] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0024] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0025] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0026] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0027] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0028] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0029] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0030] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0031] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0032] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0033] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0034] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0035] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0036] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0037] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0038] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0039] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0040] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0041] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0042] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0043] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0044] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0045] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0046] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0047] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0048] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0049] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0050] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0051] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0052] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0053] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0054] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0055] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0056] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0057] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0058] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0059] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0060] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0061] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0062] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0063] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0064] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0065] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0066] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0067] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0068] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0069] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0070] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0071] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0072] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0073] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0074] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0075] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0076] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0077] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0078] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0079] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0080] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0081] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0082] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0083] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0084] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0085] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0086] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0087] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0088] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0089] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0090] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0091] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0092] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0093] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0094] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0095] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0096] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0097] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0098] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0099] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0100] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0101] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0102] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0103] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0104] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0105] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0106] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0107] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0108] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0109] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0110] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0111] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0112] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0113] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0114] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0115] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0116] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0117] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0118] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0119] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0120] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0121] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0122] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0123] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0124] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0125] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0126] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0127] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0128] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0129] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0130] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0131] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0132] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0133] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0134] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0135] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0136] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0137] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0138] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0139] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0140] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0141] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0142] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0143] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0144] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0145] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0146] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0147] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0148] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0149] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0150] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0151] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0152] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0153] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0154] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0155] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0156] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0157] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0158] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0159] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0160] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0161] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0162] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0163] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0164] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0165] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0166] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0167] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0168] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0169] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0170] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0171] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0172] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0173] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0174] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0175] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0176] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0177] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0178] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0179] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0180] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0181] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0182] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0183] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0184] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0185] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0186] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0187] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0188] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0189] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0190] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0191] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0192] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0193] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0194] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0195] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0196] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0197] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0198] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0199] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0200] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0201] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0202] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0203] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0204] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0205] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0206] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0207] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0208] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0209] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0210] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0211] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0212] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0213] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0214] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0215] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0216] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0217] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0218] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0219] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0220] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0221] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0222] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0223] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0224] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0225] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0226] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0227] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0228] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0229] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0230] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0231] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0232] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0233] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0234] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0235] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0236] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0237] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0238] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0239] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0240] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0241] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0242] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0243] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0244] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0245] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0246] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0247] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0248] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0249] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0250] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0251] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0252] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0253] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0254] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0255] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0256] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0257] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0258] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0259] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0260] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0261] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0262] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0263] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0264] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0265] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0266] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0267] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0268] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0269] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0270] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0271] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0272] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0273] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0274] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0275] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0276] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0277] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0278] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0279] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0280] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0281] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0282] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0283] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0284] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0285] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0286] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0287] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0288] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0289] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0290] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0291] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0292] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0293] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0294] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0295] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0296] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0297] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0298] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0299] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0300] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0301] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0302] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0303] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0304] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0305] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0306] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0307] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0308] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0309] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0310] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0311] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0312] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0313] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0314] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0315] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0316] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0317] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0318] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0319] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0320] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0321] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0322] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0323] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0324] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0325] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0326] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0327] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0328] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0329] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0330] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0331] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0332] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0333] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0334] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0335] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0336] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0337] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0338] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0339] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0340] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0341] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0342] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0343] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0344] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0345] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0346] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0347] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0348] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0349] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0350] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0351] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0352] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0353] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0354] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0355] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0356] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0357] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0358] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0359] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0360] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0361] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0362] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0363] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0364] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0365] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0366] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0367] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0368] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0369] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0370] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0371] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0372] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0373] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0374] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0375] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0376] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0377] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0378] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0379] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0380] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0381] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0382] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0383] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0384] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0385] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0386] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0387] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0388] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0389] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0390] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0391] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0392] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0393] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0394] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0395] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0396] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0397] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0398] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0399] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0400] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0401] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0402] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0403] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0404] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0405] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0406] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0407] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0408] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0409] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0410] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0411] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0412] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0413] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0414] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0415] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0416] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0417] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0418] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0419] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0420] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0421] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0422] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0423] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0424] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0425] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0426] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0427] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0428] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0429] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0430] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0431] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0432] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0433] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0434] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0435] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0436] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0437] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0438] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0439] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0440] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0441] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0442] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0443] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0444] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0445] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0446] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0447] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0448] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0449] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0450] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0451] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0452] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0453] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0454] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0455] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0456] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0457] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0458] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0459] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0460] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0461] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0462] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0463] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0464] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0465] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0466] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0467] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0468] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0469] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0470] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0471] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0472] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0473] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0474] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0475] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0476] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0477] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0478] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0479] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0480] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0481] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0482] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0483] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0484] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0485] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0486] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0487] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0488] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0489] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0490] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0491] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0492] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0493] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0494] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0495] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0496] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0497] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0498] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0499] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0500] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0501] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0502] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0503] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0504] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0505] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0506] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0507] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0508] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0509] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0510] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0511] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0512] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0513] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0514] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0515] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0516] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0517] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0518] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0519] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0520] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0521] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0522] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0523] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0524] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0525] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0526] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0527] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0528] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0529] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0530] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0531] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0532] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0533] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0534] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0535] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0536] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0537] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0538] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0539] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0540] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0541] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0542] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0543] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0544] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0545] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0546] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0547] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0548] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0549] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0550] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0551] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0552] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0553] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0554] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0555] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0556] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0557] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0558] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0559] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0560] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0561] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0562] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0563] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0564] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0565] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0566] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0567] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0568] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0569] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0570] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0571] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0572] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0573] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0574] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0575] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0576] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0577] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0578] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0579] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0580] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0581] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0582] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0583] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0584] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0585] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0586] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0587] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0588] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0589] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0590] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0591] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0592] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0593] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0594] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0595] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0596] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0597] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0598] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0599] Compute expected counts after each post + mark‑read; assert equality.
+- [F-UNR-0600] Compute expected counts after each post + mark‑read; assert equality.
+### E.8 Presence & Typing TTLs
+- [G-PT-0001] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0002] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0003] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0004] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0005] heartbeat_every_30s — status stays 'online'
+- [G-PT-0006] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0007] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0008] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0009] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0010] heartbeat_every_30s — status stays 'online'
+- [G-PT-0011] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0012] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0013] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0014] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0015] heartbeat_every_30s — status stays 'online'
+- [G-PT-0016] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0017] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0018] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0019] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0020] heartbeat_every_30s — status stays 'online'
+- [G-PT-0021] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0022] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0023] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0024] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0025] heartbeat_every_30s — status stays 'online'
+- [G-PT-0026] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0027] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0028] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0029] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0030] heartbeat_every_30s — status stays 'online'
+- [G-PT-0031] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0032] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0033] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0034] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0035] heartbeat_every_30s — status stays 'online'
+- [G-PT-0036] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0037] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0038] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0039] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0040] heartbeat_every_30s — status stays 'online'
+- [G-PT-0041] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0042] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0043] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0044] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0045] heartbeat_every_30s — status stays 'online'
+- [G-PT-0046] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0047] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0048] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0049] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0050] heartbeat_every_30s — status stays 'online'
+- [G-PT-0051] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0052] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0053] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0054] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0055] heartbeat_every_30s — status stays 'online'
+- [G-PT-0056] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0057] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0058] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0059] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0060] heartbeat_every_30s — status stays 'online'
+- [G-PT-0061] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0062] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0063] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0064] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0065] heartbeat_every_30s — status stays 'online'
+- [G-PT-0066] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0067] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0068] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0069] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0070] heartbeat_every_30s — status stays 'online'
+- [G-PT-0071] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0072] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0073] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0074] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0075] heartbeat_every_30s — status stays 'online'
+- [G-PT-0076] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0077] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0078] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0079] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0080] heartbeat_every_30s — status stays 'online'
+- [G-PT-0081] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0082] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0083] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0084] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0085] heartbeat_every_30s — status stays 'online'
+- [G-PT-0086] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0087] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0088] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0089] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0090] heartbeat_every_30s — status stays 'online'
+- [G-PT-0091] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0092] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0093] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0094] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0095] heartbeat_every_30s — status stays 'online'
+- [G-PT-0096] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0097] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0098] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0099] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0100] heartbeat_every_30s — status stays 'online'
+- [G-PT-0101] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0102] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0103] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0104] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0105] heartbeat_every_30s — status stays 'online'
+- [G-PT-0106] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0107] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0108] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0109] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0110] heartbeat_every_30s — status stays 'online'
+- [G-PT-0111] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0112] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0113] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0114] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0115] heartbeat_every_30s — status stays 'online'
+- [G-PT-0116] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0117] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0118] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0119] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0120] heartbeat_every_30s — status stays 'online'
+- [G-PT-0121] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0122] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0123] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0124] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0125] heartbeat_every_30s — status stays 'online'
+- [G-PT-0126] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0127] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0128] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0129] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0130] heartbeat_every_30s — status stays 'online'
+- [G-PT-0131] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0132] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0133] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0134] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0135] heartbeat_every_30s — status stays 'online'
+- [G-PT-0136] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0137] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0138] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0139] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0140] heartbeat_every_30s — status stays 'online'
+- [G-PT-0141] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0142] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0143] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0144] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0145] heartbeat_every_30s — status stays 'online'
+- [G-PT-0146] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0147] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0148] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0149] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0150] heartbeat_every_30s — status stays 'online'
+- [G-PT-0151] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0152] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0153] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0154] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0155] heartbeat_every_30s — status stays 'online'
+- [G-PT-0156] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0157] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0158] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0159] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0160] heartbeat_every_30s — status stays 'online'
+- [G-PT-0161] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0162] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0163] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0164] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0165] heartbeat_every_30s — status stays 'online'
+- [G-PT-0166] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0167] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0168] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0169] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0170] heartbeat_every_30s — status stays 'online'
+- [G-PT-0171] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0172] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0173] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0174] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0175] heartbeat_every_30s — status stays 'online'
+- [G-PT-0176] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0177] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0178] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0179] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0180] heartbeat_every_30s — status stays 'online'
+- [G-PT-0181] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0182] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0183] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0184] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0185] heartbeat_every_30s — status stays 'online'
+- [G-PT-0186] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0187] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0188] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0189] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0190] heartbeat_every_30s — status stays 'online'
+- [G-PT-0191] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0192] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0193] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0194] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0195] heartbeat_every_30s — status stays 'online'
+- [G-PT-0196] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0197] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0198] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0199] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0200] heartbeat_every_30s — status stays 'online'
+- [G-PT-0201] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0202] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0203] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0204] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0205] heartbeat_every_30s — status stays 'online'
+- [G-PT-0206] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0207] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0208] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0209] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0210] heartbeat_every_30s — status stays 'online'
+- [G-PT-0211] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0212] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0213] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0214] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0215] heartbeat_every_30s — status stays 'online'
+- [G-PT-0216] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0217] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0218] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0219] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0220] heartbeat_every_30s — status stays 'online'
+- [G-PT-0221] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0222] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0223] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0224] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0225] heartbeat_every_30s — status stays 'online'
+- [G-PT-0226] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0227] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0228] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0229] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0230] heartbeat_every_30s — status stays 'online'
+- [G-PT-0231] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0232] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0233] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0234] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0235] heartbeat_every_30s — status stays 'online'
+- [G-PT-0236] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0237] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0238] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0239] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0240] heartbeat_every_30s — status stays 'online'
+- [G-PT-0241] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0242] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0243] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0244] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0245] heartbeat_every_30s — status stays 'online'
+- [G-PT-0246] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0247] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0248] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0249] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0250] heartbeat_every_30s — status stays 'online'
+- [G-PT-0251] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0252] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0253] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0254] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0255] heartbeat_every_30s — status stays 'online'
+- [G-PT-0256] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0257] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0258] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0259] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0260] heartbeat_every_30s — status stays 'online'
+- [G-PT-0261] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0262] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0263] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0264] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0265] heartbeat_every_30s — status stays 'online'
+- [G-PT-0266] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0267] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0268] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0269] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0270] heartbeat_every_30s — status stays 'online'
+- [G-PT-0271] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0272] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0273] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0274] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0275] heartbeat_every_30s — status stays 'online'
+- [G-PT-0276] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0277] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0278] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0279] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0280] heartbeat_every_30s — status stays 'online'
+- [G-PT-0281] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0282] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0283] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0284] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0285] heartbeat_every_30s — status stays 'online'
+- [G-PT-0286] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0287] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0288] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0289] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0290] heartbeat_every_30s — status stays 'online'
+- [G-PT-0291] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0292] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0293] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0294] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0295] heartbeat_every_30s — status stays 'online'
+- [G-PT-0296] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0297] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0298] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0299] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0300] heartbeat_every_30s — status stays 'online'
+- [G-PT-0301] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0302] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0303] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0304] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0305] heartbeat_every_30s — status stays 'online'
+- [G-PT-0306] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0307] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0308] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0309] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0310] heartbeat_every_30s — status stays 'online'
+- [G-PT-0311] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0312] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0313] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0314] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0315] heartbeat_every_30s — status stays 'online'
+- [G-PT-0316] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0317] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0318] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0319] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0320] heartbeat_every_30s — status stays 'online'
+- [G-PT-0321] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0322] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0323] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0324] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0325] heartbeat_every_30s — status stays 'online'
+- [G-PT-0326] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0327] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0328] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0329] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0330] heartbeat_every_30s — status stays 'online'
+- [G-PT-0331] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0332] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0333] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0334] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0335] heartbeat_every_30s — status stays 'online'
+- [G-PT-0336] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0337] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0338] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0339] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0340] heartbeat_every_30s — status stays 'online'
+- [G-PT-0341] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0342] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0343] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0344] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0345] heartbeat_every_30s — status stays 'online'
+- [G-PT-0346] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0347] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0348] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0349] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0350] heartbeat_every_30s — status stays 'online'
+- [G-PT-0351] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0352] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0353] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0354] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0355] heartbeat_every_30s — status stays 'online'
+- [G-PT-0356] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0357] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0358] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0359] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0360] heartbeat_every_30s — status stays 'online'
+- [G-PT-0361] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0362] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0363] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0364] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0365] heartbeat_every_30s — status stays 'online'
+- [G-PT-0366] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0367] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0368] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0369] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0370] heartbeat_every_30s — status stays 'online'
+- [G-PT-0371] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0372] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0373] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0374] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0375] heartbeat_every_30s — status stays 'online'
+- [G-PT-0376] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0377] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0378] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0379] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0380] heartbeat_every_30s — status stays 'online'
+- [G-PT-0381] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0382] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0383] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0384] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0385] heartbeat_every_30s — status stays 'online'
+- [G-PT-0386] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0387] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0388] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0389] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0390] heartbeat_every_30s — status stays 'online'
+- [G-PT-0391] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0392] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0393] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0394] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0395] heartbeat_every_30s — status stays 'online'
+- [G-PT-0396] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0397] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0398] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0399] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0400] heartbeat_every_30s — status stays 'online'
+- [G-PT-0401] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0402] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0403] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0404] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0405] heartbeat_every_30s — status stays 'online'
+- [G-PT-0406] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0407] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0408] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0409] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0410] heartbeat_every_30s — status stays 'online'
+- [G-PT-0411] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0412] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0413] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0414] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0415] heartbeat_every_30s — status stays 'online'
+- [G-PT-0416] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0417] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0418] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0419] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0420] heartbeat_every_30s — status stays 'online'
+- [G-PT-0421] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0422] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0423] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0424] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0425] heartbeat_every_30s — status stays 'online'
+- [G-PT-0426] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0427] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0428] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0429] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0430] heartbeat_every_30s — status stays 'online'
+- [G-PT-0431] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0432] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0433] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0434] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0435] heartbeat_every_30s — status stays 'online'
+- [G-PT-0436] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0437] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0438] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0439] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0440] heartbeat_every_30s — status stays 'online'
+- [G-PT-0441] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0442] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0443] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0444] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0445] heartbeat_every_30s — status stays 'online'
+- [G-PT-0446] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0447] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0448] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0449] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0450] heartbeat_every_30s — status stays 'online'
+- [G-PT-0451] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0452] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0453] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0454] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0455] heartbeat_every_30s — status stays 'online'
+- [G-PT-0456] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0457] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0458] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0459] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0460] heartbeat_every_30s — status stays 'online'
+- [G-PT-0461] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0462] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0463] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0464] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0465] heartbeat_every_30s — status stays 'online'
+- [G-PT-0466] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0467] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0468] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0469] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0470] heartbeat_every_30s — status stays 'online'
+- [G-PT-0471] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0472] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0473] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0474] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0475] heartbeat_every_30s — status stays 'online'
+- [G-PT-0476] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0477] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0478] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0479] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0480] heartbeat_every_30s — status stays 'online'
+- [G-PT-0481] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0482] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0483] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0484] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0485] heartbeat_every_30s — status stays 'online'
+- [G-PT-0486] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0487] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0488] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0489] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0490] heartbeat_every_30s — status stays 'online'
+- [G-PT-0491] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0492] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0493] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0494] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0495] heartbeat_every_30s — status stays 'online'
+- [G-PT-0496] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0497] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0498] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0499] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0500] heartbeat_every_30s — status stays 'online'
+- [G-PT-0501] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0502] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0503] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0504] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0505] heartbeat_every_30s — status stays 'online'
+- [G-PT-0506] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0507] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0508] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0509] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0510] heartbeat_every_30s — status stays 'online'
+- [G-PT-0511] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0512] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0513] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0514] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0515] heartbeat_every_30s — status stays 'online'
+- [G-PT-0516] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0517] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0518] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0519] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0520] heartbeat_every_30s — status stays 'online'
+- [G-PT-0521] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0522] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0523] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0524] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0525] heartbeat_every_30s — status stays 'online'
+- [G-PT-0526] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0527] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0528] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0529] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0530] heartbeat_every_30s — status stays 'online'
+- [G-PT-0531] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0532] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0533] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0534] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0535] heartbeat_every_30s — status stays 'online'
+- [G-PT-0536] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0537] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0538] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0539] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0540] heartbeat_every_30s — status stays 'online'
+- [G-PT-0541] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0542] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0543] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0544] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0545] heartbeat_every_30s — status stays 'online'
+- [G-PT-0546] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0547] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0548] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0549] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0550] heartbeat_every_30s — status stays 'online'
+- [G-PT-0551] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0552] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0553] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0554] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0555] heartbeat_every_30s — status stays 'online'
+- [G-PT-0556] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0557] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0558] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0559] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0560] heartbeat_every_30s — status stays 'online'
+- [G-PT-0561] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0562] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0563] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0564] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0565] heartbeat_every_30s — status stays 'online'
+- [G-PT-0566] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0567] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0568] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0569] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0570] heartbeat_every_30s — status stays 'online'
+- [G-PT-0571] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0572] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0573] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0574] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0575] heartbeat_every_30s — status stays 'online'
+- [G-PT-0576] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0577] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0578] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0579] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0580] heartbeat_every_30s — status stays 'online'
+- [G-PT-0581] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0582] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0583] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0584] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0585] heartbeat_every_30s — status stays 'online'
+- [G-PT-0586] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0587] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0588] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0589] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0590] heartbeat_every_30s — status stays 'online'
+- [G-PT-0591] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0592] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0593] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0594] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0595] heartbeat_every_30s — status stays 'online'
+- [G-PT-0596] heartbeat_stop_45s — status becomes 'away' after grace
+- [G-PT-0597] heartbeat_stop_5m — status becomes 'offline'
+- [G-PT-0598] typing_refresh_2s — typing persists; expires if gap>cap
+- [G-PT-0599] typing_burst_coalesced — events coalesced; last update wins
+- [G-PT-0600] heartbeat_every_30s — status stays 'online'
+### E.9 Rate‑Limit Profiles & Assignments
+- [H-LIM-0001] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0002] assign_route_template — limiter applies to template
+- [H-LIM-0003] delete_assigned_profile — fails domain error
+- [H-LIM-0004] delete_unassigned_profile — succeeds
+- [H-LIM-0005] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0006] create_profile_valid — profile enforceable
+- [H-LIM-0007] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0008] assign_route_template — limiter applies to template
+- [H-LIM-0009] delete_assigned_profile — fails domain error
+- [H-LIM-0010] delete_unassigned_profile — succeeds
+- [H-LIM-0011] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0012] create_profile_valid — profile enforceable
+- [H-LIM-0013] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0014] assign_route_template — limiter applies to template
+- [H-LIM-0015] delete_assigned_profile — fails domain error
+- [H-LIM-0016] delete_unassigned_profile — succeeds
+- [H-LIM-0017] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0018] create_profile_valid — profile enforceable
+- [H-LIM-0019] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0020] assign_route_template — limiter applies to template
+- [H-LIM-0021] delete_assigned_profile — fails domain error
+- [H-LIM-0022] delete_unassigned_profile — succeeds
+- [H-LIM-0023] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0024] create_profile_valid — profile enforceable
+- [H-LIM-0025] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0026] assign_route_template — limiter applies to template
+- [H-LIM-0027] delete_assigned_profile — fails domain error
+- [H-LIM-0028] delete_unassigned_profile — succeeds
+- [H-LIM-0029] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0030] create_profile_valid — profile enforceable
+- [H-LIM-0031] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0032] assign_route_template — limiter applies to template
+- [H-LIM-0033] delete_assigned_profile — fails domain error
+- [H-LIM-0034] delete_unassigned_profile — succeeds
+- [H-LIM-0035] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0036] create_profile_valid — profile enforceable
+- [H-LIM-0037] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0038] assign_route_template — limiter applies to template
+- [H-LIM-0039] delete_assigned_profile — fails domain error
+- [H-LIM-0040] delete_unassigned_profile — succeeds
+- [H-LIM-0041] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0042] create_profile_valid — profile enforceable
+- [H-LIM-0043] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0044] assign_route_template — limiter applies to template
+- [H-LIM-0045] delete_assigned_profile — fails domain error
+- [H-LIM-0046] delete_unassigned_profile — succeeds
+- [H-LIM-0047] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0048] create_profile_valid — profile enforceable
+- [H-LIM-0049] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0050] assign_route_template — limiter applies to template
+- [H-LIM-0051] delete_assigned_profile — fails domain error
+- [H-LIM-0052] delete_unassigned_profile — succeeds
+- [H-LIM-0053] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0054] create_profile_valid — profile enforceable
+- [H-LIM-0055] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0056] assign_route_template — limiter applies to template
+- [H-LIM-0057] delete_assigned_profile — fails domain error
+- [H-LIM-0058] delete_unassigned_profile — succeeds
+- [H-LIM-0059] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0060] create_profile_valid — profile enforceable
+- [H-LIM-0061] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0062] assign_route_template — limiter applies to template
+- [H-LIM-0063] delete_assigned_profile — fails domain error
+- [H-LIM-0064] delete_unassigned_profile — succeeds
+- [H-LIM-0065] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0066] create_profile_valid — profile enforceable
+- [H-LIM-0067] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0068] assign_route_template — limiter applies to template
+- [H-LIM-0069] delete_assigned_profile — fails domain error
+- [H-LIM-0070] delete_unassigned_profile — succeeds
+- [H-LIM-0071] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0072] create_profile_valid — profile enforceable
+- [H-LIM-0073] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0074] assign_route_template — limiter applies to template
+- [H-LIM-0075] delete_assigned_profile — fails domain error
+- [H-LIM-0076] delete_unassigned_profile — succeeds
+- [H-LIM-0077] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0078] create_profile_valid — profile enforceable
+- [H-LIM-0079] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0080] assign_route_template — limiter applies to template
+- [H-LIM-0081] delete_assigned_profile — fails domain error
+- [H-LIM-0082] delete_unassigned_profile — succeeds
+- [H-LIM-0083] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0084] create_profile_valid — profile enforceable
+- [H-LIM-0085] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0086] assign_route_template — limiter applies to template
+- [H-LIM-0087] delete_assigned_profile — fails domain error
+- [H-LIM-0088] delete_unassigned_profile — succeeds
+- [H-LIM-0089] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0090] create_profile_valid — profile enforceable
+- [H-LIM-0091] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0092] assign_route_template — limiter applies to template
+- [H-LIM-0093] delete_assigned_profile — fails domain error
+- [H-LIM-0094] delete_unassigned_profile — succeeds
+- [H-LIM-0095] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0096] create_profile_valid — profile enforceable
+- [H-LIM-0097] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0098] assign_route_template — limiter applies to template
+- [H-LIM-0099] delete_assigned_profile — fails domain error
+- [H-LIM-0100] delete_unassigned_profile — succeeds
+- [H-LIM-0101] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0102] create_profile_valid — profile enforceable
+- [H-LIM-0103] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0104] assign_route_template — limiter applies to template
+- [H-LIM-0105] delete_assigned_profile — fails domain error
+- [H-LIM-0106] delete_unassigned_profile — succeeds
+- [H-LIM-0107] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0108] create_profile_valid — profile enforceable
+- [H-LIM-0109] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0110] assign_route_template — limiter applies to template
+- [H-LIM-0111] delete_assigned_profile — fails domain error
+- [H-LIM-0112] delete_unassigned_profile — succeeds
+- [H-LIM-0113] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0114] create_profile_valid — profile enforceable
+- [H-LIM-0115] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0116] assign_route_template — limiter applies to template
+- [H-LIM-0117] delete_assigned_profile — fails domain error
+- [H-LIM-0118] delete_unassigned_profile — succeeds
+- [H-LIM-0119] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0120] create_profile_valid — profile enforceable
+- [H-LIM-0121] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0122] assign_route_template — limiter applies to template
+- [H-LIM-0123] delete_assigned_profile — fails domain error
+- [H-LIM-0124] delete_unassigned_profile — succeeds
+- [H-LIM-0125] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0126] create_profile_valid — profile enforceable
+- [H-LIM-0127] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0128] assign_route_template — limiter applies to template
+- [H-LIM-0129] delete_assigned_profile — fails domain error
+- [H-LIM-0130] delete_unassigned_profile — succeeds
+- [H-LIM-0131] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0132] create_profile_valid — profile enforceable
+- [H-LIM-0133] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0134] assign_route_template — limiter applies to template
+- [H-LIM-0135] delete_assigned_profile — fails domain error
+- [H-LIM-0136] delete_unassigned_profile — succeeds
+- [H-LIM-0137] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0138] create_profile_valid — profile enforceable
+- [H-LIM-0139] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0140] assign_route_template — limiter applies to template
+- [H-LIM-0141] delete_assigned_profile — fails domain error
+- [H-LIM-0142] delete_unassigned_profile — succeeds
+- [H-LIM-0143] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0144] create_profile_valid — profile enforceable
+- [H-LIM-0145] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0146] assign_route_template — limiter applies to template
+- [H-LIM-0147] delete_assigned_profile — fails domain error
+- [H-LIM-0148] delete_unassigned_profile — succeeds
+- [H-LIM-0149] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0150] create_profile_valid — profile enforceable
+- [H-LIM-0151] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0152] assign_route_template — limiter applies to template
+- [H-LIM-0153] delete_assigned_profile — fails domain error
+- [H-LIM-0154] delete_unassigned_profile — succeeds
+- [H-LIM-0155] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0156] create_profile_valid — profile enforceable
+- [H-LIM-0157] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0158] assign_route_template — limiter applies to template
+- [H-LIM-0159] delete_assigned_profile — fails domain error
+- [H-LIM-0160] delete_unassigned_profile — succeeds
+- [H-LIM-0161] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0162] create_profile_valid — profile enforceable
+- [H-LIM-0163] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0164] assign_route_template — limiter applies to template
+- [H-LIM-0165] delete_assigned_profile — fails domain error
+- [H-LIM-0166] delete_unassigned_profile — succeeds
+- [H-LIM-0167] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0168] create_profile_valid — profile enforceable
+- [H-LIM-0169] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0170] assign_route_template — limiter applies to template
+- [H-LIM-0171] delete_assigned_profile — fails domain error
+- [H-LIM-0172] delete_unassigned_profile — succeeds
+- [H-LIM-0173] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0174] create_profile_valid — profile enforceable
+- [H-LIM-0175] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0176] assign_route_template — limiter applies to template
+- [H-LIM-0177] delete_assigned_profile — fails domain error
+- [H-LIM-0178] delete_unassigned_profile — succeeds
+- [H-LIM-0179] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0180] create_profile_valid — profile enforceable
+- [H-LIM-0181] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0182] assign_route_template — limiter applies to template
+- [H-LIM-0183] delete_assigned_profile — fails domain error
+- [H-LIM-0184] delete_unassigned_profile — succeeds
+- [H-LIM-0185] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0186] create_profile_valid — profile enforceable
+- [H-LIM-0187] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0188] assign_route_template — limiter applies to template
+- [H-LIM-0189] delete_assigned_profile — fails domain error
+- [H-LIM-0190] delete_unassigned_profile — succeeds
+- [H-LIM-0191] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0192] create_profile_valid — profile enforceable
+- [H-LIM-0193] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0194] assign_route_template — limiter applies to template
+- [H-LIM-0195] delete_assigned_profile — fails domain error
+- [H-LIM-0196] delete_unassigned_profile — succeeds
+- [H-LIM-0197] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0198] create_profile_valid — profile enforceable
+- [H-LIM-0199] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0200] assign_route_template — limiter applies to template
+- [H-LIM-0201] delete_assigned_profile — fails domain error
+- [H-LIM-0202] delete_unassigned_profile — succeeds
+- [H-LIM-0203] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0204] create_profile_valid — profile enforceable
+- [H-LIM-0205] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0206] assign_route_template — limiter applies to template
+- [H-LIM-0207] delete_assigned_profile — fails domain error
+- [H-LIM-0208] delete_unassigned_profile — succeeds
+- [H-LIM-0209] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0210] create_profile_valid — profile enforceable
+- [H-LIM-0211] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0212] assign_route_template — limiter applies to template
+- [H-LIM-0213] delete_assigned_profile — fails domain error
+- [H-LIM-0214] delete_unassigned_profile — succeeds
+- [H-LIM-0215] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0216] create_profile_valid — profile enforceable
+- [H-LIM-0217] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0218] assign_route_template — limiter applies to template
+- [H-LIM-0219] delete_assigned_profile — fails domain error
+- [H-LIM-0220] delete_unassigned_profile — succeeds
+- [H-LIM-0221] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0222] create_profile_valid — profile enforceable
+- [H-LIM-0223] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0224] assign_route_template — limiter applies to template
+- [H-LIM-0225] delete_assigned_profile — fails domain error
+- [H-LIM-0226] delete_unassigned_profile — succeeds
+- [H-LIM-0227] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0228] create_profile_valid — profile enforceable
+- [H-LIM-0229] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0230] assign_route_template — limiter applies to template
+- [H-LIM-0231] delete_assigned_profile — fails domain error
+- [H-LIM-0232] delete_unassigned_profile — succeeds
+- [H-LIM-0233] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0234] create_profile_valid — profile enforceable
+- [H-LIM-0235] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0236] assign_route_template — limiter applies to template
+- [H-LIM-0237] delete_assigned_profile — fails domain error
+- [H-LIM-0238] delete_unassigned_profile — succeeds
+- [H-LIM-0239] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0240] create_profile_valid — profile enforceable
+- [H-LIM-0241] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0242] assign_route_template — limiter applies to template
+- [H-LIM-0243] delete_assigned_profile — fails domain error
+- [H-LIM-0244] delete_unassigned_profile — succeeds
+- [H-LIM-0245] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0246] create_profile_valid — profile enforceable
+- [H-LIM-0247] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0248] assign_route_template — limiter applies to template
+- [H-LIM-0249] delete_assigned_profile — fails domain error
+- [H-LIM-0250] delete_unassigned_profile — succeeds
+- [H-LIM-0251] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0252] create_profile_valid — profile enforceable
+- [H-LIM-0253] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0254] assign_route_template — limiter applies to template
+- [H-LIM-0255] delete_assigned_profile — fails domain error
+- [H-LIM-0256] delete_unassigned_profile — succeeds
+- [H-LIM-0257] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0258] create_profile_valid — profile enforceable
+- [H-LIM-0259] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0260] assign_route_template — limiter applies to template
+- [H-LIM-0261] delete_assigned_profile — fails domain error
+- [H-LIM-0262] delete_unassigned_profile — succeeds
+- [H-LIM-0263] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0264] create_profile_valid — profile enforceable
+- [H-LIM-0265] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0266] assign_route_template — limiter applies to template
+- [H-LIM-0267] delete_assigned_profile — fails domain error
+- [H-LIM-0268] delete_unassigned_profile — succeeds
+- [H-LIM-0269] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0270] create_profile_valid — profile enforceable
+- [H-LIM-0271] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0272] assign_route_template — limiter applies to template
+- [H-LIM-0273] delete_assigned_profile — fails domain error
+- [H-LIM-0274] delete_unassigned_profile — succeeds
+- [H-LIM-0275] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0276] create_profile_valid — profile enforceable
+- [H-LIM-0277] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0278] assign_route_template — limiter applies to template
+- [H-LIM-0279] delete_assigned_profile — fails domain error
+- [H-LIM-0280] delete_unassigned_profile — succeeds
+- [H-LIM-0281] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0282] create_profile_valid — profile enforceable
+- [H-LIM-0283] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0284] assign_route_template — limiter applies to template
+- [H-LIM-0285] delete_assigned_profile — fails domain error
+- [H-LIM-0286] delete_unassigned_profile — succeeds
+- [H-LIM-0287] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0288] create_profile_valid — profile enforceable
+- [H-LIM-0289] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0290] assign_route_template — limiter applies to template
+- [H-LIM-0291] delete_assigned_profile — fails domain error
+- [H-LIM-0292] delete_unassigned_profile — succeeds
+- [H-LIM-0293] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0294] create_profile_valid — profile enforceable
+- [H-LIM-0295] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0296] assign_route_template — limiter applies to template
+- [H-LIM-0297] delete_assigned_profile — fails domain error
+- [H-LIM-0298] delete_unassigned_profile — succeeds
+- [H-LIM-0299] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0300] create_profile_valid — profile enforceable
+- [H-LIM-0301] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0302] assign_route_template — limiter applies to template
+- [H-LIM-0303] delete_assigned_profile — fails domain error
+- [H-LIM-0304] delete_unassigned_profile — succeeds
+- [H-LIM-0305] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0306] create_profile_valid — profile enforceable
+- [H-LIM-0307] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0308] assign_route_template — limiter applies to template
+- [H-LIM-0309] delete_assigned_profile — fails domain error
+- [H-LIM-0310] delete_unassigned_profile — succeeds
+- [H-LIM-0311] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0312] create_profile_valid — profile enforceable
+- [H-LIM-0313] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0314] assign_route_template — limiter applies to template
+- [H-LIM-0315] delete_assigned_profile — fails domain error
+- [H-LIM-0316] delete_unassigned_profile — succeeds
+- [H-LIM-0317] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0318] create_profile_valid — profile enforceable
+- [H-LIM-0319] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0320] assign_route_template — limiter applies to template
+- [H-LIM-0321] delete_assigned_profile — fails domain error
+- [H-LIM-0322] delete_unassigned_profile — succeeds
+- [H-LIM-0323] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0324] create_profile_valid — profile enforceable
+- [H-LIM-0325] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0326] assign_route_template — limiter applies to template
+- [H-LIM-0327] delete_assigned_profile — fails domain error
+- [H-LIM-0328] delete_unassigned_profile — succeeds
+- [H-LIM-0329] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0330] create_profile_valid — profile enforceable
+- [H-LIM-0331] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0332] assign_route_template — limiter applies to template
+- [H-LIM-0333] delete_assigned_profile — fails domain error
+- [H-LIM-0334] delete_unassigned_profile — succeeds
+- [H-LIM-0335] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0336] create_profile_valid — profile enforceable
+- [H-LIM-0337] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0338] assign_route_template — limiter applies to template
+- [H-LIM-0339] delete_assigned_profile — fails domain error
+- [H-LIM-0340] delete_unassigned_profile — succeeds
+- [H-LIM-0341] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0342] create_profile_valid — profile enforceable
+- [H-LIM-0343] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0344] assign_route_template — limiter applies to template
+- [H-LIM-0345] delete_assigned_profile — fails domain error
+- [H-LIM-0346] delete_unassigned_profile — succeeds
+- [H-LIM-0347] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0348] create_profile_valid — profile enforceable
+- [H-LIM-0349] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0350] assign_route_template — limiter applies to template
+- [H-LIM-0351] delete_assigned_profile — fails domain error
+- [H-LIM-0352] delete_unassigned_profile — succeeds
+- [H-LIM-0353] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0354] create_profile_valid — profile enforceable
+- [H-LIM-0355] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0356] assign_route_template — limiter applies to template
+- [H-LIM-0357] delete_assigned_profile — fails domain error
+- [H-LIM-0358] delete_unassigned_profile — succeeds
+- [H-LIM-0359] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0360] create_profile_valid — profile enforceable
+- [H-LIM-0361] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0362] assign_route_template — limiter applies to template
+- [H-LIM-0363] delete_assigned_profile — fails domain error
+- [H-LIM-0364] delete_unassigned_profile — succeeds
+- [H-LIM-0365] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0366] create_profile_valid — profile enforceable
+- [H-LIM-0367] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0368] assign_route_template — limiter applies to template
+- [H-LIM-0369] delete_assigned_profile — fails domain error
+- [H-LIM-0370] delete_unassigned_profile — succeeds
+- [H-LIM-0371] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0372] create_profile_valid — profile enforceable
+- [H-LIM-0373] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0374] assign_route_template — limiter applies to template
+- [H-LIM-0375] delete_assigned_profile — fails domain error
+- [H-LIM-0376] delete_unassigned_profile — succeeds
+- [H-LIM-0377] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0378] create_profile_valid — profile enforceable
+- [H-LIM-0379] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0380] assign_route_template — limiter applies to template
+- [H-LIM-0381] delete_assigned_profile — fails domain error
+- [H-LIM-0382] delete_unassigned_profile — succeeds
+- [H-LIM-0383] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0384] create_profile_valid — profile enforceable
+- [H-LIM-0385] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0386] assign_route_template — limiter applies to template
+- [H-LIM-0387] delete_assigned_profile — fails domain error
+- [H-LIM-0388] delete_unassigned_profile — succeeds
+- [H-LIM-0389] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0390] create_profile_valid — profile enforceable
+- [H-LIM-0391] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0392] assign_route_template — limiter applies to template
+- [H-LIM-0393] delete_assigned_profile — fails domain error
+- [H-LIM-0394] delete_unassigned_profile — succeeds
+- [H-LIM-0395] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0396] create_profile_valid — profile enforceable
+- [H-LIM-0397] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0398] assign_route_template — limiter applies to template
+- [H-LIM-0399] delete_assigned_profile — fails domain error
+- [H-LIM-0400] delete_unassigned_profile — succeeds
+- [H-LIM-0401] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0402] create_profile_valid — profile enforceable
+- [H-LIM-0403] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0404] assign_route_template — limiter applies to template
+- [H-LIM-0405] delete_assigned_profile — fails domain error
+- [H-LIM-0406] delete_unassigned_profile — succeeds
+- [H-LIM-0407] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0408] create_profile_valid — profile enforceable
+- [H-LIM-0409] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0410] assign_route_template — limiter applies to template
+- [H-LIM-0411] delete_assigned_profile — fails domain error
+- [H-LIM-0412] delete_unassigned_profile — succeeds
+- [H-LIM-0413] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0414] create_profile_valid — profile enforceable
+- [H-LIM-0415] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0416] assign_route_template — limiter applies to template
+- [H-LIM-0417] delete_assigned_profile — fails domain error
+- [H-LIM-0418] delete_unassigned_profile — succeeds
+- [H-LIM-0419] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0420] create_profile_valid — profile enforceable
+- [H-LIM-0421] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0422] assign_route_template — limiter applies to template
+- [H-LIM-0423] delete_assigned_profile — fails domain error
+- [H-LIM-0424] delete_unassigned_profile — succeeds
+- [H-LIM-0425] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0426] create_profile_valid — profile enforceable
+- [H-LIM-0427] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0428] assign_route_template — limiter applies to template
+- [H-LIM-0429] delete_assigned_profile — fails domain error
+- [H-LIM-0430] delete_unassigned_profile — succeeds
+- [H-LIM-0431] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0432] create_profile_valid — profile enforceable
+- [H-LIM-0433] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0434] assign_route_template — limiter applies to template
+- [H-LIM-0435] delete_assigned_profile — fails domain error
+- [H-LIM-0436] delete_unassigned_profile — succeeds
+- [H-LIM-0437] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0438] create_profile_valid — profile enforceable
+- [H-LIM-0439] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0440] assign_route_template — limiter applies to template
+- [H-LIM-0441] delete_assigned_profile — fails domain error
+- [H-LIM-0442] delete_unassigned_profile — succeeds
+- [H-LIM-0443] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0444] create_profile_valid — profile enforceable
+- [H-LIM-0445] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0446] assign_route_template — limiter applies to template
+- [H-LIM-0447] delete_assigned_profile — fails domain error
+- [H-LIM-0448] delete_unassigned_profile — succeeds
+- [H-LIM-0449] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0450] create_profile_valid — profile enforceable
+- [H-LIM-0451] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0452] assign_route_template — limiter applies to template
+- [H-LIM-0453] delete_assigned_profile — fails domain error
+- [H-LIM-0454] delete_unassigned_profile — succeeds
+- [H-LIM-0455] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0456] create_profile_valid — profile enforceable
+- [H-LIM-0457] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0458] assign_route_template — limiter applies to template
+- [H-LIM-0459] delete_assigned_profile — fails domain error
+- [H-LIM-0460] delete_unassigned_profile — succeeds
+- [H-LIM-0461] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0462] create_profile_valid — profile enforceable
+- [H-LIM-0463] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0464] assign_route_template — limiter applies to template
+- [H-LIM-0465] delete_assigned_profile — fails domain error
+- [H-LIM-0466] delete_unassigned_profile — succeeds
+- [H-LIM-0467] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0468] create_profile_valid — profile enforceable
+- [H-LIM-0469] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0470] assign_route_template — limiter applies to template
+- [H-LIM-0471] delete_assigned_profile — fails domain error
+- [H-LIM-0472] delete_unassigned_profile — succeeds
+- [H-LIM-0473] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0474] create_profile_valid — profile enforceable
+- [H-LIM-0475] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0476] assign_route_template — limiter applies to template
+- [H-LIM-0477] delete_assigned_profile — fails domain error
+- [H-LIM-0478] delete_unassigned_profile — succeeds
+- [H-LIM-0479] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0480] create_profile_valid — profile enforceable
+- [H-LIM-0481] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0482] assign_route_template — limiter applies to template
+- [H-LIM-0483] delete_assigned_profile — fails domain error
+- [H-LIM-0484] delete_unassigned_profile — succeeds
+- [H-LIM-0485] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0486] create_profile_valid — profile enforceable
+- [H-LIM-0487] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0488] assign_route_template — limiter applies to template
+- [H-LIM-0489] delete_assigned_profile — fails domain error
+- [H-LIM-0490] delete_unassigned_profile — succeeds
+- [H-LIM-0491] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0492] create_profile_valid — profile enforceable
+- [H-LIM-0493] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0494] assign_route_template — limiter applies to template
+- [H-LIM-0495] delete_assigned_profile — fails domain error
+- [H-LIM-0496] delete_unassigned_profile — succeeds
+- [H-LIM-0497] 429_headers_presence — Retry-After & X-RateLimit-* present
+- [H-LIM-0498] create_profile_valid — profile enforceable
+- [H-LIM-0499] update_profile_params — new τ/burst applied immediately
+- [H-LIM-0500] assign_route_template — limiter applies to template
+### E.10 Cancellation & Deadlines
+- [I-CAN-0001] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0002] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0003] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0004] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0005] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0006] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0007] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0008] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0009] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0010] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0011] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0012] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0013] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0014] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0015] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0016] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0017] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0018] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0019] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0020] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0021] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0022] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0023] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0024] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0025] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0026] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0027] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0028] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0029] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0030] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0031] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0032] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0033] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0034] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0035] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0036] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0037] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0038] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0039] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0040] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0041] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0042] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0043] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0044] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0045] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0046] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0047] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0048] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0049] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0050] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0051] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0052] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0053] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0054] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0055] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0056] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0057] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0058] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0059] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0060] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0061] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0062] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0063] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0064] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0065] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0066] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0067] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0068] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0069] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0070] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0071] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0072] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0073] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0074] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0075] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0076] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0077] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0078] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0079] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0080] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0081] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0082] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0083] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0084] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0085] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0086] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0087] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0088] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0089] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0090] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0091] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0092] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0093] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0094] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0095] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0096] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0097] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0098] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0099] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0100] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0101] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0102] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0103] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0104] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0105] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0106] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0107] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0108] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0109] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0110] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0111] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0112] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0113] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0114] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0115] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0116] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0117] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0118] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0119] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0120] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0121] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0122] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0123] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0124] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0125] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0126] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0127] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0128] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0129] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0130] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0131] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0132] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0133] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0134] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0135] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0136] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0137] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0138] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0139] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0140] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0141] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0142] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0143] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0144] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0145] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0146] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0147] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0148] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0149] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0150] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0151] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0152] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0153] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0154] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0155] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0156] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0157] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0158] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0159] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0160] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0161] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0162] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0163] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0164] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0165] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0166] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0167] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0168] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0169] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0170] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0171] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0172] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0173] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0174] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0175] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0176] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0177] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0178] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0179] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0180] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0181] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0182] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0183] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0184] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0185] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0186] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0187] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0188] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0189] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0190] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0191] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0192] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0193] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0194] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0195] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0196] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0197] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0198] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0199] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0200] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0201] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0202] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0203] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0204] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0205] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0206] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0207] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0208] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0209] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0210] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0211] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0212] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0213] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0214] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0215] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0216] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0217] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0218] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0219] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0220] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0221] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0222] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0223] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0224] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0225] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0226] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0227] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0228] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0229] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0230] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0231] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0232] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0233] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0234] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0235] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0236] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0237] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0238] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0239] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0240] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0241] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0242] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0243] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0244] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0245] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0246] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0247] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0248] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0249] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0250] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0251] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0252] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0253] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0254] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0255] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0256] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0257] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0258] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0259] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0260] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0261] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0262] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0263] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0264] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0265] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0266] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0267] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0268] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0269] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0270] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0271] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0272] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0273] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0274] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0275] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0276] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0277] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0278] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0279] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0280] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0281] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0282] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0283] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0284] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0285] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0286] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0287] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0288] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0289] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0290] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0291] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0292] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0293] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0294] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0295] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0296] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0297] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0298] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0299] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0300] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0301] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0302] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0303] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0304] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0305] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0306] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0307] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0308] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0309] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0310] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0311] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0312] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0313] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0314] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0315] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0316] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0317] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0318] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0319] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0320] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0321] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0322] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0323] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0324] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0325] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0326] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0327] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0328] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0329] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0330] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0331] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0332] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0333] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0334] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0335] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0336] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0337] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0338] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0339] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0340] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0341] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0342] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0343] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0344] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0345] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0346] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0347] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0348] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0349] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0350] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0351] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0352] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0353] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0354] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0355] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0356] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0357] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0358] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0359] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0360] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0361] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0362] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0363] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0364] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0365] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0366] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0367] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0368] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0369] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0370] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0371] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0372] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0373] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0374] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0375] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0376] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0377] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0378] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0379] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0380] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0381] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0382] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0383] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0384] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0385] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0386] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0387] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0388] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0389] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0390] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0391] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0392] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0393] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0394] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0395] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0396] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0397] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0398] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0399] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0400] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0401] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0402] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0403] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0404] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0405] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0406] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0407] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0408] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0409] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0410] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0411] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0412] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0413] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0414] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0415] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0416] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0417] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0418] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0419] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0420] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0421] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0422] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0423] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0424] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0425] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0426] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0427] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0428] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0429] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0430] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0431] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0432] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0433] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0434] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0435] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0436] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0437] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0438] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0439] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0440] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0441] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0442] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0443] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0444] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0445] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0446] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0447] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0448] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0449] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0450] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0451] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0452] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0453] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0454] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0455] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0456] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0457] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0458] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0459] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0460] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0461] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0462] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0463] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0464] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0465] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0466] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0467] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0468] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0469] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0470] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0471] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0472] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0473] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0474] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0475] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0476] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0477] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0478] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0479] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0480] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0481] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0482] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0483] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0484] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0485] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0486] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0487] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0488] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0489] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0490] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0491] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0492] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0493] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0494] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0495] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0496] cancel_immediately — terminal(cancelled) within bound; no further deltas
+- [I-CAN-0497] cancel_mid_stream — terminal(cancelled) then silence
+- [I-CAN-0498] timeout_short_deadline — terminal(timeout)+error
+- [I-CAN-0499] timeout_then_client_disconnect — terminal and cleanup still occur
+- [I-CAN-0500] cancel_immediately — terminal(cancelled) within bound; no further deltas
+### E.11 Resume Contract Compliance
+- [J-RES-0001] Reconnect case 1 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0002] Reconnect case 2 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0003] Reconnect case 3 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0004] Reconnect case 4 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0005] Reconnect case 5 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0006] Reconnect case 6 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0007] Reconnect case 7 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0008] Reconnect case 8 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0009] Reconnect case 9 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0010] Reconnect case 10 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0011] Reconnect case 11 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0012] Reconnect case 12 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0013] Reconnect case 13 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0014] Reconnect case 14 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0015] Reconnect case 15 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0016] Reconnect case 16 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0017] Reconnect case 17 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0018] Reconnect case 18 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0019] Reconnect case 19 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0020] Reconnect case 20 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0021] Reconnect case 21 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0022] Reconnect case 22 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0023] Reconnect case 23 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0024] Reconnect case 24 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0025] Reconnect case 25 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0026] Reconnect case 26 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0027] Reconnect case 27 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0028] Reconnect case 28 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0029] Reconnect case 29 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0030] Reconnect case 30 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0031] Reconnect case 31 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0032] Reconnect case 32 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0033] Reconnect case 33 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0034] Reconnect case 34 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0035] Reconnect case 35 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0036] Reconnect case 36 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0037] Reconnect case 37 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0038] Reconnect case 38 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0039] Reconnect case 39 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0040] Reconnect case 40 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0041] Reconnect case 41 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0042] Reconnect case 42 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0043] Reconnect case 43 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0044] Reconnect case 44 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0045] Reconnect case 45 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0046] Reconnect case 46 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0047] Reconnect case 47 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0048] Reconnect case 48 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0049] Reconnect case 49 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0050] Reconnect case 50 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0051] Reconnect case 51 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0052] Reconnect case 52 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0053] Reconnect case 53 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0054] Reconnect case 54 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0055] Reconnect case 55 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0056] Reconnect case 56 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0057] Reconnect case 57 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0058] Reconnect case 58 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0059] Reconnect case 59 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0060] Reconnect case 60 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0061] Reconnect case 61 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0062] Reconnect case 62 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0063] Reconnect case 63 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0064] Reconnect case 64 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0065] Reconnect case 65 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0066] Reconnect case 66 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0067] Reconnect case 67 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0068] Reconnect case 68 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0069] Reconnect case 69 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0070] Reconnect case 70 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0071] Reconnect case 71 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0072] Reconnect case 72 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0073] Reconnect case 73 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0074] Reconnect case 74 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0075] Reconnect case 75 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0076] Reconnect case 76 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0077] Reconnect case 77 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0078] Reconnect case 78 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0079] Reconnect case 79 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0080] Reconnect case 80 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0081] Reconnect case 81 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0082] Reconnect case 82 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0083] Reconnect case 83 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0084] Reconnect case 84 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0085] Reconnect case 85 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0086] Reconnect case 86 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0087] Reconnect case 87 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0088] Reconnect case 88 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0089] Reconnect case 89 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0090] Reconnect case 90 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0091] Reconnect case 91 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0092] Reconnect case 92 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0093] Reconnect case 93 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0094] Reconnect case 94 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0095] Reconnect case 95 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0096] Reconnect case 96 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0097] Reconnect case 97 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0098] Reconnect case 98 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0099] Reconnect case 99 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0100] Reconnect case 100 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0101] Reconnect case 101 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0102] Reconnect case 102 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0103] Reconnect case 103 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0104] Reconnect case 104 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0105] Reconnect case 105 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0106] Reconnect case 106 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0107] Reconnect case 107 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0108] Reconnect case 108 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0109] Reconnect case 109 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0110] Reconnect case 110 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0111] Reconnect case 111 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0112] Reconnect case 112 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0113] Reconnect case 113 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0114] Reconnect case 114 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0115] Reconnect case 115 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0116] Reconnect case 116 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0117] Reconnect case 117 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0118] Reconnect case 118 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0119] Reconnect case 119 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0120] Reconnect case 120 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0121] Reconnect case 121 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0122] Reconnect case 122 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0123] Reconnect case 123 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0124] Reconnect case 124 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0125] Reconnect case 125 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0126] Reconnect case 126 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0127] Reconnect case 127 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0128] Reconnect case 128 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0129] Reconnect case 129 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0130] Reconnect case 130 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0131] Reconnect case 131 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0132] Reconnect case 132 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0133] Reconnect case 133 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0134] Reconnect case 134 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0135] Reconnect case 135 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0136] Reconnect case 136 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0137] Reconnect case 137 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0138] Reconnect case 138 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0139] Reconnect case 139 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0140] Reconnect case 140 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0141] Reconnect case 141 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0142] Reconnect case 142 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0143] Reconnect case 143 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0144] Reconnect case 144 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0145] Reconnect case 145 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0146] Reconnect case 146 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0147] Reconnect case 147 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0148] Reconnect case 148 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0149] Reconnect case 149 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0150] Reconnect case 150 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0151] Reconnect case 151 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0152] Reconnect case 152 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0153] Reconnect case 153 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0154] Reconnect case 154 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0155] Reconnect case 155 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0156] Reconnect case 156 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0157] Reconnect case 157 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0158] Reconnect case 158 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0159] Reconnect case 159 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0160] Reconnect case 160 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0161] Reconnect case 161 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0162] Reconnect case 162 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0163] Reconnect case 163 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0164] Reconnect case 164 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0165] Reconnect case 165 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0166] Reconnect case 166 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0167] Reconnect case 167 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0168] Reconnect case 168 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0169] Reconnect case 169 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0170] Reconnect case 170 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0171] Reconnect case 171 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0172] Reconnect case 172 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0173] Reconnect case 173 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0174] Reconnect case 174 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0175] Reconnect case 175 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0176] Reconnect case 176 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0177] Reconnect case 177 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0178] Reconnect case 178 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0179] Reconnect case 179 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0180] Reconnect case 180 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0181] Reconnect case 181 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0182] Reconnect case 182 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0183] Reconnect case 183 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0184] Reconnect case 184 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0185] Reconnect case 185 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0186] Reconnect case 186 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0187] Reconnect case 187 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0188] Reconnect case 188 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0189] Reconnect case 189 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0190] Reconnect case 190 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0191] Reconnect case 191 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0192] Reconnect case 192 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0193] Reconnect case 193 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0194] Reconnect case 194 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0195] Reconnect case 195 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0196] Reconnect case 196 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0197] Reconnect case 197 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0198] Reconnect case 198 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0199] Reconnect case 199 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0200] Reconnect case 200 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0201] Reconnect case 201 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0202] Reconnect case 202 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0203] Reconnect case 203 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0204] Reconnect case 204 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0205] Reconnect case 205 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0206] Reconnect case 206 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0207] Reconnect case 207 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0208] Reconnect case 208 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0209] Reconnect case 209 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0210] Reconnect case 210 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0211] Reconnect case 211 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0212] Reconnect case 212 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0213] Reconnect case 213 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0214] Reconnect case 214 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0215] Reconnect case 215 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0216] Reconnect case 216 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0217] Reconnect case 217 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0218] Reconnect case 218 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0219] Reconnect case 219 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0220] Reconnect case 220 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0221] Reconnect case 221 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0222] Reconnect case 222 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0223] Reconnect case 223 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0224] Reconnect case 224 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0225] Reconnect case 225 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0226] Reconnect case 226 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0227] Reconnect case 227 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0228] Reconnect case 228 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0229] Reconnect case 229 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0230] Reconnect case 230 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0231] Reconnect case 231 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0232] Reconnect case 232 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0233] Reconnect case 233 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0234] Reconnect case 234 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0235] Reconnect case 235 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0236] Reconnect case 236 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0237] Reconnect case 237 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0238] Reconnect case 238 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0239] Reconnect case 239 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0240] Reconnect case 240 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0241] Reconnect case 241 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0242] Reconnect case 242 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0243] Reconnect case 243 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0244] Reconnect case 244 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0245] Reconnect case 245 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0246] Reconnect case 246 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0247] Reconnect case 247 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0248] Reconnect case 248 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0249] Reconnect case 249 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0250] Reconnect case 250 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0251] Reconnect case 251 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0252] Reconnect case 252 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0253] Reconnect case 253 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0254] Reconnect case 254 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0255] Reconnect case 255 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0256] Reconnect case 256 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0257] Reconnect case 257 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0258] Reconnect case 258 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0259] Reconnect case 259 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0260] Reconnect case 260 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0261] Reconnect case 261 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0262] Reconnect case 262 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0263] Reconnect case 263 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0264] Reconnect case 264 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0265] Reconnect case 265 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0266] Reconnect case 266 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0267] Reconnect case 267 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0268] Reconnect case 268 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0269] Reconnect case 269 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0270] Reconnect case 270 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0271] Reconnect case 271 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0272] Reconnect case 272 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0273] Reconnect case 273 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0274] Reconnect case 274 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0275] Reconnect case 275 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0276] Reconnect case 276 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0277] Reconnect case 277 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0278] Reconnect case 278 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0279] Reconnect case 279 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0280] Reconnect case 280 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0281] Reconnect case 281 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0282] Reconnect case 282 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0283] Reconnect case 283 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0284] Reconnect case 284 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0285] Reconnect case 285 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0286] Reconnect case 286 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0287] Reconnect case 287 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0288] Reconnect case 288 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0289] Reconnect case 289 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0290] Reconnect case 290 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0291] Reconnect case 291 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0292] Reconnect case 292 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0293] Reconnect case 293 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0294] Reconnect case 294 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0295] Reconnect case 295 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0296] Reconnect case 296 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0297] Reconnect case 297 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0298] Reconnect case 298 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0299] Reconnect case 299 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0300] Reconnect case 300 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0301] Reconnect case 301 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0302] Reconnect case 302 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0303] Reconnect case 303 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0304] Reconnect case 304 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0305] Reconnect case 305 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0306] Reconnect case 306 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0307] Reconnect case 307 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0308] Reconnect case 308 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0309] Reconnect case 309 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0310] Reconnect case 310 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0311] Reconnect case 311 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0312] Reconnect case 312 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0313] Reconnect case 313 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0314] Reconnect case 314 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0315] Reconnect case 315 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0316] Reconnect case 316 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0317] Reconnect case 317 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0318] Reconnect case 318 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0319] Reconnect case 319 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0320] Reconnect case 320 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0321] Reconnect case 321 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0322] Reconnect case 322 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0323] Reconnect case 323 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0324] Reconnect case 324 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0325] Reconnect case 325 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0326] Reconnect case 326 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0327] Reconnect case 327 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0328] Reconnect case 328 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0329] Reconnect case 329 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0330] Reconnect case 330 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0331] Reconnect case 331 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0332] Reconnect case 332 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0333] Reconnect case 333 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0334] Reconnect case 334 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0335] Reconnect case 335 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0336] Reconnect case 336 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0337] Reconnect case 337 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0338] Reconnect case 338 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0339] Reconnect case 339 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0340] Reconnect case 340 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0341] Reconnect case 341 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0342] Reconnect case 342 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0343] Reconnect case 343 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0344] Reconnect case 344 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0345] Reconnect case 345 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0346] Reconnect case 346 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0347] Reconnect case 347 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0348] Reconnect case 348 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0349] Reconnect case 349 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0350] Reconnect case 350 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0351] Reconnect case 351 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0352] Reconnect case 352 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0353] Reconnect case 353 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0354] Reconnect case 354 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0355] Reconnect case 355 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0356] Reconnect case 356 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0357] Reconnect case 357 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0358] Reconnect case 358 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0359] Reconnect case 359 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0360] Reconnect case 360 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0361] Reconnect case 361 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0362] Reconnect case 362 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0363] Reconnect case 363 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0364] Reconnect case 364 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0365] Reconnect case 365 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0366] Reconnect case 366 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0367] Reconnect case 367 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0368] Reconnect case 368 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0369] Reconnect case 369 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0370] Reconnect case 370 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0371] Reconnect case 371 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0372] Reconnect case 372 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0373] Reconnect case 373 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0374] Reconnect case 374 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0375] Reconnect case 375 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0376] Reconnect case 376 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0377] Reconnect case 377 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0378] Reconnect case 378 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0379] Reconnect case 379 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0380] Reconnect case 380 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0381] Reconnect case 381 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0382] Reconnect case 382 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0383] Reconnect case 383 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0384] Reconnect case 384 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0385] Reconnect case 385 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0386] Reconnect case 386 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0387] Reconnect case 387 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0388] Reconnect case 388 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0389] Reconnect case 389 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0390] Reconnect case 390 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0391] Reconnect case 391 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0392] Reconnect case 392 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0393] Reconnect case 393 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0394] Reconnect case 394 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0395] Reconnect case 395 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0396] Reconnect case 396 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0397] Reconnect case 397 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0398] Reconnect case 398 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0399] Reconnect case 399 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0400] Reconnect case 400 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0401] Reconnect case 401 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0402] Reconnect case 402 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0403] Reconnect case 403 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0404] Reconnect case 404 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0405] Reconnect case 405 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0406] Reconnect case 406 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0407] Reconnect case 407 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0408] Reconnect case 408 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0409] Reconnect case 409 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0410] Reconnect case 410 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0411] Reconnect case 411 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0412] Reconnect case 412 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0413] Reconnect case 413 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0414] Reconnect case 414 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0415] Reconnect case 415 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0416] Reconnect case 416 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0417] Reconnect case 417 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0418] Reconnect case 418 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0419] Reconnect case 419 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0420] Reconnect case 420 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0421] Reconnect case 421 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0422] Reconnect case 422 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0423] Reconnect case 423 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0424] Reconnect case 424 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0425] Reconnect case 425 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0426] Reconnect case 426 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0427] Reconnect case 427 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0428] Reconnect case 428 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0429] Reconnect case 429 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0430] Reconnect case 430 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0431] Reconnect case 431 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0432] Reconnect case 432 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0433] Reconnect case 433 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0434] Reconnect case 434 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0435] Reconnect case 435 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0436] Reconnect case 436 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0437] Reconnect case 437 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0438] Reconnect case 438 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0439] Reconnect case 439 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0440] Reconnect case 440 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0441] Reconnect case 441 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0442] Reconnect case 442 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0443] Reconnect case 443 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0444] Reconnect case 444 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0445] Reconnect case 445 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0446] Reconnect case 446 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0447] Reconnect case 447 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0448] Reconnect case 448 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0449] Reconnect case 449 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0450] Reconnect case 450 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0451] Reconnect case 451 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0452] Reconnect case 452 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0453] Reconnect case 453 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0454] Reconnect case 454 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0455] Reconnect case 455 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0456] Reconnect case 456 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0457] Reconnect case 457 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0458] Reconnect case 458 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0459] Reconnect case 459 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0460] Reconnect case 460 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0461] Reconnect case 461 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0462] Reconnect case 462 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0463] Reconnect case 463 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0464] Reconnect case 464 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0465] Reconnect case 465 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0466] Reconnect case 466 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0467] Reconnect case 467 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0468] Reconnect case 468 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0469] Reconnect case 469 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0470] Reconnect case 470 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0471] Reconnect case 471 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0472] Reconnect case 472 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0473] Reconnect case 473 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0474] Reconnect case 474 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0475] Reconnect case 475 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0476] Reconnect case 476 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0477] Reconnect case 477 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0478] Reconnect case 478 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0479] Reconnect case 479 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0480] Reconnect case 480 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0481] Reconnect case 481 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0482] Reconnect case 482 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0483] Reconnect case 483 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0484] Reconnect case 484 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0485] Reconnect case 485 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0486] Reconnect case 486 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0487] Reconnect case 487 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0488] Reconnect case 488 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0489] Reconnect case 489 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0490] Reconnect case 490 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0491] Reconnect case 491 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0492] Reconnect case 492 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0493] Reconnect case 493 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0494] Reconnect case 494 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0495] Reconnect case 495 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0496] Reconnect case 496 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0497] Reconnect case 497 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0498] Reconnect case 498 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0499] Reconnect case 499 — server replays chunks from idx+1 and events since ts; no duplicates.
+- [J-RES-0500] Reconnect case 500 — server replays chunks from idx+1 and events since ts; no duplicates.
+## Appendix F — Property‑Based Specifications
+- P-DELTA-ORDER — For any message, chunk indices are strictly increasing and contiguous starting at 0.
+- P-ROLE-FIRST — Exactly one assistant delta contains `role`, and it is the first.
+- P-REPLAY-IDEMPOTENT — Replaying from idx+1 yields identical final transcript to uninterrupted stream.
+- P-UNREAD-MONOTONIC — Unread per user/thread decreases only on mark‑read or deletion; otherwise increases by one per new message.
+- P-RLS-ISOLATION — No visibility/mutation across conversations without active membership.
+- P-CSRF-STRICT — All cookie‑based mutations reject absent/invalid tokens.
+- P-RATE-LIMIT-SOUNDNESS — Observed acceptance pattern matches configured GCRA within ε.
+
+## Appendix G — Threat Model & Security Requirements
+- Session Fixation — Prevented by rotation on login + privilege change; opaque sids; HttpOnly.
+- CSRF — Mitigated by mandatory X‑CSRF‑Token on cookie mutations; Bearer exempt.
+- Privilege Escalation — Prevented by RLS + SP checks; forced rotation on role change.
+- Replay/Duplication — Prevented by unique (message_id,idx) and idempotent replays.
+- Rate‑Limit Bypass — Prevented by middleware + DB‑backed profiles and live reload.
+- SSE Hijack — Controlled by cookie scope, SameSite=Lax, and auth checks on subscribe.
+
+## Appendix H — Data Retention & Pruning Policies
+- SSE event log: prune older than `sse.replay_retention_seconds`.
+- Typing states: periodic cleanup for expired rows.
+- Presence: configurable retention of last_seen_at; defaults to keep for audit.
+- API keys: soft‑delete on revoke; keep usage for audit.
+
+## Appendix I — Configuration Keys Reference
+- `auth.idle_seconds` — Sliding window; rotation extends by this amount.
+- `auth.absolute_seconds` — Hard cap; refresh denied beyond this.
+- `auth.csrf` — Enable/disable CSRF checks (cookie flows).
+- `auth.suspicious_check` — Enable UA/IP anomaly detection.
+- `limits.enabled` — Enable/disable limiter globally.
+- `limits.default_profile` — Fallback profile if no route assignment.
+- `api.openai_compat` — Keep OpenAI semantics for `/v1` endpoints.
+- `sse.replay_retention_seconds` — Retention horizon for event backfill.
+- `sse.max_backfill_events` — Cap on backfilled events per connect.
+
+## Appendix J — Extended Event Sequences (Schema‑Level Illustrations)
+- [EVT-0001] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0002] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0003] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0004] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0005] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0006] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0007] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0008] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0009] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0010] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0011] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0012] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0013] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0014] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0015] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0016] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0017] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0018] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0019] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0020] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0021] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0022] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0023] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0024] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0025] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0026] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0027] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0028] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0029] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0030] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0031] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0032] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0033] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0034] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0035] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0036] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0037] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0038] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0039] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0040] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0041] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0042] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0043] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0044] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0045] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0046] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0047] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0048] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0049] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0050] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0051] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0052] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0053] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0054] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0055] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0056] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0057] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0058] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0059] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0060] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0061] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0062] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0063] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0064] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0065] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0066] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0067] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0068] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0069] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0070] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0071] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0072] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0073] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0074] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0075] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0076] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0077] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0078] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0079] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0080] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0081] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0082] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0083] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0084] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0085] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0086] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0087] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0088] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0089] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0090] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0091] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0092] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0093] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0094] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0095] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0096] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0097] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0098] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0099] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0100] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0101] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0102] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0103] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0104] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0105] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0106] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0107] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0108] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0109] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0110] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0111] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0112] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0113] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0114] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0115] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0116] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0117] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0118] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0119] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0120] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0121] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0122] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0123] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0124] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0125] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0126] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0127] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0128] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0129] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0130] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0131] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0132] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0133] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0134] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0135] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0136] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0137] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0138] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0139] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0140] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0141] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0142] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0143] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0144] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0145] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0146] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0147] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0148] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0149] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0150] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0151] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0152] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0153] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0154] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0155] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0156] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0157] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0158] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0159] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0160] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0161] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0162] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0163] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0164] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0165] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0166] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0167] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0168] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0169] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0170] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0171] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0172] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0173] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0174] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0175] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0176] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0177] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0178] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0179] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0180] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0181] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0182] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0183] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0184] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0185] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0186] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0187] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0188] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0189] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0190] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0191] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0192] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0193] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0194] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0195] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0196] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0197] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0198] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0199] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0200] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0201] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0202] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0203] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0204] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0205] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0206] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0207] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0208] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0209] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0210] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0211] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0212] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0213] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0214] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0215] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0216] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0217] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0218] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0219] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0220] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0221] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0222] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0223] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0224] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0225] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0226] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0227] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0228] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0229] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0230] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0231] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0232] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0233] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0234] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0235] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0236] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0237] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0238] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0239] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0240] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0241] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0242] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0243] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0244] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0245] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0246] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0247] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0248] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0249] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0250] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0251] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0252] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0253] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0254] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0255] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0256] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0257] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0258] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0259] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0260] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0261] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0262] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0263] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0264] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0265] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0266] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0267] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0268] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0269] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0270] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0271] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0272] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0273] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0274] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0275] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0276] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0277] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0278] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0279] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0280] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0281] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0282] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0283] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0284] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0285] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0286] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0287] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0288] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0289] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0290] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0291] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0292] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0293] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0294] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0295] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0296] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0297] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0298] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0299] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0300] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0301] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0302] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0303] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0304] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0305] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0306] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0307] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0308] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0309] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0310] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0311] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0312] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0313] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0314] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0315] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0316] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0317] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0318] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0319] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0320] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0321] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0322] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0323] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0324] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0325] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0326] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0327] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0328] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0329] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0330] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0331] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0332] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0333] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0334] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0335] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0336] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0337] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0338] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0339] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0340] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0341] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0342] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0343] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0344] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0345] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0346] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0347] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0348] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0349] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0350] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0351] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0352] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0353] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0354] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0355] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0356] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0357] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0358] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0359] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0360] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0361] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0362] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0363] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0364] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0365] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0366] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0367] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0368] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0369] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0370] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0371] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0372] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0373] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0374] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0375] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0376] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0377] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0378] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0379] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0380] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0381] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0382] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0383] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0384] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0385] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0386] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0387] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0388] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0389] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0390] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0391] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0392] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0393] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0394] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0395] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0396] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0397] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0398] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0399] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0400] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0401] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0402] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0403] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0404] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0405] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0406] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0407] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0408] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0409] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0410] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0411] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0412] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0413] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0414] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0415] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0416] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0417] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0418] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0419] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0420] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0421] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0422] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0423] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0424] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0425] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0426] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0427] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0428] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0429] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0430] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0431] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0432] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0433] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0434] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0435] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0436] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0437] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0438] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0439] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0440] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0441] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0442] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0443] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0444] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0445] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0446] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0447] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0448] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0449] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0450] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0451] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0452] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0453] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0454] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0455] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0456] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0457] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0458] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0459] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0460] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0461] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0462] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0463] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0464] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0465] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0466] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0467] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0468] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0469] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0470] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0471] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0472] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0473] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0474] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0475] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0476] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0477] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0478] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0479] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0480] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0481] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0482] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0483] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0484] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0485] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0486] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0487] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0488] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0489] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0490] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0491] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0492] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0493] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0494] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0495] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0496] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0497] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0498] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0499] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0500] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0501] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0502] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0503] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0504] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0505] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0506] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0507] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0508] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0509] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0510] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0511] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0512] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0513] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0514] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0515] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0516] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0517] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0518] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0519] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0520] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0521] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0522] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0523] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0524] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0525] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0526] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0527] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0528] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0529] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0530] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0531] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0532] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0533] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0534] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0535] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0536] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0537] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0538] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0539] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0540] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0541] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0542] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0543] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0544] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0545] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0546] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0547] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0548] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0549] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0550] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0551] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0552] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0553] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0554] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0555] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0556] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0557] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0558] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0559] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0560] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0561] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0562] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0563] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0564] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0565] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0566] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0567] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0568] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0569] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0570] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0571] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0572] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0573] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0574] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0575] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0576] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0577] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0578] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0579] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0580] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0581] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0582] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0583] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0584] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0585] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0586] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0587] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0588] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0589] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0590] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0591] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0592] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0593] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0594] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0595] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0596] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0597] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0598] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0599] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0600] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0601] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0602] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0603] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0604] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0605] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0606] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0607] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0608] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0609] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0610] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0611] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0612] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0613] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0614] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0615] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0616] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0617] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0618] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0619] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0620] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0621] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0622] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0623] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0624] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0625] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0626] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0627] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0628] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0629] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0630] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0631] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0632] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0633] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0634] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0635] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0636] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0637] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0638] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0639] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0640] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0641] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0642] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0643] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0644] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0645] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0646] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0647] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0648] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0649] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0650] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0651] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0652] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0653] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0654] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0655] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0656] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0657] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0658] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0659] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0660] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0661] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0662] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0663] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0664] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0665] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0666] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0667] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0668] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0669] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0670] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0671] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0672] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0673] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0674] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0675] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0676] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0677] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0678] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0679] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0680] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0681] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0682] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0683] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0684] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0685] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0686] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0687] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0688] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0689] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0690] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0691] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0692] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0693] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0694] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0695] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0696] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0697] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0698] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0699] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0700] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0701] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0702] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0703] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0704] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0705] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0706] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0707] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0708] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0709] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0710] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0711] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0712] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0713] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0714] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0715] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0716] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0717] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0718] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0719] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0720] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0721] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0722] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0723] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0724] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0725] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0726] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0727] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0728] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0729] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0730] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0731] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0732] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0733] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0734] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0735] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0736] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0737] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0738] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0739] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0740] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0741] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0742] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0743] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0744] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0745] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0746] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0747] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0748] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0749] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0750] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0751] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0752] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0753] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0754] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0755] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0756] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0757] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0758] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0759] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0760] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0761] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0762] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0763] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0764] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0765] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0766] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0767] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0768] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0769] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0770] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0771] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0772] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0773] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0774] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0775] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0776] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0777] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0778] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0779] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0780] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0781] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0782] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0783] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0784] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0785] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0786] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0787] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0788] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0789] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0790] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0791] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0792] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0793] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0794] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0795] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0796] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0797] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0798] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0799] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0800] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0801] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0802] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0803] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0804] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0805] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0806] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0807] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0808] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0809] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0810] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0811] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0812] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0813] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0814] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0815] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0816] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0817] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0818] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0819] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0820] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0821] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0822] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0823] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0824] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0825] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0826] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0827] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0828] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0829] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0830] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0831] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0832] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0833] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0834] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0835] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0836] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0837] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0838] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0839] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0840] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0841] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0842] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0843] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0844] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0845] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0846] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0847] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0848] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0849] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0850] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0851] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0852] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0853] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0854] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0855] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0856] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0857] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0858] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0859] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0860] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0861] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0862] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0863] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0864] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0865] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0866] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0867] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0868] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0869] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0870] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0871] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0872] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0873] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0874] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0875] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0876] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0877] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0878] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0879] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0880] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0881] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0882] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0883] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0884] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0885] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0886] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0887] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0888] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0889] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0890] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0891] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0892] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0893] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0894] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0895] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0896] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0897] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0898] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0899] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0900] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0901] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0902] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0903] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0904] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0905] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0906] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0907] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0908] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0909] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0910] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0911] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0912] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0913] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0914] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0915] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0916] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0917] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0918] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0919] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0920] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0921] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0922] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0923] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0924] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0925] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0926] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0927] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0928] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0929] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0930] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0931] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0932] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0933] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0934] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0935] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0936] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0937] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0938] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0939] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0940] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0941] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0942] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0943] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0944] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0945] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0946] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0947] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0948] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0949] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0950] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0951] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0952] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0953] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0954] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0955] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0956] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0957] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0958] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0959] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0960] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0961] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0962] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0963] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0964] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0965] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0966] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0967] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0968] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0969] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0970] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0971] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0972] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0973] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0974] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0975] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0976] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0977] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0978] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0979] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0980] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0981] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0982] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0983] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0984] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0985] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0986] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0987] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0988] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0989] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0990] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0991] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0992] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0993] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0994] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0995] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0996] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0997] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0998] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-0999] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1000] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1001] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1002] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1003] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1004] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1005] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1006] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1007] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1008] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1009] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1010] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1011] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1012] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1013] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1014] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1015] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1016] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1017] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1018] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1019] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1020] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1021] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1022] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1023] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1024] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1025] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1026] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1027] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1028] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1029] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1030] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1031] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1032] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1033] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1034] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1035] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1036] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1037] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1038] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1039] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1040] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1041] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1042] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1043] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1044] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1045] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1046] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1047] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1048] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1049] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1050] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1051] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1052] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1053] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1054] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1055] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1056] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1057] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1058] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1059] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1060] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1061] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1062] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1063] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1064] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1065] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1066] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1067] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1068] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1069] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1070] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1071] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1072] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1073] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1074] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1075] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1076] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1077] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1078] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1079] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1080] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1081] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1082] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1083] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1084] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1085] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1086] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1087] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1088] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1089] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1090] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1091] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1092] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1093] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1094] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1095] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1096] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1097] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1098] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1099] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1100] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1101] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1102] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1103] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1104] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1105] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1106] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1107] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1108] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1109] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1110] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1111] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1112] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1113] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1114] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1115] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1116] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1117] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1118] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1119] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1120] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1121] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1122] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1123] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1124] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1125] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1126] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1127] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1128] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1129] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1130] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1131] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1132] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1133] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1134] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1135] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1136] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1137] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1138] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1139] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1140] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1141] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1142] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1143] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1144] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1145] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1146] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1147] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1148] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1149] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1150] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1151] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1152] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1153] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1154] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1155] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1156] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1157] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1158] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1159] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1160] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1161] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1162] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1163] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1164] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1165] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1166] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1167] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1168] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1169] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1170] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1171] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1172] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1173] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1174] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1175] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1176] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1177] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1178] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1179] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1180] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1181] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1182] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1183] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1184] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1185] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1186] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1187] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1188] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1189] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1190] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1191] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1192] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1193] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1194] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1195] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1196] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1197] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1198] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1199] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
+- [EVT-1200] message.delta x N → message.done (finish_reason varies) → presence.update → typing.update → unread.update — verify ordering & replay.
