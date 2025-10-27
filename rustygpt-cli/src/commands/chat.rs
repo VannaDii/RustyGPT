@@ -9,6 +9,7 @@ use shared::models::{
     ConversationStreamEvent, MembershipChangeAction, MessageRole, ReplyMessageRequest,
     ThreadListResponse, ThreadTreeResponse, UnreadSummaryResponse,
 };
+use tokio::time::{Duration, sleep};
 use url::Url;
 use uuid::Uuid;
 
@@ -163,43 +164,86 @@ pub async fn handle_follow(args: FollowArgs) -> Result<()> {
     let stream_url = api_base
         .join(&format!("stream/conversations/{}", conversation_id))
         .context("invalid stream endpoint")?;
-    let response = client
-        .get(stream_url)
-        .send()
-        .await
-        .context("failed to connect to stream")?
-        .error_for_status()
-        .context("stream request rejected")?;
+    let mut last_event_id: Option<String> = None;
+    let mut last_timestamp: Option<i64> = None;
 
-    let mut stream = response.bytes_stream();
-    let mut event_name: Option<String> = None;
-    let mut data_buffer = String::new();
+    loop {
+        let mut url = stream_url.clone();
+        if let Some(ts) = last_timestamp {
+            url.query_pairs_mut().append_pair("since", &ts.to_string());
+        }
 
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk?;
-        let text = String::from_utf8_lossy(&bytes);
+        let mut request = client.get(url);
+        if let Some(id) = &last_event_id {
+            request = request.header("Last-Event-ID", id);
+        }
 
-        for line in text.split('\n') {
-            let trimmed = line.trim_end_matches('\r');
-
-            if trimmed.starts_with("event:") {
-                event_name = Some(trimmed[6..].trim().to_string());
-            } else if trimmed.starts_with("data:") {
-                let payload = trimmed[5..].trim();
-                data_buffer.push_str(payload);
-            } else if trimmed.is_empty() {
-                if let Some(name) = &event_name {
-                    if !data_buffer.is_empty() {
-                        handle_stream_event(name, &data_buffer, args.root, conversation_id).await?;
-                    }
+        let response = match request.send().await {
+            Ok(resp) => match resp.error_for_status() {
+                Ok(ok) => ok,
+                Err(err) => {
+                    eprintln!("[stream] request rejected: {err}");
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
                 }
-                event_name = None;
-                data_buffer.clear();
+            },
+            Err(err) => {
+                eprintln!("[stream] connection failed: {err}");
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+
+        let mut stream = response.bytes_stream();
+        let mut event_name: Option<String> = None;
+        let mut data_buffer = String::new();
+        let mut current_event_id: Option<String> = None;
+
+        while let Some(chunk) = stream.next().await {
+            let bytes = match chunk {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    eprintln!("[stream] chunk error: {err}");
+                    break;
+                }
+            };
+            let text = String::from_utf8_lossy(&bytes);
+
+            for line in text.split('\n') {
+                let trimmed = line.trim_end_matches('\r');
+
+                if trimmed.starts_with("event:") {
+                    event_name = Some(trimmed[6..].trim().to_string());
+                } else if trimmed.starts_with("data:") {
+                    let payload = trimmed[5..].trim();
+                    data_buffer.push_str(payload);
+                } else if trimmed.starts_with("id:") {
+                    current_event_id = Some(trimmed[3..].trim().to_string());
+                } else if trimmed.is_empty() {
+                    if let Some(name) = &event_name {
+                        if !data_buffer.is_empty() && data_buffer != "[DONE]" {
+                            handle_stream_event(name, &data_buffer, args.root, conversation_id)
+                                .await?;
+                        }
+                    }
+                    if let Some(id_value) = current_event_id.take() {
+                        if let Some(ts) = parse_event_timestamp(&id_value) {
+                            last_timestamp = Some(ts);
+                        }
+                        last_event_id = Some(id_value);
+                    }
+                    event_name = None;
+                    data_buffer.clear();
+                }
             }
         }
-    }
 
-    Ok(())
+        if last_event_id.is_none() {
+            return Ok(());
+        }
+
+        sleep(Duration::from_secs(1)).await;
+    }
 }
 
 async fn handle_stream_event(
@@ -291,6 +335,15 @@ async fn handle_stream_event(
     }
 
     Ok(())
+}
+
+fn parse_event_timestamp(event_id: &str) -> Option<i64> {
+    let parts: Vec<&str> = event_id.split(':').collect();
+    if parts.len() == 4 {
+        parts[3].parse::<i64>().ok()
+    } else {
+        None
+    }
 }
 
 async fn fetch_threads(
