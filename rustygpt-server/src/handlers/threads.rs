@@ -697,18 +697,12 @@ pub async fn persist_chunk_if_needed(
     }
 }
 
-pub async fn publish_delta_event(
-    hub: &SharedStreamHub,
-    conversation_id: Uuid,
+pub fn build_delta_event(
     created: &ReplyMessageResponse,
     text_delta: &str,
     chunk_index: i32,
-) {
-    if text_delta.is_empty() {
-        return;
-    }
-
-    let delta = ConversationStreamEvent::MessageDelta {
+) -> ConversationStreamEvent {
+    ConversationStreamEvent::MessageDelta {
         payload: ChatDeltaChunk {
             id: format!("{}:{}", created.message_id, chunk_index),
             object: "chat.completion.chunk".to_string(),
@@ -730,7 +724,21 @@ pub async fn publish_delta_event(
                 finish_reason: None,
             }],
         },
-    };
+    }
+}
+
+pub async fn publish_delta_event(
+    hub: &SharedStreamHub,
+    conversation_id: Uuid,
+    created: &ReplyMessageResponse,
+    text_delta: &str,
+    chunk_index: i32,
+) {
+    if text_delta.is_empty() {
+        return;
+    }
+
+    let delta = build_delta_event(created, text_delta, chunk_index);
 
     hub.publish_chunk_event(conversation_id, delta, chunk_index)
         .await;

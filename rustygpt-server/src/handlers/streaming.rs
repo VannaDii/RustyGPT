@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     convert::Infallible,
     fmt,
     sync::Arc,
@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
+    handlers::threads::build_delta_event,
     http::error::{ApiError, AppResult},
     middleware::request_context::RequestContext,
     services::{
@@ -29,7 +30,10 @@ use crate::{
         sse_persistence::{PersistedStreamEvent, SsePersistence, StreamEventRecord},
     },
 };
-use shared::{config::server::SsePersistenceConfig, models::ConversationStreamEvent};
+use shared::{
+    config::server::SsePersistenceConfig,
+    models::{ConversationStreamEvent, ReplyMessageResponse},
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 struct EventMetadata {
@@ -148,6 +152,14 @@ impl StreamHub {
             persistence,
             persistence_config,
         }
+    }
+
+    pub fn replay_limit(&self) -> usize {
+        self.persistence_config
+            .as_ref()
+            .map(|cfg| cfg.max_events_per_user)
+            .filter(|limit| *limit > 0)
+            .unwrap_or(500)
     }
 
     async fn get_channel(&self, conversation_id: Uuid) -> Arc<ConversationChannel> {
@@ -374,6 +386,82 @@ fn convert_persisted_record(record: PersistedStreamEvent) -> Option<EventEnvelop
     })
 }
 
+async fn chunk_replay_events(
+    service: &ChatService,
+    actor: Uuid,
+    cursor: Option<&ReplayCursor>,
+    limit: usize,
+    existing: &[EventEnvelope],
+) -> Result<Vec<EventEnvelope>, ApiError> {
+    let Some(cursor) = cursor else {
+        return Ok(Vec::new());
+    };
+
+    let Some(message_id) = cursor.message_id else {
+        return Ok(Vec::new());
+    };
+
+    let start_idx = cursor.chunk_index.unwrap_or(-1).saturating_add(1);
+    let start_idx = start_idx.max(0);
+
+    let message = service.get_message(actor, message_id).await?;
+    let reply = ReplyMessageResponse {
+        message_id: message.id,
+        root_id: message.root_id,
+        conversation_id: message.conversation_id,
+        parent_id: message.parent_id,
+        depth: message.depth,
+    };
+
+    let chunk_limit = limit.min(i32::MAX as usize);
+    let chunk_limit = chunk_limit.max(1);
+    let chunk_limit_i32 = i32::try_from(chunk_limit).unwrap_or(i32::MAX);
+
+    let chunks = service
+        .list_chunks(actor, message_id, Some(start_idx), Some(chunk_limit_i32))
+        .await?;
+
+    if chunks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut seen = existing_chunk_keys(existing);
+    let mut envelopes = Vec::with_capacity(chunks.len());
+
+    for chunk in chunks {
+        let key = (chunk.message_id, chunk.idx);
+        if !seen.insert(key) {
+            continue;
+        }
+        if chunk.content.is_empty() {
+            continue;
+        }
+
+        let event = build_delta_event(&reply, &chunk.content, chunk.idx);
+        let timestamp_ms = chunk.created_at.0.timestamp_millis();
+        envelopes.push(chunk_event_envelope(event, chunk.idx, timestamp_ms));
+    }
+
+    Ok(envelopes)
+}
+
+fn merge_replay_events(
+    mut sse_events: Vec<EventEnvelope>,
+    mut chunk_events: Vec<EventEnvelope>,
+) -> Vec<EventEnvelope> {
+    if chunk_events.is_empty() {
+        return sse_events;
+    }
+
+    sse_events.append(&mut chunk_events);
+    sse_events.sort_by(|a, b| {
+        a.timestamp_ms
+            .cmp(&b.timestamp_ms)
+            .then(a.sequence.cmp(&b.sequence))
+    });
+    sse_events
+}
+
 fn deserialize_persisted_event(payload: serde_json::Value) -> Option<ConversationStreamEvent> {
     serde_json::from_value(payload)
         .map_err(|err| {
@@ -435,7 +523,17 @@ pub async fn conversation_stream(
     let since_override = params.since.map(|value| value.max(0));
     let replay_cursor = build_replay_cursor(header_cursor, since_override);
 
-    let (receiver, replay) = hub.subscribe(conversation_id, replay_cursor).await;
+    let (receiver, mut replay) = hub.subscribe(conversation_id, replay_cursor).await;
+    let chunk_limit = hub.replay_limit();
+    let chunk_events = chunk_replay_events(
+        &service,
+        user_id,
+        replay_cursor.as_ref(),
+        chunk_limit,
+        &replay,
+    )
+    .await?;
+    replay = merge_replay_events(replay, chunk_events);
 
     let initial =
         stream::iter(replay).filter_map(|envelope| async move { convert_event(envelope) });
@@ -584,6 +682,29 @@ const fn build_replay_cursor(
             timestamp_ms: since,
         }),
     }
+}
+
+fn chunk_event_envelope(
+    event: ConversationStreamEvent,
+    chunk_index: i32,
+    timestamp_ms: i64,
+) -> EventEnvelope {
+    EventEnvelope {
+        sequence: chunk_index.max(0) as u64,
+        timestamp_ms,
+        metadata: EventMetadata::with_chunk_index(chunk_index),
+        event,
+    }
+}
+
+fn existing_chunk_keys(events: &[EventEnvelope]) -> HashSet<(Uuid, i32)> {
+    let mut keys = HashSet::new();
+    for envelope in events {
+        if let (Some(message_id), Some(idx)) = (envelope.message_id(), envelope.chunk_index()) {
+            keys.insert((message_id, idx));
+        }
+    }
+    keys
 }
 
 fn require_user(context: &RequestContext) -> AppResult<Uuid> {
@@ -987,5 +1108,39 @@ mod tests {
         let restored = StreamHub::new(128, Some(persistence), config);
         let (_, replay) = restored.subscribe(conversation, None).await;
         assert!(replay.len() <= 3);
+    }
+
+    #[test]
+    fn merge_replay_events_sorts_by_timestamp() {
+        let activity = ConversationStreamEvent::ThreadActivity {
+            payload: ThreadActivityEvent {
+                root_id: Uuid::new_v4(),
+                last_activity_at: Timestamp(Utc::now()),
+            },
+        };
+        let sse_events = vec![EventEnvelope {
+            sequence: 10,
+            timestamp_ms: 200,
+            metadata: EventMetadata { chunk_index: None },
+            event: activity,
+        }];
+
+        let root_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+        let conversation_id = Uuid::new_v4();
+        let merged = super::merge_replay_events(
+            sse_events,
+            vec![chunk_event_envelope(
+                sample_delta(message_id, root_id, conversation_id),
+                0,
+                150,
+            )],
+        );
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].timestamp_ms, 150);
+        assert_eq!(merged[1].timestamp_ms, 200);
+
+        let keys = existing_chunk_keys(&merged);
+        assert!(keys.contains(&(message_id, 0)));
     }
 }
