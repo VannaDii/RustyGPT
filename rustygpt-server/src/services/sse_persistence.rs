@@ -30,15 +30,10 @@ pub struct PersistedStreamEvent {
 #[async_trait]
 pub trait SsePersistence: Send + Sync {
     async fn record_event(&self, conversation_id: Uuid, record: &StreamEventRecord) -> Result<()>;
-    async fn load_recent_events(
+    async fn replay_events(
         &self,
         conversation_id: Uuid,
-        limit: usize,
-    ) -> Result<Vec<PersistedStreamEvent>>;
-    async fn load_events_after(
-        &self,
-        conversation_id: Uuid,
-        last_sequence: i64,
+        since: Option<DateTime<Utc>>,
         limit: usize,
     ) -> Result<Vec<PersistedStreamEvent>>;
     async fn prune_events(
@@ -82,40 +77,14 @@ impl SsePersistence for SsePersistenceStore {
         Ok(())
     }
 
-    async fn load_recent_events(
+    async fn replay_events(
         &self,
         conversation_id: Uuid,
+        since: Option<DateTime<Utc>>,
         limit: usize,
     ) -> Result<Vec<PersistedStreamEvent>> {
-        let rows = sqlx::query_as::<_, PersistedStreamEvent>(
-            "SELECT sequence, event_id, event_type, payload, root_message_id, created_at \
-             FROM rustygpt.fn_load_recent_sse_events($1, $2)",
-        )
-        .bind(conversation_id)
-        .bind(limit as i32)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows)
-    }
-
-    async fn load_events_after(
-        &self,
-        conversation_id: Uuid,
-        last_sequence: i64,
-        limit: usize,
-    ) -> Result<Vec<PersistedStreamEvent>> {
-        let rows = sqlx::query_as::<_, PersistedStreamEvent>(
-            "SELECT sequence, event_id, event_type, payload, root_message_id, created_at \
-             FROM rustygpt.fn_load_sse_events_after($1, $2, $3)",
-        )
-        .bind(conversation_id)
-        .bind(last_sequence)
-        .bind(limit as i32)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows)
+        self.replay_events_internal(conversation_id, since, limit)
+            .await
     }
 
     async fn prune_events(
@@ -148,5 +117,26 @@ impl SsePersistence for SsePersistenceStore {
             .await?;
 
         Ok(())
+    }
+}
+
+impl SsePersistenceStore {
+    async fn replay_events_internal(
+        &self,
+        conversation_id: Uuid,
+        since: Option<DateTime<Utc>>,
+        limit: usize,
+    ) -> Result<Vec<PersistedStreamEvent>> {
+        let rows = sqlx::query_as::<_, PersistedStreamEvent>(
+            "SELECT sequence, event_id, event_type, payload, root_message_id, created_at \
+             FROM rustygpt.sp_sse_replay($1, $2, $3)",
+        )
+        .bind(conversation_id)
+        .bind(since)
+        .bind(limit.min(i32::MAX as usize) as i32)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
     }
 }

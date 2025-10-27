@@ -290,7 +290,7 @@ impl StatefulStreamController {
             .unwrap_or(reply_response.conversation_id);
 
         self.hub
-            .publish(
+            .publish_chunk_event(
                 conversation,
                 ConversationStreamEvent::MessageDone {
                     payload: MessageDoneEvent {
@@ -301,6 +301,7 @@ impl StatefulStreamController {
                         usage: Some(usage_breakdown.clone()),
                     },
                 },
+                self.chunk_index,
             )
             .await;
 

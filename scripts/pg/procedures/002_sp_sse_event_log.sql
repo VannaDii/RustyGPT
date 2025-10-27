@@ -36,8 +36,9 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION rustygpt.fn_load_recent_sse_events(
+CREATE OR REPLACE FUNCTION rustygpt.sp_sse_replay(
     p_conversation_id UUID,
+    p_since TIMESTAMPTZ,
     p_limit INTEGER
 )
 RETURNS TABLE (
@@ -52,36 +53,26 @@ RETURNS TABLE (
 LANGUAGE sql
 STABLE
 AS $$
-    SELECT id, sequence, event_id, event_type, payload, root_message_id, created_at
+    SELECT id,
+           sequence,
+           event_id,
+           event_type,
+           payload,
+           root_message_id,
+           created_at
     FROM rustygpt.sse_event_log
     WHERE conversation_id = p_conversation_id
+      AND (
+          p_since IS NULL
+          OR created_at > p_since
+      )
     ORDER BY created_at ASC, id ASC
-    LIMIT p_limit;
-$$;
-
-CREATE OR REPLACE FUNCTION rustygpt.fn_load_sse_events_after(
-    p_conversation_id UUID,
-    p_last_sequence BIGINT,
-    p_limit INTEGER
-)
-RETURNS TABLE (
-    id BIGINT,
-    sequence BIGINT,
-    event_id TEXT,
-    event_type TEXT,
-    payload JSONB,
-    root_message_id UUID,
-    created_at TIMESTAMPTZ
-)
-LANGUAGE sql
-STABLE
-AS $$
-    SELECT id, sequence, event_id, event_type, payload, root_message_id, created_at
-    FROM rustygpt.sse_event_log
-    WHERE conversation_id = p_conversation_id
-      AND sequence > p_last_sequence
-    ORDER BY created_at ASC, id ASC
-    LIMIT p_limit;
+    LIMIT (
+        CASE
+            WHEN p_limit IS NULL OR p_limit <= 0 THEN 500
+            ELSE p_limit
+        END
+    );
 $$;
 
 CREATE OR REPLACE PROCEDURE rustygpt.sp_prune_sse_events(

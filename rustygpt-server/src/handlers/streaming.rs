@@ -7,11 +7,13 @@ use std::{
 };
 
 use axum::{
-    extract::{Extension, Path},
+    extract::{Extension, Path, Query},
     http::{HeaderMap, StatusCode},
     response::sse::{Event, KeepAlive, Sse},
 };
+use chrono::{DateTime, Utc};
 use futures::{StreamExt, stream};
+use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::{Mutex, broadcast};
 use tokio_stream::wrappers::BroadcastStream;
@@ -29,8 +31,81 @@ use crate::{
 };
 use shared::{config::server::SsePersistenceConfig, models::ConversationStreamEvent};
 
-type StampedEvent = (u64, ConversationStreamEvent);
+#[derive(Clone, Copy, Debug, Default)]
+struct EventMetadata {
+    chunk_index: Option<i32>,
+}
 
+impl EventMetadata {
+    const fn with_chunk_index(idx: i32) -> Self {
+        Self {
+            chunk_index: Some(idx),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct EventEnvelope {
+    sequence: u64,
+    timestamp_ms: i64,
+    metadata: EventMetadata,
+    event: ConversationStreamEvent,
+}
+
+impl EventEnvelope {
+    const fn root_id(&self) -> Option<Uuid> {
+        event_root_id(&self.event)
+    }
+
+    const fn message_id(&self) -> Option<Uuid> {
+        match &self.event {
+            ConversationStreamEvent::MessageDelta { payload } => Some(payload.message_id),
+            ConversationStreamEvent::MessageDone { payload } => Some(payload.message_id),
+            _ => None,
+        }
+    }
+
+    const fn chunk_index(&self) -> Option<i32> {
+        self.metadata.chunk_index
+    }
+
+    fn event_id(&self) -> String {
+        format_event_id(
+            self.root_id(),
+            self.message_id(),
+            self.chunk_index(),
+            self.timestamp_ms,
+        )
+    }
+
+    fn as_sse_event(&self) -> Option<Event> {
+        let name = event_name(&self.event);
+        let data = serde_json::to_string(&self.event).ok()?;
+        Some(Event::default().event(name).data(data).id(self.event_id()))
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ReplayCursor {
+    _root_id: Option<Uuid>,
+    message_id: Option<Uuid>,
+    chunk_index: Option<i32>,
+    timestamp_ms: i64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ParsedEventId {
+    root_id: Option<Uuid>,
+    message_id: Option<Uuid>,
+    chunk_index: Option<i32>,
+    timestamp_ms: i64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct StreamQuery {
+    since: Option<i64>,
+}
 #[derive(Clone)]
 pub struct StreamHub {
     inner: Arc<Mutex<HashMap<Uuid, Arc<ConversationChannel>>>>,
@@ -49,13 +124,14 @@ impl fmt::Debug for StreamHub {
 }
 
 struct ConversationChannel {
-    sender: broadcast::Sender<StampedEvent>,
+    sender: broadcast::Sender<EventEnvelope>,
     state: Mutex<ConversationState>,
 }
 
 struct ConversationState {
     next_sequence: u64,
-    history: VecDeque<StampedEvent>,
+    last_timestamp_ms: i64,
+    history: VecDeque<EventEnvelope>,
 }
 
 pub type SharedStreamHub = Arc<StreamHub>;
@@ -85,6 +161,7 @@ impl StreamHub {
             sender,
             state: Mutex::new(ConversationState {
                 next_sequence: 0,
+                last_timestamp_ms: 0,
                 history: VecDeque::new(),
             }),
         });
@@ -93,44 +170,81 @@ impl StreamHub {
     }
 
     pub async fn publish(&self, conversation_id: Uuid, event: ConversationStreamEvent) {
+        self.publish_with_metadata(conversation_id, event, EventMetadata::default())
+            .await;
+    }
+
+    async fn publish_with_metadata(
+        &self,
+        conversation_id: Uuid,
+        event: ConversationStreamEvent,
+        metadata: EventMetadata,
+    ) {
         let channel = self.get_channel(conversation_id).await;
         let mut state = channel.state.lock().await;
         let sequence = state.next_sequence;
         state.next_sequence = state.next_sequence.saturating_add(1);
 
-        let stamped = (sequence, event.clone());
-        state.history.push_back(stamped.clone());
+        let now_ms = Utc::now().timestamp_millis();
+        let timestamp_ms = if state.last_timestamp_ms >= now_ms {
+            state.last_timestamp_ms.saturating_add(1)
+        } else {
+            now_ms
+        };
+        state.last_timestamp_ms = timestamp_ms;
+
+        let envelope = EventEnvelope {
+            sequence,
+            timestamp_ms,
+            metadata,
+            event: event.clone(),
+        };
+
+        state.history.push_back(envelope.clone());
         if state.history.len() > self.history_capacity {
             state.history.pop_front();
         }
         drop(state);
 
-        let _ = channel.sender.send(stamped);
+        let _ = channel.sender.send(envelope.clone());
 
-        persist_event(self, conversation_id, sequence, &event).await;
+        persist_event(self, conversation_id, &envelope).await;
     }
 
-    pub async fn subscribe(
+    pub async fn publish_chunk_event(
         &self,
         conversation_id: Uuid,
-        after_sequence: Option<u64>,
-    ) -> (broadcast::Receiver<StampedEvent>, Vec<StampedEvent>) {
+        event: ConversationStreamEvent,
+        chunk_index: i32,
+    ) {
+        self.publish_with_metadata(
+            conversation_id,
+            event,
+            EventMetadata::with_chunk_index(chunk_index),
+        )
+        .await;
+    }
+
+    async fn subscribe(
+        &self,
+        conversation_id: Uuid,
+        replay_cursor: Option<ReplayCursor>,
+    ) -> (broadcast::Receiver<EventEnvelope>, Vec<EventEnvelope>) {
         let channel = self.get_channel(conversation_id).await;
         let in_memory = {
             let state = channel.state.lock().await;
-            state
-                .history
-                .iter()
-                .filter(|(seq, _)| after_sequence.map_or(true, |last| *seq > last))
-                .cloned()
-                .collect::<Vec<_>>()
+            state.history.iter().cloned().collect::<Vec<_>>()
         };
 
-        let persisted = self.load_persisted(conversation_id, after_sequence).await;
+        let persisted = self.load_persisted(conversation_id, replay_cursor).await;
 
-        let mut ordered = BTreeMap::new();
-        for stamped in persisted.into_iter().chain(in_memory.into_iter()) {
-            ordered.insert(stamped.0, stamped);
+        let mut ordered: BTreeMap<u64, EventEnvelope> = BTreeMap::new();
+        for envelope in persisted
+            .into_iter()
+            .chain(in_memory.into_iter())
+            .filter(|env| should_include_event(env, replay_cursor.as_ref()))
+        {
+            ordered.insert(envelope.sequence, envelope);
         }
 
         (channel.sender.subscribe(), ordered.into_values().collect())
@@ -139,8 +253,8 @@ impl StreamHub {
     async fn load_persisted(
         &self,
         conversation_id: Uuid,
-        after_sequence: Option<u64>,
-    ) -> Vec<StampedEvent> {
+        replay_cursor: Option<ReplayCursor>,
+    ) -> Vec<EventEnvelope> {
         let Some(store) = &self.persistence else {
             return Vec::new();
         };
@@ -151,14 +265,12 @@ impl StreamHub {
             return Vec::new();
         }
 
-        let limit = config.max_events_per_user;
-        let query_result = if let Some(last) = after_sequence {
-            store
-                .load_events_after(conversation_id, last as i64, limit)
-                .await
-        } else {
-            store.load_recent_events(conversation_id, limit).await
-        };
+        let since = replay_cursor
+            .and_then(|cursor| DateTime::<Utc>::from_timestamp_millis(cursor.timestamp_ms));
+
+        let query_result = store
+            .replay_events(conversation_id, since, config.max_events_per_user)
+            .await;
 
         match query_result {
             Ok(records) => records
@@ -173,24 +285,19 @@ impl StreamHub {
     }
 }
 
-async fn persist_event(
-    hub: &StreamHub,
-    conversation_id: Uuid,
-    sequence: u64,
-    event: &ConversationStreamEvent,
-) {
+async fn persist_event(hub: &StreamHub, conversation_id: Uuid, envelope: &EventEnvelope) {
     let Some(store) = &hub.persistence else {
         return;
     };
 
-    match serde_json::to_value(event) {
+    match serde_json::to_value(&envelope.event) {
         Ok(json_payload) => {
             let record = StreamEventRecord {
-                sequence: sequence as i64,
-                event_id: event_id(sequence, event).unwrap_or_else(|| sequence.to_string()),
-                event_type: event_name(event).to_string(),
+                sequence: envelope.sequence as i64,
+                event_id: envelope.event_id(),
+                event_type: event_name(&envelope.event).to_string(),
                 payload: json_payload,
-                root_message_id: event_root_id(event),
+                root_message_id: envelope.root_id(),
             };
 
             if let Err(err) = store.record_event(conversation_id, &record).await {
@@ -228,7 +335,7 @@ async fn prune_history(hub: &StreamHub, store: &Arc<dyn SsePersistence>, convers
     }
 }
 
-fn convert_persisted_record(record: PersistedStreamEvent) -> Option<StampedEvent> {
+fn convert_persisted_record(record: PersistedStreamEvent) -> Option<EventEnvelope> {
     let PersistedStreamEvent {
         sequence,
         event_id: stored_event_id,
@@ -239,20 +346,32 @@ fn convert_persisted_record(record: PersistedStreamEvent) -> Option<StampedEvent
         ..
     } = record;
 
-    let _ = created_at;
-
     let sequence = u64::try_from(sequence).ok()?;
     let event = deserialize_persisted_event(payload)?;
 
-    validate_persisted_event(
-        sequence,
-        &event,
-        &stored_event_type,
-        stored_root_id,
-        &stored_event_id,
-    );
+    let parsed = parse_event_id(&stored_event_id).or_else(|| {
+        Some(ParsedEventId {
+            root_id: stored_root_id,
+            message_id: match &event {
+                ConversationStreamEvent::MessageDelta { payload } => Some(payload.message_id),
+                ConversationStreamEvent::MessageDone { payload } => Some(payload.message_id),
+                _ => None,
+            },
+            chunk_index: None,
+            timestamp_ms: created_at.timestamp_millis(),
+        })
+    })?;
 
-    Some((sequence, event))
+    validate_persisted_event(&event, &stored_event_type, stored_root_id, &parsed);
+
+    Some(EventEnvelope {
+        sequence,
+        timestamp_ms: parsed.timestamp_ms,
+        metadata: EventMetadata {
+            chunk_index: parsed.chunk_index,
+        },
+        event,
+    })
 }
 
 fn deserialize_persisted_event(payload: serde_json::Value) -> Option<ConversationStreamEvent> {
@@ -265,15 +384,18 @@ fn deserialize_persisted_event(payload: serde_json::Value) -> Option<Conversatio
 }
 
 fn validate_persisted_event(
-    sequence: u64,
     event: &ConversationStreamEvent,
     stored_event_type: &str,
     stored_root_id: Option<Uuid>,
-    stored_event_id: &str,
+    parsed_id: &ParsedEventId,
 ) {
     warn_on_type_mismatch(stored_event_type, event);
     warn_on_root_mismatch(stored_root_id, event);
-    warn_on_id_mismatch(sequence, stored_event_id, event);
+    if let Some(root_from_id) = parsed_id.root_id {
+        if Some(root_from_id) != event_root_id(event) {
+            warn!(stored = %root_from_id, "SSE event id root mismatch in persistence");
+        }
+    }
 }
 
 fn warn_on_type_mismatch(stored_event_type: &str, event: &ConversationStreamEvent) {
@@ -291,20 +413,13 @@ fn warn_on_root_mismatch(stored_root_id: Option<Uuid>, event: &ConversationStrea
     }
 }
 
-fn warn_on_id_mismatch(sequence: u64, stored_event_id: &str, event: &ConversationStreamEvent) {
-    if let Some(computed_id) = event_id(sequence, event) {
-        if stored_event_id != computed_id {
-            warn!(stored = %stored_event_id, computed = %computed_id, "SSE event id mismatch in persistence");
-        }
-    }
-}
-
 #[instrument(skip(app_state, context, hub, headers))]
 pub async fn conversation_stream(
     Extension(app_state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
     Extension(hub): Extension<SharedStreamHub>,
     Path(conversation_id): Path<Uuid>,
+    Query(params): Query<StreamQuery>,
     headers: HeaderMap,
 ) -> AppResult<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>> {
     let user_id = require_user(&context)?;
@@ -312,17 +427,21 @@ pub async fn conversation_stream(
     let service = ChatService::new(pool);
     service.ensure_membership(user_id, conversation_id).await?;
 
-    let last_sequence = headers
+    let header_cursor = headers
         .get("last-event-id")
         .and_then(|value| value.to_str().ok())
-        .and_then(parse_last_sequence);
+        .and_then(parse_last_event_id);
 
-    let (receiver, replay) = hub.subscribe(conversation_id, last_sequence).await;
+    let since_override = params.since.map(|value| value.max(0));
+    let replay_cursor = build_replay_cursor(header_cursor, since_override);
 
-    let initial = stream::iter(replay.into_iter().filter_map(convert_event));
+    let (receiver, replay) = hub.subscribe(conversation_id, replay_cursor).await;
+
+    let initial =
+        stream::iter(replay).filter_map(|envelope| async move { convert_event(envelope) });
     let broadcast = BroadcastStream::new(receiver).filter_map(|result| async move {
         match result {
-            Ok(stamped) => convert_event(stamped),
+            Ok(envelope) => convert_event(envelope),
             Err(err) => {
                 tracing::warn!(error = %err, "stream subscriber lagged");
                 None
@@ -339,15 +458,8 @@ pub async fn conversation_stream(
     ))
 }
 
-fn convert_event(stamped: StampedEvent) -> Option<Event> {
-    let (sequence, payload) = stamped;
-    let name = event_name(&payload);
-    let data = serde_json::to_string(&payload).ok()?;
-    let mut event = Event::default().event(name).data(data);
-    if let Some(id) = event_id(sequence, &payload) {
-        event = event.id(id);
-    }
-    Some(event)
+fn convert_event(envelope: EventEnvelope) -> Option<Event> {
+    envelope.as_sse_event()
 }
 
 const fn event_name(event: &ConversationStreamEvent) -> &'static str {
@@ -364,18 +476,42 @@ const fn event_name(event: &ConversationStreamEvent) -> &'static str {
     }
 }
 
-fn event_id(sequence: u64, event: &ConversationStreamEvent) -> Option<String> {
-    match event {
-        ConversationStreamEvent::MessageDelta { payload } => Some(format!(
-            "{}:{}:{}",
-            payload.root_id, payload.message_id, sequence
-        )),
-        ConversationStreamEvent::MessageDone { payload } => Some(format!(
-            "{}:{}:{}",
-            payload.root_id, payload.message_id, sequence
-        )),
-        _ => Some(sequence.to_string()),
-    }
+fn format_event_id(
+    root_id: Option<Uuid>,
+    message_id: Option<Uuid>,
+    chunk_index: Option<i32>,
+    timestamp_ms: i64,
+) -> String {
+    let root = root_id.unwrap_or_else(Uuid::nil);
+    let message = message_id.unwrap_or_else(Uuid::nil);
+    let idx = chunk_index.unwrap_or(-1);
+    format!("{root}:{message}:{idx}:{timestamp_ms}")
+}
+
+fn parse_event_id(raw: &str) -> Option<ParsedEventId> {
+    let mut parts = raw.splitn(4, ':');
+    let root_raw = parts.next()?;
+    let message_raw = parts.next()?;
+    let idx_raw = parts.next()?;
+    let timestamp_raw = parts.next()?;
+
+    let root_id = Uuid::parse_str(root_raw)
+        .ok()
+        .and_then(|value| if value.is_nil() { None } else { Some(value) });
+    let message_id = Uuid::parse_str(message_raw)
+        .ok()
+        .and_then(|value| if value.is_nil() { None } else { Some(value) });
+
+    let idx = idx_raw.parse::<i32>().ok()?;
+    let chunk_index = if idx >= 0 { Some(idx) } else { None };
+    let timestamp_ms = timestamp_raw.parse::<i64>().ok()?;
+
+    Some(ParsedEventId {
+        root_id,
+        message_id,
+        chunk_index,
+        timestamp_ms,
+    })
 }
 
 const fn event_root_id(event: &ConversationStreamEvent) -> Option<Uuid> {
@@ -390,8 +526,64 @@ const fn event_root_id(event: &ConversationStreamEvent) -> Option<Uuid> {
     }
 }
 
-fn parse_last_sequence(raw: &str) -> Option<u64> {
-    raw.split(':').last()?.parse().ok()
+fn should_include_event(event: &EventEnvelope, cursor: Option<&ReplayCursor>) -> bool {
+    let Some(cursor) = cursor else {
+        return true;
+    };
+
+    if event.timestamp_ms < cursor.timestamp_ms {
+        return false;
+    }
+
+    if event.timestamp_ms == cursor.timestamp_ms {
+        match (cursor.message_id, event.message_id()) {
+            (Some(cursor_msg), Some(event_msg)) if cursor_msg == event_msg => {
+                match (cursor.chunk_index, event.chunk_index()) {
+                    (Some(cursor_idx), Some(event_idx)) => {
+                        if event_idx <= cursor_idx {
+                            return false;
+                        }
+                    }
+                    (Some(_), None) => return false,
+                    _ => {}
+                }
+            }
+            (None, None) => return false,
+            _ => {}
+        }
+    }
+
+    true
+}
+
+fn parse_last_event_id(raw: &str) -> Option<ReplayCursor> {
+    let parsed = parse_event_id(raw)?;
+    Some(ReplayCursor {
+        _root_id: parsed.root_id,
+        message_id: parsed.message_id,
+        chunk_index: parsed.chunk_index,
+        timestamp_ms: parsed.timestamp_ms,
+    })
+}
+
+const fn build_replay_cursor(
+    header_cursor: Option<ReplayCursor>,
+    since_override: Option<i64>,
+) -> Option<ReplayCursor> {
+    match (header_cursor, since_override) {
+        (None, None) => None,
+        (Some(mut cursor), Some(since)) => {
+            cursor.timestamp_ms = since;
+            Some(cursor)
+        }
+        (Some(cursor), None) => Some(cursor),
+        (None, Some(since)) => Some(ReplayCursor {
+            _root_id: None,
+            message_id: None,
+            chunk_index: None,
+            timestamp_ms: since,
+        }),
+    }
 }
 
 fn require_user(context: &RequestContext) -> AppResult<Uuid> {
@@ -415,7 +607,7 @@ mod tests {
     use super::*;
     use anyhow::Result;
     use async_trait::async_trait;
-    use chrono::Utc;
+    use chrono::{DateTime, Utc};
     use shared::models::{
         ChatDelta, ChatDeltaChoice, ChatDeltaChunk, MessageDoneEvent, MessageRole,
         ThreadActivityEvent, ThreadNewEvent, ThreadSummary, Timestamp, UsageBreakdown,
@@ -459,36 +651,22 @@ mod tests {
             Ok(())
         }
 
-        async fn load_recent_events(
+        async fn replay_events(
             &self,
             conversation_id: Uuid,
+            since: Option<DateTime<Utc>>,
             limit: usize,
         ) -> Result<Vec<PersistedStreamEvent>> {
             let events = {
                 let guard = self.records.lock().unwrap();
                 guard.get(&conversation_id).cloned().unwrap_or_default()
             };
-            Ok(events.into_iter().take(limit).collect())
-        }
-
-        async fn load_events_after(
-            &self,
-            conversation_id: Uuid,
-            last_sequence: i64,
-            limit: usize,
-        ) -> Result<Vec<PersistedStreamEvent>> {
-            let events = {
-                let guard = self.records.lock().unwrap();
-                guard
-                    .get(&conversation_id)
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|record| record.sequence > last_sequence)
-                    .take(limit)
-                    .collect()
-            };
-            Ok(events)
+            let filtered = events
+                .into_iter()
+                .filter(|record| since.map_or(true, |threshold| record.created_at > threshold))
+                .take(limit)
+                .collect();
+            Ok(filtered)
         }
 
         async fn prune_events(
@@ -532,13 +710,18 @@ mod tests {
         let root_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
 
-        hub.publish(
+        hub.publish_chunk_event(
             conversation,
             sample_delta(message_id, root_id, conversation),
+            0,
         )
         .await;
-        hub.publish(conversation, sample_done(message_id, root_id, conversation))
-            .await;
+        hub.publish_chunk_event(
+            conversation,
+            sample_done(message_id, root_id, conversation),
+            1,
+        )
+        .await;
 
         let activity = ConversationStreamEvent::ThreadActivity {
             payload: ThreadActivityEvent {
@@ -559,10 +742,12 @@ mod tests {
             .expect("persist activity");
 
         let (_, replay) = hub.subscribe(conversation, None).await;
-        let sequences: Vec<u64> = replay.iter().map(|(seq, _)| *seq).collect();
+        let sequences: Vec<u64> = replay.iter().map(|env| env.sequence).collect();
 
         assert_eq!(sequences, vec![0, 1, 2]);
-        if let Some((_, ConversationStreamEvent::ThreadActivity { .. })) = replay.last() {
+        if let Some(ConversationStreamEvent::ThreadActivity { .. }) =
+            replay.last().map(|env| &env.event)
+        {
             // expected activity from persistence
         } else {
             panic!("expected persisted thread activity event at the end");
@@ -655,19 +840,24 @@ mod tests {
         )
         .await;
 
-        hub.publish(
+        hub.publish_chunk_event(
             conversation,
             sample_delta(message_id, root_id, conversation),
+            0,
         )
         .await;
-        hub.publish(conversation, sample_done(message_id, root_id, conversation))
-            .await;
+        hub.publish_chunk_event(
+            conversation,
+            sample_done(message_id, root_id, conversation),
+            1,
+        )
+        .await;
 
         let restored = StreamHub::new(128, Some(persistence.clone()), config.clone());
         let (_, replay) = restored.subscribe(conversation, None).await;
         let event_names: Vec<&'static str> = replay
             .into_iter()
-            .map(|(_, event)| match event {
+            .map(|env| match env.event {
                 ConversationStreamEvent::ThreadNew { .. } => "thread.new",
                 ConversationStreamEvent::ThreadActivity { .. } => "thread.activity",
                 ConversationStreamEvent::MessageDelta { .. } => "message.delta",
@@ -719,19 +909,32 @@ mod tests {
             },
         )
         .await;
-        hub.publish(
+        hub.publish_chunk_event(
             conversation,
             sample_delta(message_id, root_id, conversation),
+            0,
         )
         .await;
-        hub.publish(conversation, sample_done(message_id, root_id, conversation))
-            .await;
+        hub.publish_chunk_event(
+            conversation,
+            sample_done(message_id, root_id, conversation),
+            1,
+        )
+        .await;
 
         let restored = StreamHub::new(128, Some(persistence.clone()), config.clone());
-        let (_, replay) = restored.subscribe(conversation, Some(0)).await;
+        let (_, initial) = restored.subscribe(conversation, None).await;
+        let first = initial.first().expect("expected at least one event");
+        let cursor = ReplayCursor {
+            _root_id: first.root_id(),
+            message_id: first.message_id(),
+            chunk_index: first.chunk_index(),
+            timestamp_ms: first.timestamp_ms,
+        };
+        let (_, replay) = restored.subscribe(conversation, Some(cursor)).await;
         let event_names: Vec<&'static str> = replay
             .into_iter()
-            .map(|(_, event)| match event {
+            .map(|env| match env.event {
                 ConversationStreamEvent::ThreadNew { .. } => "thread.new",
                 ConversationStreamEvent::ThreadActivity { .. } => "thread.activity",
                 ConversationStreamEvent::MessageDelta { .. } => "message.delta",

@@ -514,6 +514,7 @@ struct StreamOutcome {
     finish_reason: Option<String>,
     usage: Option<TokenUsage>,
     stream_error: Option<String>,
+    next_chunk_index: i32,
 }
 
 async fn process_assistant_stream(
@@ -633,6 +634,7 @@ async fn process_assistant_stream(
         finish_reason,
         usage,
         stream_error,
+        next_chunk_index: chunk_index,
     })
 }
 
@@ -716,7 +718,7 @@ pub async fn publish_delta_event(
             parent_id: created.parent_id,
             depth: Some(created.depth),
             choices: vec![ChatDeltaChoice {
-                index: 0,
+                index: u32::try_from(chunk_index.max(0)).unwrap_or_default(),
                 delta: ChatDelta {
                     role: if chunk_index == 0 {
                         Some(MessageRole::Assistant)
@@ -730,7 +732,8 @@ pub async fn publish_delta_event(
         },
     };
 
-    hub.publish(conversation_id, delta).await;
+    hub.publish_chunk_event(conversation_id, delta, chunk_index)
+        .await;
 }
 
 fn spawn_assistant_reply(
@@ -806,6 +809,7 @@ async fn run_assistant_reply(
         finish_reason: outcome_finish_reason,
         usage,
         stream_error: outcome_stream_error,
+        next_chunk_index,
     } = process_assistant_stream(
         &service,
         &hub,
@@ -921,7 +925,8 @@ async fn run_assistant_reply(
             usage: Some(usage_breakdown),
         },
     };
-    hub.publish(conversation, done).await;
+    hub.publish_chunk_event(conversation, done, next_chunk_index)
+        .await;
 
     if let Some(event) = error_event {
         hub.publish(
