@@ -452,7 +452,7 @@ and how rate limiting integrates with PostgreSQL. Use them alongside the <a href
   Hub-&gt;&gt;DB: sp_record_sse_event
   Client-&gt;&gt;API: reconnect with Last-Event-ID
   API-&gt;&gt;Hub: subscribe(after)
-  Hub-&gt;&gt;DB: fn_load_recent_sse_events
+  Hub-&gt;&gt;DB: sp_sse_replay
   DB--&gt;&gt;Hub: persisted events
   Hub--&gt;&gt;Client: replay then live stream
 </pre>

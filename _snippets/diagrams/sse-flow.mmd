@@ -12,7 +12,7 @@ sequenceDiagram
   Hub->>DB: sp_record_sse_event
   Client->>API: reconnect with Last-Event-ID
   API->>Hub: subscribe(after)
-  Hub->>DB: fn_load_recent_sse_events
+  Hub->>DB: sp_sse_replay
   DB-->>Hub: persisted events
   Hub-->>Client: replay then live stream
 ```
