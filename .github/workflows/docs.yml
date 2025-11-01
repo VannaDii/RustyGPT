@@ -23,7 +23,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
 
       - name: Install documentation tooling
         run: just install-docs
