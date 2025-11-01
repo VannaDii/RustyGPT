@@ -54,11 +54,13 @@ RUSTY_GPT/
 
 ### Prime Directives
 
-- **Rust 2024** only; pinned in `rust-toolchain.toml` and `package.rust-version` for every crate.
+- **Rust 2024** only; pinned to **Rust 1.91.0** in `rust-toolchain.toml` and every crate's `rust-version`.
 - `#![forbid(unsafe_code)]` in all library/binary crates.
+- **Banned:** crate- or module-level `#![allow(clippy::all)]`, `#![allow(clippy::pedantic)]`, `#![allow(clippy::cargo)]`, `#![allow(clippy::nursery)]`, or any equivalent blanket suppression. Delete the existing allows and fix the code instead; any future lint waiver must be as narrow as possible and documented inline with a tracking issue.
 - `-D warnings` and `clippy::pedantic` must be clean.
 - No `unwrap`/`expect` in runtime paths (allowed in tests/examples).
 - **Justfile is law** — CI and local runs invoke only `just …` targets (never raw `cargo` in CI).
+- **README.md is informational** — never treat it as authoritative for workflow or policy; whenever a change affects developer ergonomics, update README examples in the same PR to stay in sync with this document.
 - **Stored procedures** only for DB writes; no embedded SQL that mutates state.
 - **Accessibility** (WCAG 2.2 AA) and **i18n** (incl. RTL) required for all UI.
 - **Deterministic reasoning**: DAG nodes must be testable, seeded, and reproducible.
@@ -102,6 +104,15 @@ RUSTY_GPT/
 
 ---
 
+### Toolchain & Workspace Configuration
+
+- `rust-toolchain.toml` stays pinned to **Rust 1.91.0**. Bump only with an ADR that covers every crate, CI image, and deployment environment.
+- Every crate’s `[package]` table must declare `rust-version = "1.91.0"`. Missing fields are violations; add them while touching the crate (or proactively when fixing other items).
+- Dependencies live in the workspace root. Members consume them via `{ workspace = true }` declarations instead of repeating version strings. Per-crate overrides require an ADR and a comment explaining the exception.
+- Periodically dedupe overlapping libraries. Prefer a single crate per capability (HTTP, time, UUID, etc.); removing duplication takes precedence over adding a new dependency.
+
+---
+
 ### Language & Lint Gates (apply to every crate)
 
 ```rust
@@ -126,6 +137,10 @@ RUSTY_GPT/
 
 - Public API minimal; prefer `pub(crate)`.
 - Add `#[must_use]` to IDs/handles/results with effects.
+- Do not suppress `clippy::too_many_lines`; refactor to satisfy the lint instead.
+- Each crate root (`lib.rs`/`main.rs`) must include the attribute block above verbatim. Do not delete lines, reorder lints, or surround it with broader `#![allow(...)]`.
+- Item-level `#[allow(...)]` is only acceptable when scoped to the smallest expression, paired with an inline comment that references a tracking issue or explains the unavoidable trade-off.
+- Runtime code must never rely on `unwrap`/`expect`; use explicit error handling, fallbacks, or typed propagation (`?`, `Option::ok_or_else`, etc.). Treat existing runtime unwraps as bugs to fix immediately.
 
 ---
 
@@ -143,6 +158,7 @@ RUSTY_GPT/
   - read‑only queries that map to views/functions,
   - offline checking with `.sqlx/` data.
 - Ensure `scripts/gen-sqlx-data.sh` refreshes `.sqlx/` (called by `just db:prepare`).
+- Application code must not issue raw `INSERT`, `UPDATE`, or `DELETE` statements. Any legacy direct-write (e.g., bootstrap bookkeeping) is a bug—replace it with a stored procedure transaction before landing new features.
 
 **Contract Stability:** any change to a proc/view must bump a DB schema version and be captured in an ADR.
 
@@ -238,47 +254,84 @@ async fn reasoning_chain_is_deterministic() {
 
 ### Justfile (canonical)
 
-> **Never** call `cargo` directly in CI. Add/modify Just recipes instead.
+> **Never** call `cargo` directly in CI. Add/modify Just recipes instead. The root `Justfile` must mirror the targets and flags below exactly. If the canonical list changes, update the actual `Justfile` in the same pull request so both stay in sync. Any drift (including missing `RUSTFLAGS`, flags, or recipe order) blocks merges.
 
 ```make
 default: fmt lint check
 
-fmt:          @cargo fmt --all --check
-fmt:fix:      @cargo fmt --all
+fmt:          cargo fmt --all --check
+fmt-fix:      cargo fmt --all
 
-lint:         @cargo clippy --workspace --all-targets --all-features -D warnings
+lint:         cargo clippy --workspace --all-targets --all-features -D warnings -- -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery
+lint-fix:     cargo clippy --workspace --all-targets --all-features --fix --allow-staged -D warnings -- -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery
 
-udeps:        @cargo +stable udeps --workspace --all-targets
-audit:        @cargo audit
-deny:         @cargo deny check
-check:        @RUSTFLAGS="-Dwarnings" cargo check --workspace --all-features
+check:        cargo check --workspace --all-features -- -Dwarnings
 
-build:        @cargo build --workspace --all-features
-build:rel:    @cargo build --workspace --release --all-features
+fix:
+    just fmt-fix
+    just lint-fix
 
-test:         @RUSTFLAGS="-Dwarnings" cargo test --workspace --all-features
-cov:          @cargo llvm-cov --workspace --fail-under 90
+build:
+    cargo build --workspace
+    cd rustygpt-web && trunk build
 
-# Server
-dev:server:   @cargo run -p rustygpt-server
-test:server:  @cargo test -p rustygpt-server -- --include-ignored
+build-release:
+    cargo build --workspace --release
+    cd rustygpt-web && trunk build --release
 
-# Web
-web:serve:    @trunk serve --open --config rustygpt-web/Trunk.toml
-web:build:    @trunk build --release --config rustygpt-web/Trunk.toml
+test:
+    cargo test --workspace --lib
 
-# DB
-db:prepare:   @scripts/gen-sqlx-data.sh
-db:migrate:   @scripts/db-migrate.sh deploy/db/migrations
-db:procs:     @scripts/db-apply-procedures.sh deploy/db/procedures
+coverage:
+    cargo llvm-cov --workspace --lib --html --output-dir .coverage
+    @echo "📊 Coverage report generated at file://$PWD/.coverage/html/index.html"
 
-# Reasoning
-dag:test:     @cargo test -p rustygpt-tools --features dag -- --include-ignored
-rag:validate: @cargo run -p rustygpt-doc-indexer -- --validate
+dev:
+    cargo run --manifest-path rustygpt-tools/confuse/Cargo.toml -- "server@./rustygpt-server:just watch-server" "client@./rustygpt-web:trunk watch"
 
-# CI gate
-ci:           @just fmt lint udeps audit deny test cov
+cli *args:
+    cargo run -p rustygpt-cli -- {{args}}
+
+run-server:
+    cd rustygpt-server && cargo run -- serve --port 8080
+
+watch-server:
+    cd rustygpt-server && cargo watch -x 'run -- serve --port 8080'
+
+docs-serve:
+    mdbook serve --open
+
+docs-build:
+    mdbook build
+
+docs-index:
+    cargo run -p rustygpt-doc-indexer --release
+
+docs-links:
+    cargo install --locked lychee
+    lychee --verbose --no-progress docs
+
+docs-deploy:
+    just docs-build
+    just docs-index
+    git add book/ docs/llm/
+    git commit -m "docs: publish" || true
+    git push origin gh-pages
+
+docs:
+    just docs-build
+    just docs-index
+
+api-docs:
+    cargo doc --no-deps --workspace
+    mkdir -p docs/api
+    cp -r target/doc/* docs/api/
+
+nuke-port-zombies:
+    sudo lsof -t -i :8080 | xargs kill -9
 ```
+
+Strictness is non-negotiable: whenever these recipes fail, repair the code or tooling; never relax the flags, remove targets, or bypass the Justfile.
 
 If a new feature flag is added, mirror it with `test:feat[...]` recipes and call them from CI.
 

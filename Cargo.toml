@@ -18,6 +18,7 @@ missing_debug_implementations = { level = "warn" }
 pedantic = { level = "warn" }
 
 [workspace.package]
+rust-version = "1.91.0"
 description = "RustyGPT – a Rust-based chat assistant platform with server, CLI, and web clients."
 license = "Apache-2.0"
 repository = "https://github.com/vanna/rusty_gpt"

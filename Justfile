@@ -1,5 +1,5 @@
 # Default recipe (runs when you just run "just" with no arguments)
-default: check
+default: fmt lint check
 
 # Tool lists - SINGLE SOURCE OF TRUTH
 _core_tools := "sqlx-cli trunk cargo-llvm-cov"
@@ -108,15 +108,25 @@ dev:
     cargo run --manifest-path rustygpt-tools/confuse/Cargo.toml -- "server@./rustygpt-server:just watch-server" "client@./rustygpt-web:trunk watch"
 
 # Standard checks for both frontend and backend
+fmt:
+    cargo fmt --all --check
+
+fmt-fix:
+    cargo fmt --all
+
+lint:
+    cargo clippy --workspace --all-targets --all-features -D warnings -- -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery
+
+lint-fix:
+    cargo clippy --workspace --all-targets --all-features --fix --allow-staged -D warnings -- -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery
+
 check:
-    cargo fmt -- --check
-    cargo check --workspace
-    cargo clippy --workspace --all-targets --all-features -- -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery -Aclippy::multiple_crate_versions
+    cargo check --workspace --all-features -- -Dwarnings
 
 # Auto-fix what can be
 fix:
-    cargo fmt --all
-    cargo clippy --workspace --all --all-features --fix --allow-staged
+    just fmt-fix
+    just lint-fix
 
 # Build everything
 build:
@@ -127,6 +137,10 @@ build:
 build-release:
     cargo build --workspace --release
     cd rustygpt-web && trunk build --release
+
+# Run CLI commands
+cli *args:
+    cargo run -p rustygpt-cli -- {{args}}
 
 # Test everything
 test:
