@@ -54,7 +54,7 @@ RUSTY_GPT/
 
 ### Prime Directives
 
-- **Rust 2024** only; pinned to **Rust 1.91.0** in `rust-toolchain.toml` and every crate's `rust-version`.
+- **Rust 2024** only; pinned to **stable** in `rust-toolchain.toml` and every crate's `rust-version`.
 - `#![forbid(unsafe_code)]` in all library/binary crates.
 - **Banned:** crate- or module-level `#![allow(clippy::all)]`, `#![allow(clippy::pedantic)]`, `#![allow(clippy::cargo)]`, `#![allow(clippy::nursery)]`, or any equivalent blanket suppression. Delete the existing allows and fix the code instead; any future lint waiver must be as narrow as possible and documented inline with a tracking issue.
 - `-D warnings` and `clippy::pedantic` must be clean.
@@ -107,8 +107,9 @@ RUSTY_GPT/
 ### Toolchain & Workspace Configuration
 
 - `rust-toolchain.toml` stays pinned to **Rust 1.91.0**. Bump only with an ADR that covers every crate, CI image, and deployment environment.
-- Every crate’s `[package]` table must declare `rust-version = "1.91.0"`. Missing fields are violations; add them while touching the crate (or proactively when fixing other items).
+- Workspace `Cargo.toml` pins `rust-version = "1.91.0"`. Each crate must use `rust-version.workspace = true` so the pin is inherited; never lower this requirement.
 - Dependencies live in the workspace root. Members consume them via `{ workspace = true }` declarations instead of repeating version strings. Per-crate overrides require an ADR and a comment explaining the exception.
+- Vendoring is banned. Do not add `[patch.crates-io]` entries that point to local copies of crates; if an upstream dependency needs fixes, land them upstream or fork and publish a vetted release instead. Existing patches must be removed as part of the fix you are making.
 - Periodically dedupe overlapping libraries. Prefer a single crate per capability (HTTP, time, UUID, etc.); removing duplication takes precedence over adding a new dependency.
 
 ---
@@ -141,6 +142,7 @@ RUSTY_GPT/
 - Each crate root (`lib.rs`/`main.rs`) must include the attribute block above verbatim. Do not delete lines, reorder lints, or surround it with broader `#![allow(...)]`.
 - Item-level `#[allow(...)]` is only acceptable when scoped to the smallest expression, paired with an inline comment that references a tracking issue or explains the unavoidable trade-off.
 - Runtime code must never rely on `unwrap`/`expect`; use explicit error handling, fallbacks, or typed propagation (`?`, `Option::ok_or_else`, etc.). Treat existing runtime unwraps as bugs to fix immediately.
+- Suppression tricks are forbidden. Do not pass flags like `--ignore-filename-regex '(rustygpt-(cli|server|shared|web))'`, hide code via `.gitignore`/`.secignore` entries, or use `#![allow(..)]` blankets to dodge lint/test coverage. Any attempt to exclude files, modules, or binaries from lint/test tooling is a violation.
 
 ---
 
