@@ -1,4 +1,5 @@
-#![allow(clippy::all, clippy::pedantic)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![deny(warnings, clippy::pedantic)]
 
 use clap::Parser;
 use colored::*;
@@ -45,7 +46,6 @@ fn parse_color(s: &str) -> Color {
         "blue" => Color::Blue,
         "magenta" => Color::Magenta,
         "cyan" => Color::Cyan,
-        "white" => Color::White,
         _ => Color::White,
     }
 }
@@ -64,9 +64,7 @@ fn parse_command(
 
     // Parse the command and its arguments using shlex.
     let parts = shlex::split(command_str).expect("Failed to parse command arguments");
-    if parts.is_empty() {
-        panic!("No command provided in '{}'", cmd_str);
-    }
+    assert!(!parts.is_empty(), "No command provided in '{cmd_str}'");
 
     // Extract name and working directory from the prefix if available.
     let prefix_data = prefix_opt.map(|prefix| {

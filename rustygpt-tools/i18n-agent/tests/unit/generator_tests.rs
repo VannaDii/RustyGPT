@@ -22,7 +22,7 @@ fn test_create_backups() -> Result<()> {
 
     // Count number of JSON files in the directory before backup
     let json_files_count = fs::read_dir(temp_dir.path())?
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().extension().unwrap_or_default() == "json")
         .count();
 
@@ -36,7 +36,7 @@ fn test_create_backups() -> Result<()> {
 
     // Verify timestamped directory was created inside backup_dir
     let timestamped_dirs: Vec<_> = fs::read_dir(&backup_dir)?
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().is_dir())
         .collect();
 
@@ -45,7 +45,7 @@ fn test_create_backups() -> Result<()> {
     // Verify all JSON files were backed up
     let timestamped_dir = &timestamped_dirs[0].path();
     let backup_files_count = fs::read_dir(timestamped_dir)?
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().extension().unwrap_or_default() == "json")
         .count();
 
@@ -68,7 +68,7 @@ fn test_create_backups_with_existing_backup_dir() -> Result<()> {
 
     // Verify timestamped directory was created
     let timestamped_dirs: Vec<_> = fs::read_dir(&backup_dir)?
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().is_dir())
         .collect();
 
@@ -341,15 +341,21 @@ fn test_create_translation_templates() -> Result<()> {
         serde_json::from_str(&fs::read_to_string(&es_template_path)?)?;
 
     // Should contain the missing keys with "TODO:" prefix
-    assert!(es_template_content
-        .pointer("/common/button/reset")
-        .is_some());
-    assert!(es_template_content
-        .pointer("/admin/routes/settings/title")
-        .is_some());
-    assert!(es_template_content
-        .pointer("/admin/routes/settings/icon")
-        .is_some());
+    assert!(
+        es_template_content
+            .pointer("/common/button/reset")
+            .is_some()
+    );
+    assert!(
+        es_template_content
+            .pointer("/admin/routes/settings/title")
+            .is_some()
+    );
+    assert!(
+        es_template_content
+            .pointer("/admin/routes/settings/icon")
+            .is_some()
+    );
 
     // The values should be prefixed with "TODO:"
     let reset_value = es_template_content

@@ -68,6 +68,7 @@ impl LLMConfig {
     /// let optimal_params = hardware.calculate_optimal_params(Some(4_000_000_000)); // 4GB model
     /// let config = LLMConfig::default().apply_optimal_params(&optimal_params, None);
     /// ```
+    #[must_use]
     pub fn apply_optimal_params(
         mut self,
         optimal_params: &crate::llms::OptimalParams,
@@ -97,7 +98,7 @@ impl LLMConfig {
         self.additional_params.insert(
             "memory_buffer_percent".to_string(),
             serde_json::Value::Number(
-                serde_json::Number::from_f64(optimal_params.memory_buffer_percent as f64)
+                serde_json::Number::from_f64(f64::from(optimal_params.memory_buffer_percent))
                     .unwrap_or_else(|| serde_json::Number::from(20)), // 20% as integer fallback
             ),
         );
@@ -174,6 +175,10 @@ impl LLMConfig {
     ///     }
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns a vector of warning messages when the configuration exceeds detected hardware limits.
     pub fn validate_for_hardware(&self) -> Result<(), Vec<String>> {
         let mut warnings = Vec::new();
 
@@ -214,23 +219,22 @@ impl LLMConfig {
                 }
 
                 // Check context size
-                if let Some(context_size) = self.context_size {
-                    if context_size > optimal_params.context_size * 2 {
-                        warnings.push(format!(
-                            "Context size ({}) may be too large for available memory. Recommended: {}",
-                            context_size, optimal_params.context_size
-                        ));
-                    }
+                if let Some(context_size) = self.context_size
+                    && context_size > optimal_params.context_size * 2
+                {
+                    warnings.push(format!(
+                        "Context size ({}) may be too large for available memory. Recommended: {}",
+                        context_size, optimal_params.context_size
+                    ));
                 }
 
-                // Check batch size
-                if let Some(batch_size) = self.batch_size {
-                    if batch_size > optimal_params.batch_size * 2 {
-                        warnings.push(format!(
-                            "Batch size ({}) may be too large for available memory. Recommended: {}",
-                            batch_size, optimal_params.batch_size
-                        ));
-                    }
+                if let Some(batch_size) = self.batch_size
+                    && batch_size > optimal_params.batch_size * 2
+                {
+                    warnings.push(format!(
+                        "Batch size ({}) may be too large for available memory. Recommended: {}",
+                        batch_size, optimal_params.batch_size
+                    ));
                 }
             }
             Err(_) => {
@@ -316,30 +320,35 @@ impl LLMRequest {
     }
 
     /// Set the system message
+    #[must_use]
     pub fn with_system_message<T: Into<String>>(mut self, system_message: T) -> Self {
         self.system_message = Some(system_message.into());
         self
     }
 
     /// Set the maximum tokens
+    #[must_use]
     pub const fn with_max_tokens(mut self, max_tokens: u32) -> Self {
         self.max_tokens = Some(max_tokens);
         self
     }
 
     /// Set the temperature
+    #[must_use]
     pub const fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = Some(temperature);
         self
     }
 
     /// Add a stop sequence
+    #[must_use]
     pub fn with_stop_sequence<T: Into<String>>(mut self, stop_sequence: T) -> Self {
         self.stop_sequences.push(stop_sequence.into());
         self
     }
 
     /// Add metadata
+    #[must_use]
     pub fn with_metadata<K: Into<String>>(mut self, key: K, value: serde_json::Value) -> Self {
         self.metadata.insert(key.into(), value);
         self
@@ -433,6 +442,7 @@ pub struct TokenUsage {
 
 impl TokenUsage {
     /// Create new token usage
+    #[must_use]
     pub const fn new(prompt_tokens: u32, completion_tokens: u32) -> Self {
         Self {
             prompt_tokens,
@@ -471,6 +481,7 @@ pub struct ModelInfo {
 }
 
 /// Model capabilities
+#[allow(clippy::struct_excessive_bools)] // Tracking: TODO llm-caps-001 (bitset refactor)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelCapabilities {
     /// Supports text generation
@@ -559,16 +570,13 @@ mod tests {
         let result = LLMConfig::optimized_for_hardware("/test/model.gguf", Some(2_000_000_000));
 
         // This should succeed on any platform that supports hardware detection
-        match result {
-            Ok(config) => {
-                assert_eq!(config.model_path, "/test/model.gguf");
-                assert!(config.n_threads.is_some());
-                assert!(config.context_size.is_some());
-                assert!(config.batch_size.is_some());
-            }
-            Err(_) => {
-                // Hardware detection might fail in test environments, which is acceptable
-            }
+        if let Ok(config) = result {
+            assert_eq!(config.model_path, "/test/model.gguf");
+            assert!(config.n_threads.is_some());
+            assert!(config.context_size.is_some());
+            assert!(config.batch_size.is_some());
+        } else {
+            // Hardware detection might fail in test environments, which is acceptable
         }
     }
 
@@ -576,13 +584,10 @@ mod tests {
     fn test_llm_config_optimized_for_hardware_string() {
         let result = LLMConfig::optimized_for_hardware("model.bin".to_string(), None);
 
-        match result {
-            Ok(config) => {
-                assert_eq!(config.model_path, "model.bin");
-            }
-            Err(_) => {
-                // Hardware detection might fail in test environments
-            }
+        if let Ok(config) = result {
+            assert_eq!(config.model_path, "model.bin");
+        } else {
+            // Hardware detection might fail in test environments
         }
     }
 
@@ -645,7 +650,7 @@ mod tests {
     #[test]
     fn test_llm_config_debug() {
         let config = LLMConfig::default();
-        let debug_str = format!("{:?}", config);
+        let debug_str = format!("{config:?}");
         assert!(debug_str.contains("LLMConfig"));
         assert!(debug_str.contains("model_path"));
     }
@@ -745,7 +750,7 @@ mod tests {
     #[test]
     fn test_llm_request_debug() {
         let request = LLMRequest::new("test");
-        let debug_str = format!("{:?}", request);
+        let debug_str = format!("{request:?}");
         assert!(debug_str.contains("LLMRequest"));
         assert!(debug_str.contains("test"));
     }
@@ -799,7 +804,7 @@ mod tests {
     #[test]
     fn test_token_usage_debug() {
         let usage = TokenUsage::new(10, 20);
-        let debug_str = format!("{:?}", usage);
+        let debug_str = format!("{usage:?}");
         assert!(debug_str.contains("TokenUsage"));
         assert!(debug_str.contains("10"));
         assert!(debug_str.contains("20"));
@@ -838,11 +843,11 @@ mod tests {
     #[test]
     fn test_finish_reason_debug() {
         let reason = FinishReason::MaxTokens;
-        let debug_str = format!("{:?}", reason);
+        let debug_str = format!("{reason:?}");
         assert_eq!(debug_str, "MaxTokens");
 
         let reason = FinishReason::StopSequence;
-        let debug_str = format!("{:?}", reason);
+        let debug_str = format!("{reason:?}");
         assert_eq!(debug_str, "StopSequence");
     }
 
@@ -899,7 +904,7 @@ mod tests {
             capabilities: ModelCapabilities::default(),
         };
 
-        let debug_str = format!("{:?}", info);
+        let debug_str = format!("{info:?}");
         assert!(debug_str.contains("ModelInfo"));
         assert!(debug_str.contains("test"));
     }
@@ -979,7 +984,7 @@ mod tests {
     #[test]
     fn test_model_capabilities_debug() {
         let capabilities = ModelCapabilities::default();
-        let debug_str = format!("{:?}", capabilities);
+        let debug_str = format!("{capabilities:?}");
         assert!(debug_str.contains("ModelCapabilities"));
         assert!(debug_str.contains("text_generation"));
     }

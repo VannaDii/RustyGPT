@@ -40,16 +40,14 @@ impl StreamSession {
             started_at: Instant::now(),
         });
 
-        if let Some(duration) = default_timeout {
-            if !duration.is_zero() {
-                let weak = Arc::downgrade(&session);
-                tokio::spawn(async move {
-                    tokio::time::sleep(duration).await;
-                    if let Some(session) = weak.upgrade() {
-                        session.mark_timeout();
-                    }
-                });
-            }
+        if let Some(duration) = default_timeout.filter(|d| !d.is_zero()) {
+            let weak = Arc::downgrade(&session);
+            tokio::spawn(async move {
+                tokio::time::sleep(duration).await;
+                if let Some(session) = weak.upgrade() {
+                    session.mark_timeout();
+                }
+            });
         }
 
         session

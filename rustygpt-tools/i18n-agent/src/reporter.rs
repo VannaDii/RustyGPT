@@ -1,10 +1,11 @@
 use anyhow::Result;
 use colored::Colorize;
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 
-use crate::analyzer::{calculate_coverage, get_missing_translations, AuditResult};
+use crate::analyzer::{AuditResult, calculate_coverage, get_missing_translations};
 
 /// Prints an audit report to the console
 pub fn print_audit_report(audit_result: &AuditResult, format: &str) {
@@ -16,7 +17,6 @@ pub fn print_audit_report(audit_result: &AuditResult, format: &str) {
         let is_reference = lang_code == &audit_result.reference_language;
         let total_keys = data.all_keys.len();
         let unused_keys = data.unused_keys.len();
-        let _used_keys = total_keys - unused_keys;
 
         let missing = if is_reference {
             0
@@ -27,9 +27,9 @@ pub fn print_audit_report(audit_result: &AuditResult, format: &str) {
         let coverage = calculate_coverage(audit_result, lang_code);
 
         let status = if is_reference {
-            format!("{} keys (reference)", total_keys).white()
+            format!("{total_keys} keys (reference)").white()
         } else {
-            format!("{} keys ({} missing)", total_keys, missing).white()
+            format!("{total_keys} keys ({missing} missing)").white()
         };
 
         println!(
@@ -38,7 +38,7 @@ pub fn print_audit_report(audit_result: &AuditResult, format: &str) {
             status,
             coverage,
             unused_keys,
-            (unused_keys as f64 / total_keys as f64 * 100.0).round()
+            unused_percentage(unused_keys, total_keys)
         );
     }
 
@@ -60,7 +60,7 @@ pub fn print_audit_report(audit_result: &AuditResult, format: &str) {
             // Show a few examples of unused keys
             let examples: Vec<_> = data.unused_keys.iter().take(5).collect();
             for key in examples {
-                println!("  - {}", key);
+                println!("  - {key}");
             }
 
             if data.unused_keys.len() > 5 {
@@ -86,7 +86,7 @@ pub fn print_audit_report(audit_result: &AuditResult, format: &str) {
             // Show a few examples of missing keys
             let examples: Vec<_> = missing.iter().take(5).collect();
             for key in examples {
-                println!("  - {}", key);
+                println!("  - {key}");
             }
 
             if missing.len() > 5 {
@@ -98,13 +98,27 @@ pub fn print_audit_report(audit_result: &AuditResult, format: &str) {
     println!("\nRun 'i18n-agent report' for a detailed report.");
 }
 
-/// Generates a detailed report in the specified format
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+fn unused_percentage(unused: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        (unused as f64 / total as f64 * 100.0).round()
+    }
+}
+
+/// Generates a detailed report in the specified format.
+///
+/// # Errors
+///
+/// Returns an error when writing the requested report format fails.
 pub fn generate_report(audit_result: &AuditResult, output_dir: &Path, format: &str) -> Result<()> {
     match format {
         "text" => generate_text_report(audit_result, output_dir),
         "json" => generate_json_report(audit_result, output_dir),
         "html" => generate_html_report(audit_result, output_dir),
-        _ => Err(anyhow::anyhow!("Unsupported report format: {}", format)),
+        _ => Err(anyhow::anyhow!("Unsupported report format: {format}")),
     }
 }
 
@@ -121,7 +135,6 @@ fn generate_text_report(audit_result: &AuditResult, output_dir: &Path) -> Result
         let is_reference = lang_code == &audit_result.reference_language;
         let total_keys = data.all_keys.len();
         let unused_keys = data.unused_keys.len();
-        let _used_keys = total_keys - unused_keys;
 
         let missing = if is_reference {
             0
@@ -132,34 +145,37 @@ fn generate_text_report(audit_result: &AuditResult, output_dir: &Path) -> Result
         let coverage = calculate_coverage(audit_result, lang_code);
 
         let status = if is_reference {
-            format!("{} keys (reference)", total_keys)
+            format!("{total_keys} keys (reference)")
         } else {
-            format!("{} keys ({} missing)", total_keys, missing)
+            format!("{total_keys} keys ({missing} missing)")
         };
 
-        report.push_str(&format!(
-            "- {}.json: {} - {:.1}% coverage, {} unused keys ({}%)\n",
+        let _ = writeln!(
+            report,
+            "- {}.json: {} - {:.1}% coverage, {} unused keys ({}%)",
             lang_code,
             status,
             coverage,
             unused_keys,
-            (unused_keys as f64 / total_keys as f64 * 100.0).round()
-        ));
+            unused_percentage(unused_keys, total_keys)
+        );
     }
 
     report.push_str("\nKeys in Use:\n");
-    report.push_str(&format!(
-        "- Total unique keys in codebase: {}\n",
+    let _ = writeln!(
+        report,
+        "- Total unique keys in codebase: {}",
         audit_result.keys_in_use.len()
-    ));
+    );
 
     report.push_str("\nUnused Keys:\n");
     for (lang_code, data) in &audit_result.translations {
-        report.push_str(&format!(
-            "- {}.json: {} unused keys\n",
+        let _ = writeln!(
+            report,
+            "- {}.json: {} unused keys",
             lang_code,
             data.unused_keys.len()
-        ));
+        );
 
         if !data.unused_keys.is_empty() {
             // List all unused keys
@@ -167,7 +183,7 @@ fn generate_text_report(audit_result: &AuditResult, output_dir: &Path) -> Result
             sorted_keys.sort();
 
             for key in sorted_keys {
-                report.push_str(&format!("  - {}\n", key));
+                let _ = writeln!(report, "  - {key}");
             }
 
             report.push('\n');
@@ -181,11 +197,12 @@ fn generate_text_report(audit_result: &AuditResult, output_dir: &Path) -> Result
         }
 
         let missing = get_missing_translations(audit_result, lang_code);
-        report.push_str(&format!(
-            "- {}.json: {} missing translations\n",
+        let _ = writeln!(
+            report,
+            "- {}.json: {} missing translations",
             lang_code,
             missing.len()
-        ));
+        );
 
         if !missing.is_empty() {
             // List all missing keys
@@ -193,7 +210,7 @@ fn generate_text_report(audit_result: &AuditResult, output_dir: &Path) -> Result
             sorted_keys.sort();
 
             for key in sorted_keys {
-                report.push_str(&format!("  - {}\n", key));
+                let _ = writeln!(report, "  - {key}");
             }
 
             report.push('\n');
@@ -201,7 +218,7 @@ fn generate_text_report(audit_result: &AuditResult, output_dir: &Path) -> Result
     }
 
     fs::write(&report_path, report)?;
-    println!("Text report generated: {:?}", report_path);
+    println!("Text report generated: {}", report_path.display());
 
     Ok(())
 }
@@ -256,7 +273,7 @@ fn generate_json_report(audit_result: &AuditResult, output_dir: &Path) -> Result
         // Handle the coverage percentage - convert to string to avoid precision issues
         file_data.insert(
             "coverage_percentage".to_string(),
-            serde_json::Value::String(format!("{:.1}", coverage)),
+            serde_json::Value::String(format!("{coverage:.1}")),
         );
         file_data.insert(
             "is_reference".to_string(),
@@ -285,7 +302,7 @@ fn generate_json_report(audit_result: &AuditResult, output_dir: &Path) -> Result
         );
 
         files.insert(
-            format!("{}.json", lang_code),
+            format!("{lang_code}.json"),
             serde_json::Value::Object(file_data),
         );
     }
@@ -297,7 +314,7 @@ fn generate_json_report(audit_result: &AuditResult, output_dir: &Path) -> Result
     let json_str = serde_json::to_string_pretty(&json)?;
 
     fs::write(&report_path, json_str)?;
-    println!("JSON report generated: {:?}", report_path);
+    println!("JSON report generated: {}", report_path.display());
 
     Ok(())
 }
@@ -349,16 +366,13 @@ fn generate_html_report(audit_result: &AuditResult, output_dir: &Path) -> Result
         let coverage = calculate_coverage(audit_result, lang_code);
 
         html.push_str("<tr>");
-        html.push_str(&format!(
-            "<td>{}.json {}</td>",
-            lang_code,
-            if is_reference { "(reference)" } else { "" }
-        ));
-        html.push_str(&format!("<td>{}</td>", total_keys));
-        html.push_str(&format!("<td>{}</td>", used_keys));
-        html.push_str(&format!("<td>{}</td>", unused_keys));
-        html.push_str(&format!("<td>{}</td>", missing));
-        html.push_str(&format!("<td>{:.1}%</td>", coverage));
+        let suffix = if is_reference { "(reference)" } else { "" };
+        let _ = write!(html, "<td>{lang_code}.json {suffix}</td>");
+        let _ = write!(html, "<td>{total_keys}</td>");
+        let _ = write!(html, "<td>{used_keys}</td>");
+        let _ = write!(html, "<td>{unused_keys}</td>");
+        let _ = write!(html, "<td>{missing}</td>");
+        let _ = write!(html, "<td>{coverage:.1}%</td>");
         html.push_str("</tr>\n");
     }
 
@@ -369,13 +383,13 @@ fn generate_html_report(audit_result: &AuditResult, output_dir: &Path) -> Result
 
     // Write the HTML to file
     fs::write(&report_path, html)?;
-    println!("HTML report generated: {:?}", report_path);
+    println!("HTML report generated: {}", report_path.display());
 
     Ok(())
 }
 
 #[cfg(test)]
-#[allow(clippy::similar_names)]
+#[allow(clippy::similar_names, clippy::unnecessary_wraps)] // Tests use Result for ergonomic `?` usage.
 mod tests {
     use super::*;
     use assert_fs::TempDir;
@@ -713,10 +727,12 @@ mod tests {
 
         // Should return an error
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unsupported report format"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unsupported report format")
+        );
 
         Ok(())
     }

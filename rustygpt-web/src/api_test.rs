@@ -18,7 +18,7 @@ mod tests {
     #[test]
     fn test_list_threads_endpoint() {
         let conversation_id = Uuid::nil();
-        let url = format!("/api/conversations/{}/threads", conversation_id);
+        let url = format!("/api/conversations/{conversation_id}/threads");
         assert!(url.contains("/threads"));
     }
 
@@ -66,15 +66,15 @@ mod tests {
         let conversation_id = "test-conv-123";
 
         // Conversation endpoint
-        let conv_url = format!("/api/conversations/{}", conversation_id);
+        let conv_url = format!("/api/conversations/{conversation_id}");
         assert_eq!(conv_url, "/api/conversations/test-conv-123");
 
         // Thread listing endpoint
-        let thread_url = format!("/api/conversations/{}/threads", conversation_id);
+        let thread_url = format!("/api/conversations/{conversation_id}/threads");
         assert_eq!(thread_url, "/api/conversations/test-conv-123/threads");
 
         // Stream endpoint
-        let stream_url = format!("/api/stream/conversations/{}", conversation_id);
+        let stream_url = format!("/api/stream/conversations/{conversation_id}");
         assert_eq!(stream_url, "/api/stream/conversations/test-conv-123");
     }
 
@@ -144,8 +144,7 @@ mod tests {
     fn test_stream_event_deserialization() {
         let root_id = Uuid::new_v4();
         let json = format!(
-            "{{\"type\":\"thread.activity\",\"payload\":{{\"root_id\":\"{}\",\"last_activity_at\":\"2024-01-01T00:00:00Z\"}}}}",
-            root_id
+            "{{\"type\":\"thread.activity\",\"payload\":{{\"root_id\":\"{root_id}\",\"last_activity_at\":\"2024-01-01T00:00:00Z\"}}}}"
         );
 
         let event: ConversationStreamEvent = serde_json::from_str(&json).expect("parse event");

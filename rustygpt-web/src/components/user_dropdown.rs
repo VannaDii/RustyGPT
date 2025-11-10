@@ -29,7 +29,7 @@ pub fn user_dropdown(props: &UserDropdownProps) -> Html {
         let settings_navigator = navigator.clone();
         let onclick = Callback::from(move |event: yew::MouseEvent| {
             event.prevent_default();
-            settings_navigator.push(&AdminRoute::Profile)
+            settings_navigator.push(&AdminRoute::Profile);
         });
         html! {
             <li><a {onclick}>{i18n.t("sidebar.settings")}</a></li>
@@ -46,14 +46,10 @@ pub fn user_dropdown(props: &UserDropdownProps) -> Html {
             spawn_local(async move {
                 let client = RustyGPTClient::shared();
                 let result = client.logout().await;
-                if let Err(err) = result {
-                    if err
-                        .status()
-                        .map(|status| status != StatusCode::UNAUTHORIZED)
-                        .unwrap_or(true)
-                    {
-                        log::error!("logout failed: {}", err);
-                    }
+                if let Err(err) = result
+                    && err.status() != Some(StatusCode::UNAUTHORIZED)
+                {
+                    log::error!("logout failed: {err}");
                 }
                 if let Some(callback) = on_logout {
                     callback.emit(());

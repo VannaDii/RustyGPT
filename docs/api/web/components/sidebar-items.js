@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["header_nav_item","language_selector","language_selector_button","loading","message_node","theme_switcher","thread_composer","thread_list","thread_view","typing_indicator","user_dropdown"]};

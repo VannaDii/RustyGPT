@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_wraps)] // Tests use Result for fallible setup helpers.
+
 use anyhow::Result;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -5,8 +7,8 @@ use std::path::PathBuf;
 
 // Import the module we're testing
 use i18n_agent::analyzer::{
-    audit_translations, calculate_coverage, extract_keys_from_json, get_missing_translations,
-    get_value_by_path, remove_key_from_json, set_value_by_path, AuditResult, TranslationData,
+    AuditResult, TranslationData, audit_translations, calculate_coverage, extract_keys_from_json,
+    get_missing_translations, get_value_by_path, remove_key_from_json, set_value_by_path,
 };
 
 // Import test utilities
@@ -75,7 +77,7 @@ fn test_extract_keys_from_json_nested_structure() -> Result<()> {
 
     // Verify each expected key exists
     for key in expected_keys {
-        assert!(keys.contains(key), "Missing key: {}", key);
+        assert!(keys.contains(key), "Missing key: {key}");
     }
 
     Ok(())
@@ -194,7 +196,7 @@ fn test_extract_keys_from_json_with_non_object() -> Result<()> {
 
     for (i, json) in test_cases.iter().enumerate() {
         let keys = extract_keys_from_json(json, "");
-        assert_eq!(keys.len(), 0, "Test case {} should return no keys", i);
+        assert_eq!(keys.len(), 0, "Test case {i} should return no keys");
     }
 
     Ok(())
@@ -219,22 +221,22 @@ fn test_audit_translations() -> Result<()> {
     assert!(audit_result.translations.contains_key("fr"));
 
     // Check English translation data
-    let en_data = &audit_result.translations["en"];
-    assert!(en_data.all_keys.contains("common.button.submit"));
-    assert!(en_data.all_keys.contains("common.button.cancel"));
-    assert!(en_data.all_keys.contains("common.button.reset"));
-    assert!(en_data.all_keys.contains("profile.title"));
+    let english_data = &audit_result.translations["en"];
+    assert!(english_data.all_keys.contains("common.button.submit"));
+    assert!(english_data.all_keys.contains("common.button.cancel"));
+    assert!(english_data.all_keys.contains("common.button.reset"));
+    assert!(english_data.all_keys.contains("profile.title"));
 
     // English has the unused.key that's not in keys_in_use
-    assert!(en_data.unused_keys.contains("unused.key"));
+    assert!(english_data.unused_keys.contains("unused.key"));
 
     // Check Spanish translation data
-    let es_data = &audit_result.translations["es"];
-    assert!(es_data.all_keys.contains("common.button.submit"));
-    assert!(es_data.all_keys.contains("common.button.cancel"));
-    assert!(!es_data.all_keys.contains("common.button.reset")); // missing
-    assert!(es_data.all_keys.contains("profile.title"));
-    assert!(es_data.unused_keys.contains("unused.key"));
+    let spanish_data = &audit_result.translations["es"];
+    assert!(spanish_data.all_keys.contains("common.button.submit"));
+    assert!(spanish_data.all_keys.contains("common.button.cancel"));
+    assert!(!spanish_data.all_keys.contains("common.button.reset")); // missing
+    assert!(spanish_data.all_keys.contains("profile.title"));
+    assert!(spanish_data.unused_keys.contains("unused.key"));
 
     // Check French translation data
     let fr_data = &audit_result.translations["fr"];
@@ -280,33 +282,33 @@ fn test_get_missing_translations() -> Result<()> {
     let mut translations = HashMap::new();
 
     // English translation - reference language with all keys
-    let mut en_all_keys = HashSet::new();
-    en_all_keys.insert("common.button.submit".to_string());
-    en_all_keys.insert("common.button.cancel".to_string());
-    en_all_keys.insert("common.button.reset".to_string());
-    en_all_keys.insert("profile.title".to_string());
+    let mut english_all_keys = HashSet::new();
+    english_all_keys.insert("common.button.submit".to_string());
+    english_all_keys.insert("common.button.cancel".to_string());
+    english_all_keys.insert("common.button.reset".to_string());
+    english_all_keys.insert("profile.title".to_string());
 
-    let en_data = TranslationData {
+    let english_data = TranslationData {
         file_path: PathBuf::from("en.json"),
-        all_keys: en_all_keys,
+        all_keys: english_all_keys,
         unused_keys: HashSet::new(),
         content: json!({}),
     };
-    translations.insert("en".to_string(), en_data);
+    translations.insert("en".to_string(), english_data);
 
     // Spanish translation - missing reset button
-    let mut es_all_keys = HashSet::new();
-    es_all_keys.insert("common.button.submit".to_string());
-    es_all_keys.insert("common.button.cancel".to_string());
-    es_all_keys.insert("profile.title".to_string());
+    let mut spanish_all_keys = HashSet::new();
+    spanish_all_keys.insert("common.button.submit".to_string());
+    spanish_all_keys.insert("common.button.cancel".to_string());
+    spanish_all_keys.insert("profile.title".to_string());
 
-    let es_data = TranslationData {
+    let spanish_data = TranslationData {
         file_path: PathBuf::from("es.json"),
-        all_keys: es_all_keys,
+        all_keys: spanish_all_keys,
         unused_keys: HashSet::new(),
         content: json!({}),
     };
-    translations.insert("es".to_string(), es_data);
+    translations.insert("es".to_string(), spanish_data);
 
     // French translation - missing cancel button and profile title
     let mut fr_all_keys = HashSet::new();
@@ -328,16 +330,16 @@ fn test_get_missing_translations() -> Result<()> {
     };
 
     // Test get_missing_translations for various languages
-    let en_missing = get_missing_translations(&audit_result, "en");
-    let es_missing = get_missing_translations(&audit_result, "es");
+    let english_missing = get_missing_translations(&audit_result, "en");
+    let spanish_missing = get_missing_translations(&audit_result, "es");
     let fr_missing = get_missing_translations(&audit_result, "fr");
     let de_missing = get_missing_translations(&audit_result, "de"); // Non-existent language
 
     // Verify missing translations
-    assert_eq!(en_missing.len(), 0); // Reference language has no missing translations
+    assert_eq!(english_missing.len(), 0); // Reference language has no missing translations
 
-    assert_eq!(es_missing.len(), 1);
-    assert!(es_missing.contains("common.button.reset"));
+    assert_eq!(spanish_missing.len(), 1);
+    assert!(spanish_missing.contains("common.button.reset"));
 
     assert_eq!(fr_missing.len(), 2);
     assert!(fr_missing.contains("common.button.cancel"));
@@ -360,33 +362,33 @@ fn test_calculate_coverage() -> Result<()> {
     let mut translations = HashMap::new();
 
     // English translation - reference language with all keys
-    let mut en_all_keys = HashSet::new();
-    en_all_keys.insert("common.button.submit".to_string());
-    en_all_keys.insert("common.button.cancel".to_string());
-    en_all_keys.insert("common.button.reset".to_string());
-    en_all_keys.insert("profile.title".to_string());
+    let mut english_all_keys = HashSet::new();
+    english_all_keys.insert("common.button.submit".to_string());
+    english_all_keys.insert("common.button.cancel".to_string());
+    english_all_keys.insert("common.button.reset".to_string());
+    english_all_keys.insert("profile.title".to_string());
 
-    let en_data = TranslationData {
+    let english_data = TranslationData {
         file_path: PathBuf::from("en.json"),
-        all_keys: en_all_keys,
+        all_keys: english_all_keys,
         unused_keys: HashSet::new(),
         content: json!({}),
     };
-    translations.insert("en".to_string(), en_data);
+    translations.insert("en".to_string(), english_data);
 
     // Spanish translation - 3/4 keys = 75% coverage
-    let mut es_all_keys = HashSet::new();
-    es_all_keys.insert("common.button.submit".to_string());
-    es_all_keys.insert("common.button.cancel".to_string());
-    es_all_keys.insert("profile.title".to_string());
+    let mut spanish_all_keys = HashSet::new();
+    spanish_all_keys.insert("common.button.submit".to_string());
+    spanish_all_keys.insert("common.button.cancel".to_string());
+    spanish_all_keys.insert("profile.title".to_string());
 
-    let es_data = TranslationData {
+    let spanish_data = TranslationData {
         file_path: PathBuf::from("es.json"),
-        all_keys: es_all_keys,
+        all_keys: spanish_all_keys,
         unused_keys: HashSet::new(),
         content: json!({}),
     };
-    translations.insert("es".to_string(), es_data);
+    translations.insert("es".to_string(), spanish_data);
 
     // French translation - 2/4 keys = 50% coverage
     let mut fr_all_keys = HashSet::new();
@@ -420,18 +422,33 @@ fn test_calculate_coverage() -> Result<()> {
     };
 
     // Test calculate_coverage for various languages
-    let en_coverage = calculate_coverage(&audit_result, "en");
-    let es_coverage = calculate_coverage(&audit_result, "es");
+    let english_coverage_calc = calculate_coverage(&audit_result, "en");
+    let spanish_coverage_calc = calculate_coverage(&audit_result, "es");
     let fr_coverage = calculate_coverage(&audit_result, "fr");
     let de_coverage = calculate_coverage(&audit_result, "de");
     let unknown_coverage = calculate_coverage(&audit_result, "unknown");
 
-    // Verify coverage percentages
-    assert_eq!(en_coverage, 100.0); // Reference language has 100% coverage
-    assert_eq!(es_coverage, 75.0); // 3/4 keys
-    assert_eq!(fr_coverage, 50.0); // 2/4 keys
-    assert_eq!(de_coverage, 25.0); // 1/4 keys
-    assert_eq!(unknown_coverage, 0.0); // Unknown language has 0% coverage
+    // Verify coverage percentages with a small tolerance
+    assert!(
+        (english_coverage_calc - 100.0).abs() < f64::EPSILON,
+        "expected 100%, got {english_coverage_calc}"
+    );
+    assert!(
+        (spanish_coverage_calc - 75.0).abs() < f64::EPSILON,
+        "expected 75%, got {spanish_coverage_calc}"
+    );
+    assert!(
+        (fr_coverage - 50.0).abs() < f64::EPSILON,
+        "expected 50%, got {fr_coverage}"
+    );
+    assert!(
+        (de_coverage - 25.0).abs() < f64::EPSILON,
+        "expected 25%, got {de_coverage}"
+    );
+    assert!(
+        unknown_coverage.abs() < f64::EPSILON,
+        "expected 0%, got {unknown_coverage}"
+    );
 
     Ok(())
 }

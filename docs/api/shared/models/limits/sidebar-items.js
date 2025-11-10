@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["AssignRateLimitRequest","CreateRateLimitProfileRequest","RateLimitAssignment","RateLimitProfile","UpdateRateLimitProfileRequest"]};

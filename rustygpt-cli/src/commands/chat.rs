@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Write as _, sync::Arc};
+use std::{collections::HashMap, convert::TryFrom, fmt::Write as _, sync::Arc};
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -43,7 +43,7 @@ pub struct ChatArgs {
     #[arg(long)]
     pub limit: Option<i32>,
 
-    /// RustyGPT server base URL (default: http://localhost:8080)
+    /// `RustyGPT` server base URL (default: <http://localhost:8080>)
     #[arg(long, default_value = "http://localhost:8080")]
     pub server: String,
 }
@@ -59,7 +59,7 @@ pub struct ReplyArgs {
     #[arg()]
     pub text: String,
 
-    /// RustyGPT server base URL (default: http://localhost:8080)
+    /// `RustyGPT` server base URL (default: <http://localhost:8080>)
     #[arg(long, default_value = "http://localhost:8080")]
     pub server: String,
 }
@@ -71,7 +71,7 @@ pub struct FollowArgs {
     #[arg(long)]
     pub root: Uuid,
 
-    /// RustyGPT server base URL (default: http://localhost:8080)
+    /// `RustyGPT` server base URL (default: <http://localhost:8080>)
     #[arg(long, default_value = "http://localhost:8080")]
     pub server: String,
 }
@@ -122,7 +122,7 @@ pub async fn handle_reply(args: ReplyArgs) -> Result<()> {
     };
 
     let mut request = client
-        .post(api_base.join(&format!("messages/{}/reply", args.parent))?)
+        .post(api_base.join(&format!("messages/{parent}/reply", parent = args.parent))?)
         .json(&payload);
     if let Some(csrf) = session::csrf_token_from_jar(&jar, &server_url) {
         request = request.header("X-CSRF-Token", csrf);
@@ -162,7 +162,7 @@ pub async fn handle_follow(args: FollowArgs) -> Result<()> {
     );
 
     let stream_url = api_base
-        .join(&format!("stream/conversations/{}", conversation_id))
+        .join(&format!("stream/conversations/{conversation_id}"))
         .context("invalid stream endpoint")?;
     let mut last_event_id: Option<String> = None;
     let mut last_timestamp: Option<i64> = None;
@@ -212,19 +212,19 @@ pub async fn handle_follow(args: FollowArgs) -> Result<()> {
             for line in text.split('\n') {
                 let trimmed = line.trim_end_matches('\r');
 
-                if trimmed.starts_with("event:") {
-                    event_name = Some(trimmed[6..].trim().to_string());
-                } else if trimmed.starts_with("data:") {
-                    let payload = trimmed[5..].trim();
+                if let Some(value) = trimmed.strip_prefix("event:") {
+                    event_name = Some(value.trim().to_string());
+                } else if let Some(value) = trimmed.strip_prefix("data:") {
+                    let payload = value.trim();
                     data_buffer.push_str(payload);
-                } else if trimmed.starts_with("id:") {
-                    current_event_id = Some(trimmed[3..].trim().to_string());
+                } else if let Some(value) = trimmed.strip_prefix("id:") {
+                    current_event_id = Some(value.trim().to_string());
                 } else if trimmed.is_empty() {
-                    if let Some(name) = &event_name {
-                        if !data_buffer.is_empty() && data_buffer != "[DONE]" {
-                            handle_stream_event(name, &data_buffer, args.root, conversation_id)
-                                .await?;
-                        }
+                    if let Some(name) = &event_name
+                        && !data_buffer.is_empty()
+                        && data_buffer != "[DONE]"
+                    {
+                        handle_stream_event(name, &data_buffer, args.root, conversation_id)?;
                     }
                     if let Some(id_value) = current_event_id.take() {
                         if let Some(ts) = parse_event_timestamp(&id_value) {
@@ -246,7 +246,7 @@ pub async fn handle_follow(args: FollowArgs) -> Result<()> {
     }
 }
 
-async fn handle_stream_event(
+fn handle_stream_event(
     event_name: &str,
     data: &str,
     root_filter: Uuid,
@@ -258,7 +258,7 @@ async fn handle_stream_event(
                 if payload.root_id == root_filter {
                     for choice in payload.choices {
                         if let Some(content) = choice.delta.content {
-                            print!("{}", content);
+                            print!("{content}");
                         }
                     }
                     std::io::Write::flush(&mut std::io::stdout())?;
@@ -268,44 +268,43 @@ async fn handle_stream_event(
                 if payload.root_id == root_filter {
                     println!();
                     if let Some(reason) = payload.finish_reason {
-                        println!("[stream finished: {}]", reason);
+                        println!("[stream finished: {reason}]");
                     }
                     if let Some(usage) = payload.usage {
-                        println!(
-                            "[usage prompt={} completion={} total={}]",
-                            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-                        );
+                        let prompt = usage.prompt_tokens;
+                        let completion = usage.completion_tokens;
+                        let total = usage.total_tokens;
+                        println!("[usage prompt={prompt} completion={completion} total={total}]");
                     }
                 }
             }
             ConversationStreamEvent::ThreadActivity { payload } => {
                 if payload.root_id == root_filter {
-                    println!(
-                        "[thread activity at {}]",
-                        payload.last_activity_at.0.format("%Y-%m-%d %H:%M:%S")
-                    );
+                    let timestamp = payload.last_activity_at.0.format("%Y-%m-%d %H:%M:%S");
+                    println!("[thread activity at {timestamp}]");
                 }
             }
             ConversationStreamEvent::TypingUpdate { payload } => {
                 if payload.root_id == root_filter {
+                    let expires = payload.expires_at.0.format("%Y-%m-%d %H:%M:%S");
                     println!(
-                        "[typing update user={} expires={}]",
-                        payload.user_id,
-                        payload.expires_at.0.format("%Y-%m-%d %H:%M:%S")
+                        "[typing update user={user} expires={expires}]",
+                        user = payload.user_id
                     );
                 }
             }
             ConversationStreamEvent::PresenceUpdate { payload } => {
+                let last_seen = payload.last_seen_at.0.format("%Y-%m-%d %H:%M:%S");
                 println!(
-                    "[presence user={} status={:?} last_seen={}]",
-                    payload.user_id,
-                    payload.status,
-                    payload.last_seen_at.0.format("%Y-%m-%d %H:%M:%S")
+                    "[presence user={user} status={status:?} last_seen={last_seen}]",
+                    user = payload.user_id,
+                    status = payload.status
                 );
             }
             ConversationStreamEvent::UnreadUpdate { payload } => {
                 if payload.root_id == root_filter {
-                    println!("[unread count updated: {}]", payload.unread);
+                    let unread = payload.unread;
+                    println!("[unread count updated: {unread}]");
                 }
             }
             ConversationStreamEvent::MembershipChanged { payload } => {
@@ -317,21 +316,24 @@ async fn handle_stream_event(
                     };
                     let role = payload
                         .role
-                        .map(|role| role.as_str().to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
+                        .map_or_else(|| "unknown".to_string(), |role| role.as_str().to_string());
                     println!(
-                        "[membership] user {} {} (role {})",
-                        payload.user_id, action, role
+                        "[membership] user {user} {action} (role {role})",
+                        user = payload.user_id
                     );
                 }
             }
             ConversationStreamEvent::Error { payload } => {
-                eprintln!("[stream error {}] {}", payload.code, payload.message);
+                eprintln!(
+                    "[stream error {code}] {message}",
+                    code = payload.code,
+                    message = payload.message
+                );
             }
-            _ => {}
+            ConversationStreamEvent::ThreadNew { .. } => {}
         }
     } else {
-        eprintln!("[unparsed {}] {}", event_name, data);
+        eprintln!("[unparsed {event_name}] {data}");
     }
 
     Ok(())
@@ -353,7 +355,7 @@ async fn fetch_threads(
     limit: Option<i32>,
 ) -> Result<ThreadListResponse> {
     let endpoint = api_base
-        .join(&format!("conversations/{}/threads", conversation))
+        .join(&format!("conversations/{conversation}/threads"))
         .context("invalid threads endpoint")?;
     let mut request = client.get(endpoint);
     if let Some(limit) = limit {
@@ -377,7 +379,7 @@ async fn fetch_thread_tree(
     limit: Option<i32>,
 ) -> Result<ThreadTreeResponse> {
     let endpoint = api_base
-        .join(&format!("threads/{}/tree", root))
+        .join(&format!("threads/{root}/tree"))
         .context("invalid thread endpoint")?;
     let mut request = client.get(endpoint);
     if let Some(limit) = limit {
@@ -400,7 +402,7 @@ async fn fetch_unread_summary(
     conversation: Uuid,
 ) -> Result<UnreadSummaryResponse> {
     let endpoint = api_base
-        .join(&format!("conversations/{}/unread", conversation))
+        .join(&format!("conversations/{conversation}/unread"))
         .context("invalid unread endpoint")?;
     let response = client
         .get(endpoint)
@@ -447,7 +449,7 @@ fn render_thread(tree: &ThreadTreeResponse) {
     println!("Thread {}", tree.root_id);
     for message in &tree.messages {
         let mut line = String::new();
-        let indent = "  ".repeat(message.depth.saturating_sub(1) as usize);
+        let indent = "  ".repeat(usize::try_from(message.depth.saturating_sub(1)).unwrap_or(0));
         let _ = write!(
             &mut line,
             "{}[{}] {}",
@@ -455,10 +457,10 @@ fn render_thread(tree: &ThreadTreeResponse) {
             message.created_at.0.format("%Y-%m-%d %H:%M:%S"),
             message.content
         );
-        println!("{}", line);
+        println!("{line}");
     }
 
     if let Some(cursor) = &tree.next_cursor {
-        println!("(More messages after path {})", cursor);
+        println!("(More messages after path {cursor})");
     }
 }

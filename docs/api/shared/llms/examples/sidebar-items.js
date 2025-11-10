@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["basic_example","streaming_example","text_generation_example"]};

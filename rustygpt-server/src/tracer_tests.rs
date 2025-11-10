@@ -335,14 +335,14 @@ mod tests {
             session: None,
         });
 
-        let mut make_span = HttpMakeSpan::default();
+        let mut make_span = HttpMakeSpan;
         let span = make_span.make_span(&request);
         let response = Response::builder()
             .status(StatusCode::OK)
             .body(Body::empty())
             .unwrap();
 
-        HttpOnResponse::default().on_response(&response, Duration::from_millis(10), &span);
+        HttpOnResponse.on_response(&response, Duration::from_millis(10), &span);
 
         let metrics = handle.render();
         assert!(

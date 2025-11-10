@@ -12,11 +12,11 @@ pub mod threads;
 #[cfg(test)]
 mod apple_auth_test;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod apple_auth_tests;
 
 #[cfg(test)]
 mod github_auth_test;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod github_auth_tests;

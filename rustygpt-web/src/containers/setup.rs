@@ -113,7 +113,7 @@ pub fn setup() -> Html {
         move |_: FocusEvent| {
             let value = (*username).clone();
             match validate_username(&value) {
-                Ok(_) => username_error.set(None),
+                Ok(()) => username_error.set(None),
                 Err(ValidationError::Required) => {
                     username_error.set(Some(i18n.t("setup.errors.username_required").into()));
                 }
@@ -133,7 +133,7 @@ pub fn setup() -> Html {
         move |_: FocusEvent| {
             let value = (*email).clone();
             match validate_email(&value) {
-                Ok(_) => email_error.set(None),
+                Ok(()) => email_error.set(None),
                 Err(ValidationError::Required) => {
                     email_error.set(Some(i18n.t("setup.errors.email_required").into()));
                 }
@@ -153,7 +153,7 @@ pub fn setup() -> Html {
         move |_: FocusEvent| {
             let value = (*password).clone();
             match validate_password(&value) {
-                Ok(_) => password_error.set(None),
+                Ok(()) => password_error.set(None),
                 Err(ValidationError::Required) => {
                     password_error.set(Some(i18n.t("setup.errors.password_required").into()));
                 }
@@ -176,7 +176,7 @@ pub fn setup() -> Html {
             let confirm_val = (*confirm_password).clone();
 
             match validate_confirm_password(&confirm_val, &password_val) {
-                Ok(_) => confirm_password_error.set(None),
+                Ok(()) => confirm_password_error.set(None),
                 Err(ValidationError::Required) => {
                     confirm_password_error.set(Some(
                         i18n.t("setup.errors.confirm_password_required").into(),
@@ -222,7 +222,7 @@ pub fn setup() -> Html {
 
             // Username validation
             match validate_username(&username) {
-                Ok(_) => username_error.set(None),
+                Ok(()) => username_error.set(None),
                 Err(ValidationError::Required) => {
                     username_error.set(Some(i18n.t("setup.errors.username_required").into()));
                     has_errors = true;
@@ -236,7 +236,7 @@ pub fn setup() -> Html {
 
             // Email validation
             match validate_email(&email) {
-                Ok(_) => email_error.set(None),
+                Ok(()) => email_error.set(None),
                 Err(ValidationError::Required) => {
                     email_error.set(Some(i18n.t("setup.errors.email_required").into()));
                     has_errors = true;
@@ -250,7 +250,7 @@ pub fn setup() -> Html {
 
             // Password validation
             match validate_password(&password) {
-                Ok(_) => password_error.set(None),
+                Ok(()) => password_error.set(None),
                 Err(ValidationError::Required) => {
                     password_error.set(Some(i18n.t("setup.errors.password_required").into()));
                     has_errors = true;
@@ -264,7 +264,7 @@ pub fn setup() -> Html {
 
             // Password confirmation validation
             match validate_confirm_password(&confirm_password, &password) {
-                Ok(_) => confirm_password_error.set(None),
+                Ok(()) => confirm_password_error.set(None),
                 Err(ValidationError::Required) => {
                     confirm_password_error.set(Some(
                         i18n.t("setup.errors.confirm_password_required").into(),
@@ -304,11 +304,11 @@ pub fn setup() -> Html {
                 };
 
                 match client.post_setup(&setup_request).await {
-                    Ok(_) => {
+                    Ok(()) => {
                         setup_complete.set(true);
                     }
                     Err(err) => {
-                        form_error.set(Some(format!("{}", err).into()));
+                        form_error.set(Some(format!("{err}").into()));
                         is_submitting.set(false);
                     }
                 }
@@ -464,7 +464,7 @@ pub fn setup() -> Html {
 /// This function is extracted to make it easier to mock in tests.
 ///
 /// # Returns
-/// A [`RustyGPTClient`](crate::api::RustyGPTClient) instance configured to connect to the backend.
+/// A [`RustyGPTClient`] instance configured to connect to the backend.
 pub fn create_api_client() -> RustyGPTClient {
     RustyGPTClient::shared()
 }
@@ -474,15 +474,14 @@ pub fn create_api_client() -> RustyGPTClient {
 /// Applies the 'dark' theme to the document's HTML element by setting the
 /// 'data-theme' attribute.
 fn initialize_theme() {
-    use_effect_with((), |_| {
-        if let Some(window) = window() {
-            if let Some(document) = window.document() {
-                if let Some(html_element) = document.document_element() {
-                    html_element
-                        .set_attribute("data-theme", "dark")
-                        .unwrap_or_default();
-                }
-            }
+    use_effect_with((), |()| {
+        if let Some(window) = window()
+            && let Some(document) = window.document()
+            && let Some(html_element) = document.document_element()
+        {
+            html_element
+                .set_attribute("data-theme", "dark")
+                .unwrap_or_default();
         }
         || {}
     });

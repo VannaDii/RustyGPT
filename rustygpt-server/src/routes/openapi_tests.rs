@@ -1,4 +1,4 @@
-//! Tests for OpenAPI routes.
+//! Tests for `OpenAPI` routes.
 
 use crate::{app_state::AppState, routes::openapi::openapi_routes};
 use axum_test::TestServer;
@@ -46,7 +46,7 @@ async fn test_openapi_json_route_via_swagger() {
 
     response.assert_status_ok();
     let text = response.text();
-    assert!(text.contains("{"));
+    assert!(text.contains('{'));
     assert!(text.contains("openapi"));
 }
 
@@ -270,7 +270,7 @@ async fn test_openapi_yaml_error_path() {
         let error_message = "Simulated YAML serialization error";
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("YAML error: {}", error_message),
+            format!("YAML error: {error_message}"),
         )
     }
 

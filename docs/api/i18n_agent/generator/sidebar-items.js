@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["clean_translation_files","create_backups","create_merged_translation","create_translation_templates"]};

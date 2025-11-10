@@ -8,7 +8,7 @@ extern "C" {
     fn log(s: &str);
 }
 
-/// SettingsPage page component
+/// `SettingsPage` page component
 #[function_component(SettingsPage)]
 pub fn settings_page() -> Html {
     let (_i18n, _) = use_translation();

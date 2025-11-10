@@ -115,13 +115,13 @@ fmt-fix:
     cargo fmt --all
 
 lint:
-    cargo clippy --workspace --all-targets --all-features -D warnings -- -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery
+    cargo clippy --workspace --all-targets --all-features -- -Dwarnings -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery
 
 lint-fix:
-    cargo clippy --workspace --all-targets --all-features --fix --allow-staged -D warnings -- -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery
+    cargo clippy --workspace --all-targets --all-features --fix --allow-staged -- -Dwarnings -Dclippy::all -Dclippy::pedantic -Dclippy::cargo -Dclippy::nursery
 
 check:
-    cargo check --workspace --all-features -- -Dwarnings
+    cargo check --workspace --all-features
 
 # Auto-fix what can be
 fix:

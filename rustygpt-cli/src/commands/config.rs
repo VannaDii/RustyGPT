@@ -29,7 +29,7 @@ pub fn generate_config(format: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = fs::File::create(file_name)?;
     file.write_all(serialized.as_bytes())?;
 
-    println!("Configuration file '{}' generated successfully.", file_name);
+    println!("Configuration file '{file_name}' generated successfully.");
     Ok(())
 }
 

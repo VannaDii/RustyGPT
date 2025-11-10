@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_api_client","handle_setup_completion","initialize_theme","log"],"struct":["Setup"]};

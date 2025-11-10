@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["GpuType","HardwareError"],"struct":["OptimalParams","SystemHardware"]};

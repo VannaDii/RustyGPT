@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["audit_translations","calculate_coverage","extract_keys_from_json","get_missing_translations","get_value_by_path","remove_key_from_json","set_value_by_path"],"struct":["AuditResult","TranslationData"]};

@@ -44,6 +44,7 @@ impl ErrorResponse {
     ///
     /// # Returns
     /// `true` if details are present, `false` otherwise.
+    #[must_use]
     pub const fn has_details(&self) -> bool {
         self.details.is_some()
     }
@@ -64,7 +65,7 @@ impl std::error::Error for ErrorResponse {}
 mod tests {
     use super::*;
 
-    /// Test ErrorResponse creation with new()
+    /// Test `ErrorResponse` creation with `new()`
     #[test]
     fn test_error_response_new() {
         let error = ErrorResponse::new("Test error");
@@ -73,7 +74,7 @@ mod tests {
         assert!(!error.has_details());
     }
 
-    /// Test ErrorResponse creation with with_details()
+    /// Test `ErrorResponse` creation with `with_details()`
     #[test]
     fn test_error_response_with_details() {
         let error = ErrorResponse::with_details("Test error", "Additional details");
@@ -82,7 +83,7 @@ mod tests {
         assert!(error.has_details());
     }
 
-    /// Test ErrorResponse creation from String
+    /// Test `ErrorResponse` creation from `String`
     #[test]
     fn test_error_response_from_string() {
         let message = "Dynamic error".to_string();
@@ -92,7 +93,7 @@ mod tests {
         assert_eq!(error.details, Some("Dynamic details".to_string()));
     }
 
-    /// Test ErrorResponse equality
+    /// Test `ErrorResponse` equality
     #[test]
     fn test_error_response_equality() {
         let error1 = ErrorResponse::new("Same message");
@@ -103,7 +104,7 @@ mod tests {
         assert_ne!(error1, error3);
     }
 
-    /// Test ErrorResponse with details equality
+    /// Test `ErrorResponse` with details equality
     #[test]
     fn test_error_response_with_details_equality() {
         let error1 = ErrorResponse::with_details("Message", "Details");
@@ -114,7 +115,7 @@ mod tests {
         assert_ne!(error1, error3);
     }
 
-    /// Test ErrorResponse serialization
+    /// Test `ErrorResponse` serialization
     #[test]
     fn test_error_response_serialization() {
         let error = ErrorResponse::new("Test error");
@@ -124,7 +125,7 @@ mod tests {
         assert!(json.contains("\"details\":null"));
     }
 
-    /// Test ErrorResponse with details serialization
+    /// Test `ErrorResponse` with details serialization
     #[test]
     fn test_error_response_with_details_serialization() {
         let error = ErrorResponse::with_details("Test error", "Error details");
@@ -135,7 +136,7 @@ mod tests {
         assert!(json.contains("\"details\""));
     }
 
-    /// Test ErrorResponse deserialization
+    /// Test `ErrorResponse` deserialization
     #[test]
     fn test_error_response_deserialization() {
         let json = r#"{"message":"Test error","details":null}"#;
@@ -144,7 +145,7 @@ mod tests {
         assert_eq!(error.details, None);
     }
 
-    /// Test ErrorResponse with details deserialization
+    /// Test `ErrorResponse` with details deserialization
     #[test]
     fn test_error_response_with_details_deserialization() {
         let json = r#"{"message":"Test error","details":"Error details"}"#;
@@ -153,29 +154,29 @@ mod tests {
         assert_eq!(error.details, Some("Error details".to_string()));
     }
 
-    /// Test ErrorResponse Display implementation
+    /// Test `ErrorResponse` Display implementation
     #[test]
     fn test_error_response_display() {
         let error_no_details = ErrorResponse::new("Simple error");
-        assert_eq!(format!("{}", error_no_details), "Simple error");
+        assert_eq!(format!("{error_no_details}"), "Simple error");
 
         let error_with_details = ErrorResponse::with_details("Main error", "Additional info");
         assert_eq!(
-            format!("{}", error_with_details),
+            format!("{error_with_details}"),
             "Main error: Additional info"
         );
     }
 
-    /// Test ErrorResponse Debug implementation
+    /// Test `ErrorResponse` Debug implementation
     #[test]
     fn test_error_response_debug() {
         let error = ErrorResponse::new("Debug test");
-        let debug_str = format!("{:?}", error);
+        let debug_str = format!("{error:?}");
         assert!(debug_str.contains("ErrorResponse"));
         assert!(debug_str.contains("Debug test"));
     }
 
-    /// Test ErrorResponse as Error trait
+    /// Test `ErrorResponse` as Error trait
     #[test]
     fn test_error_response_as_error() {
         let error = ErrorResponse::new("Error trait test");
@@ -183,7 +184,7 @@ mod tests {
         assert!(error_trait.to_string().contains("Error trait test"));
     }
 
-    /// Test has_details method
+    /// Test `has_details` method
     #[test]
     fn test_has_details() {
         let error_no_details = ErrorResponse::new("No details");
@@ -206,7 +207,7 @@ mod tests {
     fn test_empty_details() {
         let error = ErrorResponse::with_details("Message", "");
         assert_eq!(error.message, "Message");
-        assert_eq!(error.details, Some("".to_string()));
+        assert_eq!(error.details, Some(String::new()));
         assert!(error.has_details());
     }
 }

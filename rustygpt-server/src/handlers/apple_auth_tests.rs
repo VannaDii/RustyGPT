@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use crate::{
     app_state::AppState,
     handlers::{
@@ -16,25 +18,33 @@ use axum::{
 use shared::models::oauth::{OAuthCallback, OAuthRequest};
 use std::{env, sync::Arc};
 
+fn set_env_var(key: &str, value: &str) {
+    unsafe {
+        env::set_var(key, value);
+    }
+}
+
+fn remove_env_var(key: &str) {
+    unsafe {
+        env::remove_var(key);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
 
     fn set_test_env() {
-        unsafe {
-            env::set_var("APPLE_CLIENT_ID", "test.app.client");
-            env::set_var("APPLE_REDIRECT_URI", "https://app.com/oauth/apple/callback");
-            env::set_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
-        }
+        set_env_var("APPLE_CLIENT_ID", "test.app.client");
+        set_env_var("APPLE_REDIRECT_URI", "https://app.com/oauth/apple/callback");
+        set_env_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
     }
 
     fn clean_test_env() {
-        unsafe {
-            env::remove_var("APPLE_CLIENT_ID");
-            env::remove_var("APPLE_REDIRECT_URI");
-            env::remove_var("APPLE_AUTH_URL");
-        }
+        remove_env_var("APPLE_CLIENT_ID");
+        remove_env_var("APPLE_REDIRECT_URI");
+        remove_env_var("APPLE_AUTH_URL");
     }
 
     #[tokio::test]
@@ -64,21 +74,17 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_apple_oauth_init_partial_env_vars() {
-        unsafe {
-            env::set_var("APPLE_CLIENT_ID", "com.example.app");
-            env::remove_var("APPLE_REDIRECT_URI");
-            env::set_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
-        }
+        set_env_var("APPLE_CLIENT_ID", "com.example.app");
+        remove_env_var("APPLE_REDIRECT_URI");
+        set_env_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
 
         let response = apple_oauth_init().await;
         let expected_url = "https://appleid.apple.com/auth/authorize?client_id=com.example.app&redirect_uri=&response_type=code&scope=name%20email";
 
         assert_eq!(response.auth_url, expected_url);
 
-        unsafe {
-            env::remove_var("APPLE_CLIENT_ID");
-            env::remove_var("APPLE_AUTH_URL");
-        }
+        remove_env_var("APPLE_CLIENT_ID");
+        remove_env_var("APPLE_AUTH_URL");
     }
 
     #[tokio::test]
@@ -99,7 +105,7 @@ mod tests {
     async fn test_apple_oauth_callback_empty_code() {
         let state = Arc::new(AppState::default());
         let callback = OAuthCallback {
-            code: "".to_string(),
+            code: String::new(),
             state: None,
         };
 
@@ -127,17 +133,15 @@ mod tests {
         let router = apple_auth_routes();
 
         // Test that the router was created successfully
-        assert!(!format!("{:?}", router).is_empty());
+        assert!(!format!("{router:?}").is_empty());
     }
 
     #[tokio::test]
     #[serial]
     async fn test_apple_oauth_scope_encoding() {
-        unsafe {
-            env::set_var("APPLE_CLIENT_ID", "test.client");
-            env::set_var("APPLE_REDIRECT_URI", "https://test.com/callback");
-            env::set_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
-        }
+        set_env_var("APPLE_CLIENT_ID", "test.client");
+        set_env_var("APPLE_REDIRECT_URI", "https://test.com/callback");
+        set_env_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
 
         let response = apple_oauth_init().await;
 

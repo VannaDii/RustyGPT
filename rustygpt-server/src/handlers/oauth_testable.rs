@@ -23,12 +23,12 @@ pub async fn github_oauth_callback_with_service<T: OAuthService>(
     oauth_service: T,
 ) -> Response {
     oauth_service
-        .handle_github_oauth(&state.pool, params.code)
+        .handle_github_oauth(state.pool.as_ref(), params.code)
         .await
         .map_or_else(
             |_| (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
             |user_id| {
-                Redirect::to(&format!("/auth-success.html?user_id={}", user_id)).into_response()
+                Redirect::to(&format!("/auth-success.html?user_id={user_id}")).into_response()
             },
         )
 }
@@ -48,14 +48,14 @@ pub async fn github_oauth_manual_with_service<T: OAuthService>(
     oauth_service: T,
 ) -> Response {
     oauth_service
-        .handle_github_oauth(&state.pool, payload.auth_code)
+        .handle_github_oauth(state.pool.as_ref(), payload.auth_code)
         .await
         .map_or_else(
             |_| (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
             |user_id| {
                 (
                     StatusCode::OK,
-                    format!("GitHub OAuth successful, user_id: {}", user_id),
+                    format!("GitHub OAuth successful, user_id: {user_id}"),
                 )
                     .into_response()
             },
@@ -77,12 +77,12 @@ pub async fn apple_oauth_callback_with_service<T: OAuthService>(
     oauth_service: T,
 ) -> Response {
     oauth_service
-        .handle_apple_oauth(&state.pool, params.code)
+        .handle_apple_oauth(state.pool.as_ref(), params.code)
         .await
         .map_or_else(
             |_| (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
             |user_id| {
-                Redirect::to(&format!("/auth-success.html?user_id={}", user_id)).into_response()
+                Redirect::to(&format!("/auth-success.html?user_id={user_id}")).into_response()
             },
         )
 }
@@ -102,14 +102,14 @@ pub async fn apple_oauth_manual_with_service<T: OAuthService>(
     oauth_service: T,
 ) -> Response {
     oauth_service
-        .handle_apple_oauth(&state.pool, payload.auth_code)
+        .handle_apple_oauth(state.pool.as_ref(), payload.auth_code)
         .await
         .map_or_else(
             |_| (StatusCode::INTERNAL_SERVER_ERROR, "OAuth failed").into_response(),
             |user_id| {
                 (
                     StatusCode::OK,
-                    format!("Apple OAuth successful, user_id: {}", user_id),
+                    format!("Apple OAuth successful, user_id: {user_id}"),
                 )
                     .into_response()
             },

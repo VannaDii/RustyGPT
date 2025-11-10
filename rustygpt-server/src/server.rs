@@ -49,6 +49,10 @@ const SSE_RETENTION_SCAN_LIMIT: i64 = 128;
 const SSE_RETENTION_INTERVAL_SECS: u64 = 300;
 const RATE_LIMIT_REFRESH_INTERVAL_SECS: u64 = 60;
 
+/// Returns the shared Prometheus metrics handle.
+///
+/// # Panics
+/// Panics if the Prometheus recorder cannot be installed.
 pub fn metrics_handle() -> PrometheusHandle {
     PROMETHEUS_HANDLE
         .get_or_init(|| {
@@ -81,7 +85,7 @@ async fn prune_sse_once(
         return Ok(());
     }
 
-    let cutoff = Utc::now() - ChronoDuration::seconds(retention_seconds as i64);
+    let cutoff = Utc::now() - ChronoDuration::seconds(i64::from(retention_seconds));
     let conversations = sqlx::query_scalar::<_, uuid::Uuid>(
         "SELECT DISTINCT conversation_id
          FROM rustygpt.sse_event_log
@@ -106,15 +110,17 @@ async fn prune_sse_once(
     Ok(())
 }
 
-fn spawn_sse_retention_task(
-    pool: sqlx::PgPool,
-    config: SsePersistenceConfig,
-) -> tokio::task::JoinHandle<()> {
-    let retention_seconds =
-        (u64::from(config.retention_hours).saturating_mul(3600)).min(i32::MAX as u64) as i32;
-    let prune_batch = config.prune_batch_size.max(1).min(i32::MAX as usize) as i32;
+fn spawn_sse_retention_task(pool: sqlx::PgPool, config: &SsePersistenceConfig) {
+    let retention_seconds = i32::try_from(
+        u64::from(config.retention_hours)
+            .saturating_mul(3600)
+            .min(i32::MAX as u64),
+    )
+    .unwrap_or(i32::MAX);
+    let prune_batch =
+        i32::try_from(config.prune_batch_size.max(1).min(i32::MAX as usize)).unwrap_or(i32::MAX);
     let hard_limit = if config.max_events_per_user > 0 {
-        Some(config.max_events_per_user.min(i32::MAX as usize) as i32)
+        Some(i32::try_from(config.max_events_per_user.min(i32::MAX as usize)).unwrap_or(i32::MAX))
     } else {
         None
     };
@@ -131,10 +137,11 @@ fn spawn_sse_retention_task(
                 warn!(error = %err, "SSE retention sweep failed");
             }
         }
-    })
+    });
 }
 
 /// Initializes the tracing subscriber for logging using the provided configuration.
+#[must_use]
 pub fn initialize_tracing(config: &Config) -> String {
     if matches!(config.logging.format, LogFormat::Json) {
         let env_filter = build_env_filter(config);
@@ -191,8 +198,10 @@ pub async fn create_database_pool(db: &DatabaseConfig) -> Result<sqlx::PgPool, s
         .max_connections(db.max_connections)
         .connect(&db.url)
         .await?;
-    metrics::gauge!("db_pool_max_connections").set(db.max_connections as f64);
-    metrics::gauge!("db_statement_timeout_ms").set(db.statement_timeout_ms as f64);
+    metrics::gauge!("db_pool_max_connections").set(f64::from(db.max_connections));
+    #[allow(clippy::cast_precision_loss)]
+    let timeout_ms = db.statement_timeout_ms as f64;
+    metrics::gauge!("db_statement_timeout_ms").set(timeout_ms);
     Ok(pool)
 }
 
@@ -203,6 +212,7 @@ pub async fn create_database_pool(db: &DatabaseConfig) -> Result<sqlx::PgPool, s
 ///
 /// # Returns
 /// Returns an [`Arc<AppState>`] for sharing across the application.
+#[must_use]
 pub fn create_app_state(
     pool: Option<sqlx::PgPool>,
     assistant: Option<Arc<dyn AssistantRuntime>>,
@@ -263,7 +273,7 @@ pub fn create_cors_layer(config: &Config) -> CorsLayer {
 ///
 /// # Returns
 /// Returns a configured [`Router`] with all API routes.
-pub fn create_api_router(config: Arc<Config>) -> Router<Arc<AppState>> {
+pub fn create_api_router(config: &Config) -> Router<Arc<AppState>> {
     let mut router = Router::new().merge(routes::setup::create_router_setup());
 
     if config.features.auth_v1 {
@@ -340,7 +350,7 @@ pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
             state.sse_store.clone(),
             persistence_config,
         ));
-        create_api_router(config.clone()).layer(Extension(stream_hub))
+        create_api_router(config.as_ref()).layer(Extension(stream_hub))
     };
     let static_files_service =
         create_static_service(config.web.static_dir.clone(), config.web.spa_index.clone());
@@ -388,6 +398,9 @@ pub fn create_app_router(state: Arc<AppState>, config: Arc<Config>) -> Router {
 ///
 /// # Returns
 /// Returns a future that resolves when a shutdown signal is received.
+///
+/// # Panics
+/// Panics if installing the `CTRL+C` signal handler fails.
 pub async fn create_shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
@@ -395,13 +408,6 @@ pub async fn create_shutdown_signal() {
     info!("Shutting down...");
 }
 
-/// Starts the backend server and binds it to the specified port.
-///
-/// # Arguments
-/// * `config` - The fully resolved configuration struct.
-///
-/// # Errors
-/// Returns an error if the server fails to start.
 type AnyError = Box<dyn std::error::Error>;
 
 #[derive(Debug)]
@@ -432,8 +438,15 @@ impl fmt::Display for BootstrapIncompleteError {
 
 impl std::error::Error for BootstrapIncompleteError {}
 
+/// Starts the backend server and binds it to the specified port.
+///
+/// # Arguments
+/// * `config` - The fully resolved configuration struct.
+///
+/// # Errors
+/// Returns an error if database initialization, middleware configuration, or server startup fails.
 pub async fn run(config: Config) -> Result<(), AnyError> {
-    initialize_tracing(&config);
+    let _ = initialize_tracing(&config);
     info!("Starting server...");
 
     let _ = metrics_handle();
@@ -506,7 +519,7 @@ async fn setup_database(config: &Arc<Config>) -> Result<PgPool, AnyError> {
 fn build_sse_store(config: &Arc<Config>, pool: &PgPool) -> Option<Arc<dyn SsePersistence>> {
     if config.sse.persistence.enabled {
         let persistence_config = config.sse.persistence.clone();
-        let _ = spawn_sse_retention_task(pool.clone(), persistence_config.clone());
+        spawn_sse_retention_task(pool.clone(), &persistence_config);
         Some(Arc::new(SsePersistenceStore::new(
             pool.clone(),
             persistence_config,
@@ -527,7 +540,7 @@ async fn initialize_rate_limiting(config: &Arc<Config>, pool: &PgPool) -> Arc<Ra
     if let Err(err) = rate_limit_state.reload_from_db().await {
         warn!(error = %err, "failed to load rate limit configuration");
     }
-    let _ = rate_limit_state
+    rate_limit_state
         .clone()
         .spawn_auto_refresh(Duration::from_secs(RATE_LIMIT_REFRESH_INTERVAL_SECS));
     rate_limit_state

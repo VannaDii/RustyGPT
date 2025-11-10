@@ -1,8 +1,12 @@
-use assert_fs::prelude::*;
 use assert_fs::TempDir;
+use assert_fs::prelude::*;
 use std::collections::HashSet;
 
-/// Creates a temporary directory with sample source files for testing
+/// Creates a temporary directory with sample source files for testing.
+///
+/// # Errors
+///
+/// Returns an error when the temporary directory cannot be created or files cannot be written.
 pub fn create_test_source_directory() -> anyhow::Result<TempDir> {
     let temp_dir = TempDir::new()?;
 
@@ -50,13 +54,17 @@ pub fn create_test_source_directory() -> anyhow::Result<TempDir> {
     Ok(temp_dir)
 }
 
-/// Creates a temporary directory with sample translation files for testing
+/// Creates a temporary directory with sample translation files for testing.
+///
+/// # Errors
+///
+/// Returns an error when the temporary directory or translation files cannot be created.
 pub fn create_test_translation_directory() -> anyhow::Result<TempDir> {
     let temp_dir = TempDir::new()?;
 
     // Create English translation file (reference language)
-    let en_file = temp_dir.child("en.json");
-    en_file.write_str(
+    let english_file = temp_dir.child("en.json");
+    english_file.write_str(
         r#"{
             "common": {
                 "button": {
@@ -89,8 +97,8 @@ pub fn create_test_translation_directory() -> anyhow::Result<TempDir> {
     )?;
 
     // Create Spanish translation file (missing some keys)
-    let es_file = temp_dir.child("es.json");
-    es_file.write_str(
+    let spanish_file = temp_dir.child("es.json");
+    spanish_file.write_str(
         r#"{
             "common": {
                 "button": {
@@ -154,6 +162,7 @@ pub fn create_test_translation_directory() -> anyhow::Result<TempDir> {
 }
 
 /// Creates a predefined set of keys in use for testing
+#[must_use]
 pub fn create_test_keys_in_use() -> HashSet<String> {
     let mut keys_in_use = HashSet::new();
 

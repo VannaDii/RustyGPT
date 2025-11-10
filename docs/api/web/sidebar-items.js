@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["main"],"mod":["api","app","components","config","containers","language","models","pages","routes"],"struct":["InternationalApp"]};

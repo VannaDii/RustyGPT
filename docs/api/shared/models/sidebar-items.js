@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["chat","errors","limits","oauth","setup","streaming","threads","timestamp","user"],"struct":["ChatCompletionChoice","ChatCompletionChunk","ChatCompletionChunkChoice","ChatCompletionChunkDelta","ChatCompletionMessage","ChatCompletionRequest","ChatCompletionResponse","Model","ModelsResponse"]};

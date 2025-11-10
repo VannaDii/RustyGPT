@@ -1,135 +1,207 @@
 [
   {
-    "id": "index",
-    "title": "RustyGPT Documentation",
-    "summary": "Landing page with quick links to guides, reference material, and architecture notes for the Rust workspace.",
-    "tags": ["overview", "navigation"],
-    "href": "/index/"
-  },
-  {
-    "id": "guide/index",
-    "title": "Guide Overview",
-    "summary": "Explains how the quickstart and local development guides help configure the server, web client, and CLI.",
-    "tags": ["guides", "intro"],
-    "href": "/guide/index/"
-  },
-  {
-    "id": "guide/quickstart",
-    "title": "Quickstart",
-    "summary": "Step-by-step instructions for configuring config.toml, starting PostgreSQL, running the server, completing setup, and using the web UI + CLI.",
-    "tags": ["setup", "postgres", "cli", "sse"],
-    "href": "/guide/quickstart/"
-  },
-  {
-    "id": "guide/local-dev",
-    "title": "Local Development",
-    "summary": "Describes configuration layering, just-based watcher workflows, CLI smoke tests, and debugging techniques for SSE and tracing.",
-    "tags": ["watchers", "cli", "debugging"],
-    "href": "/guide/local-dev/"
-  },
-  {
-    "id": "concepts/index",
-    "title": "Concepts Overview",
-    "summary": "Lists the core ideas—threaded conversations and shared models—that underpin the server and clients.",
-    "tags": ["concepts", "overview"],
-    "href": "/concepts/index/"
-  },
-  {
-    "id": "concepts/reasoning-dag",
-    "title": "Threaded conversations",
-    "summary": "Explains how conversations, threads, message events, and SSE payloads are structured and enforced in the backend.",
-    "tags": ["threads", "sse", "data-model"],
-    "href": "/concepts/reasoning-dag/"
-  },
-  {
-    "id": "concepts/dimensioned-entities",
-    "title": "Shared models",
-    "summary": "Covers the rustygpt-shared crate: configuration structs, request/response DTOs, and llama.cpp abstractions.",
-    "tags": ["shared", "dto", "llm"],
-    "href": "/concepts/dimensioned-entities/"
-  },
-  {
     "id": "architecture/index",
     "title": "Architecture Overview",
-    "summary": "Highlights the available architecture chapters covering topology, streaming, and rate limiting.",
-    "tags": ["architecture", "index"],
+    "summary": "These chapters document the runtime architecture of RustyGPT: how the Axum server is composed, how the SSE stream hub works, and how rate limiting integrates with PostgreSQL. Use them alongside the [concepts](../concepts/index.md) and [reference](../reference/index.md) sections when exploring the code. - [Service topology](service-topology.md) - [Streaming delivery](streaming.md) - [Rate-limit architecture](rate-limits.md)",
+    "tags": [],
     "href": "/architecture/index/"
+  },
+  {
+    "id": "architecture/rate-limits",
+    "title": "Rate-limit architecture",
+    "summary": "RustyGPT enforces per-route throttling using a leaky-bucket strategy implemented in middleware::rate_limit. Configuration comes from two tables managed by stored procedures in scripts/pg/procs/034_limits.sql.",
+    "tags": [
+      "admin-api-payloads",
+      "conversation-posting-limits",
+      "data-model",
+      "matching-logic",
+      "metrics-and-headers"
+    ],
+    "href": "/architecture/rate-limits/"
   },
   {
     "id": "architecture/service-topology",
     "title": "Service topology",
-    "summary": "Shows how the Axum server, StreamHub, PostgreSQL, Yew SPA, and CLI interact along with feature flags and scaling notes.",
-    "tags": ["components", "data-flow", "scaling"],
+    "summary": "RustyGPT is composed of a single Axum process backed by PostgreSQL. The web client and CLI talk to the same REST + SSE surface.",
+    "tags": [
+      "components",
+      "data-flow",
+      "feature-flags",
+      "scaling-notes"
+    ],
     "href": "/architecture/service-topology/"
   },
   {
     "id": "architecture/streaming",
     "title": "Streaming delivery",
-    "summary": "Details the SSE flow, event payloads, persistence options, backpressure controls, and client responsibilities.",
-    "tags": ["sse", "persistence", "backpressure"],
+    "summary": "RustyGPT streams conversation activity to authenticated clients over Server-Sent Events (SSE). The implementation lives in rustygpt-server/src/handlers/streaming.rs and is gated by features.sse_v1.",
+    "tags": [
+      "backpressure-handling",
+      "client-responsibilities",
+      "event-payloads",
+      "flow",
+      "persistence-and-retention"
+    ],
     "href": "/architecture/streaming/"
-  },
-  {
-    "id": "architecture/rate-limits",
-    "title": "Rate-limit architecture",
-    "summary": "Describes the PostgreSQL-backed rate-limit profiles, matching logic, metrics, and admin APIs.",
-    "tags": ["rate-limits", "admin", "metrics"],
-    "href": "/architecture/rate-limits/"
-  },
-  {
-    "id": "reference/index",
-    "title": "Reference Overview",
-    "summary": "Points to the detailed authentication, REST API, and configuration reference pages.",
-    "tags": ["reference", "navigation"],
-    "href": "/reference/index/"
-  },
-  {
-    "id": "reference/authentication",
-    "title": "Authentication",
-    "summary": "Documents the session lifecycle, cookie names, configuration knobs, CLI helpers, and logging guidance.",
-    "tags": ["auth", "cookies", "sessions"],
-    "href": "/reference/authentication/"
-  },
-  {
-    "id": "reference/api",
-    "title": "REST API",
-    "summary": "Table of every REST and SSE endpoint grouped by setup, auth, conversations, streaming, admin, and health.",
-    "tags": ["api", "endpoints", "sse"],
-    "href": "/reference/api/"
-  },
-  {
-    "id": "reference/config",
-    "title": "Configuration",
-    "summary": "Explains the layered loader, environment override syntax, and the structure of logging, server, security, rate-limit, session, db, sse, feature, CLI, web, and LLM blocks.",
-    "tags": ["config", "environment", "profiles"],
-    "href": "/reference/config/"
-  },
-  {
-    "id": "howto/index",
-    "title": "How-to Overview",
-    "summary": "Introduces the operational playbooks for Docker deployment and secret rotation.",
-    "tags": ["howto", "overview"],
-    "href": "/howto/index/"
-  },
-  {
-    "id": "howto/docker-deploy",
-    "title": "Docker deploy",
-    "summary": "Instructions for building the Docker image, running the Compose stack, copying bootstrap SQL, configuring secrets, and validating the rollout.",
-    "tags": ["docker", "compose", "deployment"],
-    "href": "/howto/docker-deploy/"
-  },
-  {
-    "id": "howto/rotate-secrets",
-    "title": "Rotate secrets",
-    "summary": "Runbook for staging, deploying, verifying, and rolling back secret changes while keeping the service available.",
-    "tags": ["operations", "secrets", "runbook"],
-    "href": "/howto/rotate-secrets/"
   },
   {
     "id": "changelog/index",
     "title": "Release notes",
-    "summary": "Notes that CHANGELOG.md tracks development and that no tagged releases exist yet.",
-    "tags": ["changelog", "releases"],
+    "summary": "The authoritative changelog lives in [CHANGELOG.md](../../CHANGELOG.md). No tagged releases have been published yet; the [Unreleased] section tracks ongoing development across the workspace crates. When a release is tagged (vMAJOR.MINOR.PATCH) update the changelog and, if applicable, regenerate the docs index with just docs-index so the summaries reflect the new features.",
+    "tags": [],
     "href": "/changelog/index/"
+  },
+  {
+    "id": "concepts/dimensioned-entities",
+    "title": "Shared models",
+    "summary": "rustygpt-shared centralises the data structures consumed by the server, web client, and CLI. Keeping these DTOs in one crate prevents drift between components and allows serde + utoipa derives to stay consistent.",
+    "tags": [
+      "api-payloads",
+      "configuration-loader",
+      "llm-abstractions",
+      "why-it-matters"
+    ],
+    "href": "/concepts/dimensioned-entities/"
+  },
+  {
+    "id": "concepts/index",
+    "title": "Concepts Overview",
+    "summary": "This section explains the core ideas that appear across the server, web client, and CLI. Use it to understand the vocabulary used in API responses and stream payloads before diving into the reference material. - [Threaded conversations](reasoning-dag.md) describes how messages, threads, and ConversationStreamEvent values relate to each other. - [Shared models](dimensioned-entities.md) covers the rustygpt-shared crate, focusing on how typed DTOs and enums keep clients in sync with the server. Pair these concepts with the [Architecture](../architecture/index.md) diagrams to see where each part lives at runtime.",
+    "tags": [],
+    "href": "/concepts/index/"
+  },
+  {
+    "id": "concepts/reasoning-dag",
+    "title": "Threaded conversations",
+    "summary": "RustyGPT models chat history as **threaded conversations** stored in PostgreSQL. Each conversation has participants, invites, thread roots, and replies. The server exposes this structure through the DTOs in rustygpt-shared/src/models/chat.rs.",
+    "tags": [
+      "access-control",
+      "core-data-types",
+      "streaming-lifecycle"
+    ],
+    "href": "/concepts/reasoning-dag/"
+  },
+  {
+    "id": "guide/index",
+    "title": "Guide Overview",
+    "summary": "These walkthroughs assume you are starting from a fresh checkout. They show how to configure config.toml, run the Axum server, keep the Yew frontend hot-reloading, and validate that authentication + streaming work end to end. - [Quickstart](quickstart.md) bootstraps the database, enables feature flags, and walks through the setup flow. - [Local Development](local-dev.md) documents the just recipes, watcher processes, and debugging tips. For conceptual background jump to [Concepts](../concepts/index.md); for task-specific runbooks see [How-to](../howto/index.md).",
+    "tags": [],
+    "href": "/guide/index/"
+  },
+  {
+    "id": "guide/local-dev",
+    "title": "Local Development",
+    "summary": "TL;DR – keep `config.toml` in sync with your environment, use `just dev` for paired watchers, and rely on the CLI for quick smoke tests of authentication and streaming.",
+    "tags": [
+      "cli-smoke-tests",
+      "debugging-tips",
+      "environment-configuration",
+      "watcher-workflows"
+    ],
+    "href": "/guide/local-dev/"
+  },
+  {
+    "id": "guide/quickstart",
+    "title": "Quickstart",
+    "summary": "TL;DR – copy `config.example.toml`, enable the feature flags you need, start PostgreSQL, run the Axum server, complete the `/api/setup` flow, then bring up the Yew frontend and CLI.",
+    "tags": [
+      "1-prerequisites",
+      "2-configure-the-server",
+      "3-start-postgresql",
+      "4-run-the-backend",
+      "5-complete-initial-setup",
+      "6-start-the-web-client",
+      "7-exercise-the-cli",
+      "8-next-steps"
+    ],
+    "href": "/guide/quickstart/"
+  },
+  {
+    "id": "howto/docker-deploy",
+    "title": "Docker deploy",
+    "summary": "This guide covers building the RustyGPT container image and running it alongside PostgreSQL with Docker Compose.",
+    "tags": [
+      "build-the-image",
+      "compose-stack",
+      "configuration-and-secrets",
+      "post-deployment-checks",
+      "rollback"
+    ],
+    "href": "/howto/docker-deploy/"
+  },
+  {
+    "id": "howto/index",
+    "title": "How-to Overview",
+    "summary": "Task-focused guides for operating RustyGPT. These assume you already understand the system from the [Guides](../guide/index.md) and [Reference](../reference/index.md) sections. - [Docker Deploy](docker-deploy.md) – build/publish images and run Compose. - [Rotate Secrets](rotate-secrets.md) – refresh credentials and validate sessions.",
+    "tags": [],
+    "href": "/howto/index/"
+  },
+  {
+    "id": "howto/rotate-secrets",
+    "title": "Rotate secrets",
+    "summary": "Use this runbook to update credentials (database passwords, OAuth secrets, session keys) while keeping RustyGPT online.",
+    "tags": [
+      "incident-response",
+      "observability",
+      "preparation",
+      "rotation-steps"
+    ],
+    "href": "/howto/rotate-secrets/"
+  },
+  {
+    "id": "index",
+    "title": "RustyGPT Documentation",
+    "summary": "Welcome! This mdBook describes the RustyGPT workspace in depth: how the server and clients are structured, how the PostgreSQL-backed features behave, and how to operate the platform locally or in shared environments. *Start with the guides to get a local environment running, then dive into the reference and architecture chapters for precise APIs and design notes.*",
+    "tags": [
+      "quick-navigation",
+      "what-rustygpt-ships-today"
+    ],
+    "href": "/index/"
+  },
+  {
+    "id": "reference/api",
+    "title": "REST API",
+    "summary": "All endpoints are served under /api unless noted otherwise. Session cookies and CSRF headers are required for non-authenticated GET requests when features.auth_v1 is enabled. The OpenAPI schema is generated from rustygpt-server/src/openapi.rs and can be exported with cargo run -p rustygpt-cli -- spec.",
+    "tags": [
+      "admin-rate-limit-api",
+      "authentication",
+      "conversations-membership",
+      "copilot-compatible-endpoints",
+      "health-and-observability",
+      "setup",
+      "streaming",
+      "threads-messages"
+    ],
+    "href": "/reference/api/"
+  },
+  {
+    "id": "reference/authentication",
+    "title": "Authentication",
+    "summary": "RustyGPT uses cookie-based sessions backed by PostgreSQL. Session management lives in rustygpt-server/src/auth/session.rs and is exposed through /api/auth/* handlers when features.auth_v1 = true.",
+    "tags": [
+      "cli-workflow",
+      "cookie-configuration",
+      "observability",
+      "session-lifecycle"
+    ],
+    "href": "/reference/authentication/"
+  },
+  {
+    "id": "reference/config",
+    "title": "Configuration",
+    "summary": "RustyGPT uses a layered configuration loader (rustygpt-shared::config::server::Config). Defaults are determined by the active profile (Dev/Test/Prod), then merged with an optional file and environment overrides. CLI flags can override specific values (e.g. --port).",
+    "tags": [
+      "environment-variable-syntax",
+      "key-sections",
+      "loading-order"
+    ],
+    "href": "/reference/config/"
+  },
+  {
+    "id": "reference/index",
+    "title": "Reference Overview",
+    "summary": "Authoritative details for RustyGPT’s public surfaces: - [Authentication](authentication.md) – session cookies, setup flow, and rotation behaviour - [REST API](api.md) – endpoint catalogue grouped by feature area - [Configuration](config.md) – config.toml structure and environment overrides For operational workflows see [How-to](../howto/index.md); for high-level design context visit the [Architecture](../architecture/index.md) section.",
+    "tags": [],
+    "href": "/reference/index/"
   }
 ]

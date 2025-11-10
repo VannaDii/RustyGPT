@@ -10,9 +10,9 @@ use crate::{
 };
 
 /// Application state shared across all routes.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct AppState {
-    /// Optional PostgreSQL connection pool
+    /// Optional `PostgreSQL` connection pool
     pub(crate) pool: Option<sqlx::PgPool>,
     /// Assistant streaming service for automated replies
     pub(crate) assistant: Option<Arc<dyn AssistantRuntime>>,
@@ -24,19 +24,6 @@ pub struct AppState {
     pub(crate) rate_limits: Option<Arc<RateLimitState>>,
     /// Supervisor tracking in-flight assistant streams
     pub(crate) streams: Option<SharedStreamSupervisor>,
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            pool: None,
-            assistant: None,
-            sse_store: None,
-            sessions: None,
-            rate_limits: None,
-            streams: None,
-        }
-    }
 }
 
 impl std::fmt::Debug for AppState {

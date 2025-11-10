@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CSRF_COOKIE_NAME","DEFAULT_BASE_URL","SESSION_ROTATED_HEADER","SHARED_CLIENT"],"fn":["read_cookie"],"struct":["RustyGPTClient"]};

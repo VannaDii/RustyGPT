@@ -1,6 +1,7 @@
-#![allow(clippy::all, clippy::pedantic)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![deny(warnings, clippy::pedantic)]
 
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs::File;
 use std::io::Write;
@@ -32,7 +33,7 @@ fn test_execute_single_command() {
     let script_path =
         create_test_script(temp_dir.path(), "echo_test.sh", "echo \"Hello, ConFuse!\"").unwrap();
 
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg(&script_path)
         .assert()
         .success()
@@ -56,7 +57,7 @@ fn test_multiple_commands() {
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg(&script1)
         .arg(&script2)
         .assert()
@@ -86,7 +87,7 @@ fn test_with_custom_names() {
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg(&script1)
         .arg(&script2)
         .args(["--names", "FIRST,SECOND"])
@@ -105,7 +106,7 @@ fn test_with_custom_colors() {
     let script =
         create_test_script(temp_dir.path(), "test_script.sh", "echo \"Testing colors\"").unwrap();
 
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg(&script)
         .args(["-p", "red"])
         .assert()
@@ -118,7 +119,7 @@ fn test_working_directory_option() {
     let temp_dir = tempdir().unwrap();
     let script = create_test_script(temp_dir.path(), "pwd_test.sh", "pwd").unwrap();
 
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg(&script)
         .args(["-d", temp_dir.path().to_str().unwrap()])
         .assert()
@@ -134,7 +135,7 @@ fn test_command_with_inline_name() {
 
     let cmd_str = format!("CustomName:{script}");
 
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg(cmd_str)
         .assert()
         .success()
@@ -158,7 +159,7 @@ fn test_command_with_working_dir_in_string() {
         script_name
     );
 
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg(cmd_str)
         .assert()
         .success()
@@ -168,7 +169,7 @@ fn test_command_with_working_dir_in_string() {
 
 #[test]
 fn test_error_handling() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
 
     // The command succeeds initially because the CLI parser accepts it,
     // but it fails at runtime with a panic when trying to execute the non-existent command.
@@ -183,7 +184,7 @@ fn test_duplicate_task_names() {
     let temp_dir = tempdir().unwrap();
     let script = create_test_script(temp_dir.path(), "echo.sh", "echo \"Hello\"").unwrap();
 
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     // Use the same name for both tasks, should get disambiguated
     cmd.arg(&script)
         .arg(&script)

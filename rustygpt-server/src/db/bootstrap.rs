@@ -269,7 +269,7 @@ async fn apply_stage(
 
         let timer = Instant::now();
         match apply_script(pool, &path).await {
-            Ok(_) => record_script_metrics(stage, "ok", timer.elapsed().as_secs_f64()),
+            Ok(()) => record_script_metrics(stage, "ok", timer.elapsed().as_secs_f64()),
             Err(err) => {
                 record_script_metrics(stage, "error", timer.elapsed().as_secs_f64());
                 return Err(err);
@@ -465,8 +465,7 @@ mod tests {
     #[serial]
     async fn readiness_override_errors_propagate() {
         let pool = test_pool();
-        super::set_readiness_override(Some(Err(sqlx::Error::Io(io::Error::new(
-            io::ErrorKind::Other,
+        super::set_readiness_override(Some(Err(sqlx::Error::Io(io::Error::other(
             "simulated failure",
         )))));
 

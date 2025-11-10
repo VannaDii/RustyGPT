@@ -1,6 +1,8 @@
-#![allow(clippy::all, clippy::pedantic)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![deny(warnings, clippy::pedantic)]
+#![allow(clippy::multiple_crate_versions)] // TODO(deps-001): remove once transitive dependencies converge.
 
-//! Main entry point for the RustyGPT backend CLI.
+//! Main entry point for the `RustyGPT` backend CLI.
 
 use clap::{Parser, Subcommand};
 use dotenv::dotenv;
@@ -26,7 +28,7 @@ mod main_tests;
 #[cfg(test)]
 mod server_test;
 
-/// Main CLI structure for RustyGPT server
+/// Main CLI structure for the `RustyGPT` server
 #[derive(Parser)]
 #[command(name = "RustyGPT CLI")]
 #[command(about = "Backend server and tools for RustyGPT", long_about = None)]
@@ -35,7 +37,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
-/// Subcommands for the RustyGPT CLI
+/// Subcommands for the `RustyGPT` CLI
 #[derive(Subcommand)]
 pub enum Commands {
     /// Start the backend server
@@ -62,6 +64,7 @@ pub enum Commands {
 ///
 /// # Returns
 /// Returns the parsed [`Cli`] structure.
+#[must_use]
 pub fn initialize_cli() -> Cli {
     dotenv().ok();
     Cli::parse()
@@ -75,6 +78,9 @@ pub fn initialize_cli() -> Cli {
 ///
 /// # Errors
 /// Returns an error if configuration loading or server startup fails.
+///
+/// # Panics
+/// Panics if the server runtime exits unexpectedly.
 pub async fn handle_serve_command(
     port: u16,
     config: Option<PathBuf>,

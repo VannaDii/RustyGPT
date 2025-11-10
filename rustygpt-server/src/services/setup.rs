@@ -4,9 +4,9 @@ use sqlx::{Error, PgPool};
 use crate::auth::session::hash_password;
 
 /// Checks if the database is already set up.
-pub async fn is_setup(pool: &Option<PgPool>) -> Result<bool, Error> {
+pub async fn is_setup(pool: Option<&PgPool>) -> Result<bool, Error> {
     // Check if database pool is available
-    let pool_ref = pool.as_ref().ok_or(Error::PoolClosed)?;
+    let pool_ref = pool.ok_or(Error::PoolClosed)?;
 
     let configured = sqlx::query_scalar::<_, Option<bool>>("SELECT is_setup()")
         .fetch_one(pool_ref)
@@ -16,14 +16,14 @@ pub async fn is_setup(pool: &Option<PgPool>) -> Result<bool, Error> {
 }
 
 /// Performs the setup.
-pub async fn init_setup(pool: &Option<PgPool>, config: &SetupRequest) -> Result<bool, Error> {
+pub async fn init_setup(pool: Option<&PgPool>, config: &SetupRequest) -> Result<bool, Error> {
     // Check if the database is already set up
     if is_setup(pool).await? {
         return Ok(false);
     }
 
     // Check if database pool is available
-    let pool_ref = pool.as_ref().ok_or(Error::PoolClosed)?;
+    let pool_ref = pool.ok_or(Error::PoolClosed)?;
 
     let password_hash =
         hash_password(&config.password).map_err(|err| Error::Protocol(err.to_string()))?;
@@ -45,18 +45,18 @@ mod tests {
     use shared::models::SetupRequest;
     use sqlx::PgPool;
 
-    /// Test that is_setup returns error when database pool is None
+    /// Test that `is_setup` returns error when database pool is None
     #[tokio::test]
     async fn test_is_setup_with_none_pool() {
         let pool: Option<PgPool> = None;
 
         // This should return an error when pool is None
-        let result = is_setup(&pool).await;
+        let result = is_setup(pool.as_ref()).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::PoolClosed));
     }
 
-    /// Test that init_setup returns error when database pool is None
+    /// Test that `init_setup` returns error when database pool is None
     #[tokio::test]
     async fn test_init_setup_with_none_pool() {
         let pool: Option<PgPool> = None;
@@ -67,12 +67,12 @@ mod tests {
         };
 
         // This should return an error when pool is None
-        let result = init_setup(&pool, &config).await;
+        let result = init_setup(pool.as_ref(), &config).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::PoolClosed));
     }
 
-    /// Test SetupRequest creation and field access
+    /// Test `SetupRequest` creation and field access
     #[test]
     fn test_setup_request_creation() {
         let request = SetupRequest {
@@ -86,7 +86,7 @@ mod tests {
         assert_eq!(request.password, "testpassword");
     }
 
-    /// Test SetupRequest serialization to JSON
+    /// Test `SetupRequest` serialization to JSON
     #[test]
     fn test_setup_request_serialization() {
         let request = SetupRequest {
@@ -101,7 +101,7 @@ mod tests {
         assert!(json.contains("testpassword"));
     }
 
-    /// Test SetupRequest deserialization from JSON
+    /// Test `SetupRequest` deserialization from JSON
     #[test]
     fn test_setup_request_deserialization() {
         let json =
@@ -113,13 +113,13 @@ mod tests {
         assert_eq!(request.password, "testpassword");
     }
 
-    /// Test SetupRequest with empty fields
+    /// Test `SetupRequest` with empty fields
     #[test]
     fn test_setup_request_with_empty_fields() {
         let request = SetupRequest {
-            username: "".to_string(),
-            email: "".to_string(),
-            password: "".to_string(),
+            username: String::new(),
+            email: String::new(),
+            password: String::new(),
         };
 
         assert_eq!(request.username, "");
@@ -127,7 +127,7 @@ mod tests {
         assert_eq!(request.password, "");
     }
 
-    /// Test SetupRequest equality
+    /// Test `SetupRequest` equality
     #[test]
     fn test_setup_request_equality() {
         let request1 = SetupRequest {

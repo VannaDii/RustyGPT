@@ -19,3 +19,6 @@
   - [Docker deploy](howto/docker-deploy.md)
   - [Rotate secrets](howto/rotate-secrets.md)
 - [Release notes](changelog/index.md)
+- [LLMs Welcome](llm/schema.json)
+  - [Manifest](llm/manifest.json)
+  - [Summaries](llm/summaries.json)

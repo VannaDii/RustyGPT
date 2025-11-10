@@ -5,6 +5,34 @@ use http::StatusCode;
 use serde_json::json;
 use std::sync::Arc;
 
+fn set_env_vars(vars: &[(&str, &str)]) {
+    for (key, value) in vars {
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+}
+
+fn remove_env_vars(keys: &[&str]) {
+    for key in keys {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+}
+
+fn set_or_remove(key: &str, value: &str) {
+    if value.is_empty() {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    } else {
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_apple_auth_routes_exist() {
     tracing::info!("Testing Apple auth routes creation");
@@ -34,11 +62,11 @@ async fn test_apple_oauth_init() {
 #[serial_test::serial]
 async fn test_apple_oauth_init_with_env_vars() {
     // Test Apple OAuth initialization with environment variables set
-    unsafe {
-        std::env::set_var("APPLE_CLIENT_ID", "test_client_id");
-        std::env::set_var("APPLE_REDIRECT_URI", "http://localhost:8080/callback");
-        std::env::set_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
-    }
+    set_env_vars(&[
+        ("APPLE_CLIENT_ID", "test_client_id"),
+        ("APPLE_REDIRECT_URI", "http://localhost:8080/callback"),
+        ("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize"),
+    ]);
 
     let app_state = Arc::new(AppState::default());
     let app = apple_auth_routes().with_state(app_state);
@@ -59,11 +87,7 @@ async fn test_apple_oauth_init_with_env_vars() {
     assert!(!auth_url.is_empty());
 
     // Clean up environment variables
-    unsafe {
-        std::env::remove_var("APPLE_CLIENT_ID");
-        std::env::remove_var("APPLE_REDIRECT_URI");
-        std::env::remove_var("APPLE_AUTH_URL");
-    }
+    remove_env_vars(&["APPLE_CLIENT_ID", "APPLE_REDIRECT_URI", "APPLE_AUTH_URL"]);
 }
 
 #[tokio::test]
@@ -115,11 +139,7 @@ async fn test_apple_oauth_manual_invalid_payload() {
 #[serial_test::serial]
 fn test_environment_variable_defaults() {
     // Test behavior when environment variables are not set
-    unsafe {
-        std::env::remove_var("APPLE_CLIENT_ID");
-        std::env::remove_var("APPLE_REDIRECT_URI");
-        std::env::remove_var("APPLE_AUTH_URL");
-    }
+    remove_env_vars(&["APPLE_CLIENT_ID", "APPLE_REDIRECT_URI", "APPLE_AUTH_URL"]);
 
     let client_id = std::env::var("APPLE_CLIENT_ID").unwrap_or_default();
     let redirect_uri = std::env::var("APPLE_REDIRECT_URI").unwrap_or_default();
@@ -138,8 +158,7 @@ fn test_auth_url_construction() {
     let auth_base_url = "https://example.com/auth";
 
     let auth_url = format!(
-        "{}?client_id={}&redirect_uri={}&response_type=code&scope=name%20email",
-        auth_base_url, client_id, redirect_uri
+        "{auth_base_url}?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope=name%20email"
     );
 
     assert!(auth_url.contains("test_client"));
@@ -254,14 +273,14 @@ async fn test_apple_oauth_manual_with_malformed_json() {
 #[serial_test::serial]
 fn test_env_var_behavior_with_special_characters() {
     // Test handling of environment variables with special characters
-    unsafe {
-        std::env::set_var("APPLE_CLIENT_ID", "client@123");
-        std::env::set_var(
+    set_env_vars(&[
+        ("APPLE_CLIENT_ID", "client@123"),
+        (
             "APPLE_REDIRECT_URI",
             "http://localhost:8080/callback?state=test",
-        );
-        std::env::set_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
-    }
+        ),
+        ("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize"),
+    ]);
 
     let client_id = std::env::var("APPLE_CLIENT_ID").unwrap_or_default();
     let redirect_uri = std::env::var("APPLE_REDIRECT_URI").unwrap_or_default();
@@ -272,11 +291,7 @@ fn test_env_var_behavior_with_special_characters() {
     assert!(!auth_base_url.is_empty());
 
     // Clean up
-    unsafe {
-        std::env::remove_var("APPLE_CLIENT_ID");
-        std::env::remove_var("APPLE_REDIRECT_URI");
-        std::env::remove_var("APPLE_AUTH_URL");
-    }
+    remove_env_vars(&["APPLE_CLIENT_ID", "APPLE_REDIRECT_URI", "APPLE_AUTH_URL"]);
 }
 
 #[tokio::test]
@@ -330,14 +345,14 @@ async fn test_apple_oauth_edge_cases() {
 #[serial_test::serial]
 async fn test_apple_oauth_comprehensive_validation() {
     // Test comprehensive validation of Apple OAuth flows
-    unsafe {
-        std::env::set_var("APPLE_CLIENT_ID", "comprehensive_test_client");
-        std::env::set_var(
+    set_env_vars(&[
+        ("APPLE_CLIENT_ID", "comprehensive_test_client"),
+        (
             "APPLE_REDIRECT_URI",
             "https://test.example.com/auth/callback",
-        );
-        std::env::set_var("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize");
-    }
+        ),
+        ("APPLE_AUTH_URL", "https://appleid.apple.com/auth/authorize"),
+    ]);
 
     let app_state = Arc::new(AppState::default());
     let app = apple_auth_routes().with_state(app_state);
@@ -357,11 +372,7 @@ async fn test_apple_oauth_comprehensive_validation() {
     assert!(auth_url.contains("scope=name%20email"));
 
     // Clean up
-    unsafe {
-        std::env::remove_var("APPLE_CLIENT_ID");
-        std::env::remove_var("APPLE_REDIRECT_URI");
-        std::env::remove_var("APPLE_AUTH_URL");
-    }
+    remove_env_vars(&["APPLE_CLIENT_ID", "APPLE_REDIRECT_URI", "APPLE_AUTH_URL"]);
 }
 
 #[test]
@@ -380,25 +391,9 @@ fn test_apple_env_var_combinations() {
     ];
 
     for (client_id, redirect_uri, auth_url) in test_cases {
-        unsafe {
-            if client_id.is_empty() {
-                std::env::remove_var("APPLE_CLIENT_ID");
-            } else {
-                std::env::set_var("APPLE_CLIENT_ID", client_id);
-            }
-
-            if redirect_uri.is_empty() {
-                std::env::remove_var("APPLE_REDIRECT_URI");
-            } else {
-                std::env::set_var("APPLE_REDIRECT_URI", redirect_uri);
-            }
-
-            if auth_url.is_empty() {
-                std::env::remove_var("APPLE_AUTH_URL");
-            } else {
-                std::env::set_var("APPLE_AUTH_URL", auth_url);
-            }
-        }
+        set_or_remove("APPLE_CLIENT_ID", client_id);
+        set_or_remove("APPLE_REDIRECT_URI", redirect_uri);
+        set_or_remove("APPLE_AUTH_URL", auth_url);
 
         // Test that environment variable reading works
         let retrieved_client_id = std::env::var("APPLE_CLIENT_ID").unwrap_or_default();
@@ -411,9 +406,5 @@ fn test_apple_env_var_combinations() {
     }
 
     // Clean up
-    unsafe {
-        std::env::remove_var("APPLE_CLIENT_ID");
-        std::env::remove_var("APPLE_REDIRECT_URI");
-        std::env::remove_var("APPLE_AUTH_URL");
-    }
+    remove_env_vars(&["APPLE_CLIENT_ID", "APPLE_REDIRECT_URI", "APPLE_AUTH_URL"]);
 }

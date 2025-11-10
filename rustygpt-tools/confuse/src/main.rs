@@ -1,12 +1,16 @@
-#![allow(clippy::all, clippy::pedantic)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![deny(warnings, clippy::pedantic)]
+#![allow(clippy::multiple_crate_versions)] // TODO(deps-001): remove once transitive dependencies converge.
 
 use clap::Parser;
-use colored::*;
+use colored::{Color, Colorize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::LinesStream;
 
@@ -17,7 +21,7 @@ struct Task {
     name: Option<String>,
     /// The command to run (e.g., "cargo")
     command: String,
-    /// The command arguments (e.g., ["watch", "-x", "run"])
+    /// The command arguments (e.g., `["watch", "-x", "run"]`)
     args: Vec<String>,
     /// The working directory (applied globally if not overridden per command)
     working_dir: Option<PathBuf>,
@@ -90,8 +94,8 @@ where
     let icon = icon_for_color(color);
     while let Some(Ok(line)) = lines.next().await {
         // Combine the icon and the task name in the prefix.
-        let prefix = format!("[{}:{}]", icon, name).color(color);
-        println!("{}: {}", prefix, line);
+        let prefix = format!("[{icon}:{name}]").color(color);
+        println!("{prefix}: {line}");
     }
 }
 
@@ -124,7 +128,7 @@ struct Cli {
     cwd: Option<PathBuf>,
 }
 
-/// Map a string to a colored::Color. Defaults to White if unrecognized.
+/// Map a string to a `colored::Color`. Defaults to White if unrecognized.
 fn parse_color(s: &str) -> Color {
     match s.to_lowercase().as_str() {
         "black" => Color::Black,
@@ -134,7 +138,6 @@ fn parse_color(s: &str) -> Color {
         "blue" => Color::Blue,
         "magenta" => Color::Magenta,
         "cyan" => Color::Cyan,
-        "white" => Color::White,
         _ => Color::White,
     }
 }
@@ -151,9 +154,7 @@ fn parse_command(cmd_str: &str, default_cwd: Option<PathBuf>) -> Task {
 
     // Parse the command and its arguments using shlex.
     let parts = shlex::split(command_str).expect("Failed to parse command arguments");
-    if parts.is_empty() {
-        panic!("No command provided in '{}'", cmd_str);
-    }
+    assert!(!parts.is_empty(), "No command provided in '{cmd_str}'");
 
     // Extract name and working directory from the prefix if available.
     let prefix_data = prefix_opt.map(|prefix| {
@@ -203,21 +204,23 @@ const fn icon_for_color(color: Color) -> &'static str {
 async fn main() {
     let cli = Cli::parse();
 
-    // Set up SIGTERM and SIGINT handling for graceful shutdown (Unix only).
-    use tokio::signal::unix::{SignalKind, signal};
-    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to bind SIGTERM");
-    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to bind SIGINT");
-    tokio::spawn(async move {
-        tokio::select! {
-            _ = sigterm.recv() => {
-                eprintln!("Received SIGTERM. Shutting down gracefully...");
-            },
-            _ = sigint.recv() => {
-                eprintln!("Received SIGINT. Shutting down gracefully...");
+    #[cfg(unix)]
+    {
+        // Set up SIGTERM and SIGINT handling for graceful shutdown (Unix only).
+        let mut sigterm = signal(SignalKind::terminate()).expect("Failed to bind SIGTERM");
+        let mut sigint = signal(SignalKind::interrupt()).expect("Failed to bind SIGINT");
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = sigterm.recv() => {
+                    eprintln!("Received SIGTERM. Shutting down gracefully...");
+                },
+                _ = sigint.recv() => {
+                    eprintln!("Received SIGINT. Shutting down gracefully...");
+                }
             }
-        }
-        std::process::exit(0);
-    });
+            std::process::exit(0);
+        });
+    }
 
     // Parse optional names and colors from comma-separated strings.
     let cli_names: Option<Vec<String>> = cli.names.as_ref().map(|s| {
@@ -264,7 +267,7 @@ async fn main() {
     }
 
     // For each task, if no name is provided, derive one.
-    for task in tasks.iter_mut() {
+    for task in &mut tasks {
         if task.name.is_none() {
             task.name = Some(task.derive_base_name());
         }
@@ -273,7 +276,7 @@ async fn main() {
     // Ensure unique names by appending incremental numbers for duplicates.
     let mut name_counts: HashMap<String, usize> = HashMap::new();
     let mut tasks_with_names = Vec::new();
-    for task in tasks.into_iter() {
+    for task in tasks {
         let base_name = task.name.clone().unwrap();
         let count = name_counts.entry(base_name.clone()).or_insert(0);
         let unique_name = if *count > 0 {

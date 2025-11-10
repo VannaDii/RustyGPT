@@ -76,12 +76,10 @@ mod tests {
         // This test validates that CORS can be configured without errors
         use std::env;
 
-        unsafe {
-            env::set_var("CORS_ORIGIN", "http://localhost:3000");
-            let origin = env::var("CORS_ORIGIN").unwrap();
-            assert_eq!(origin, "http://localhost:3000");
-            env::remove_var("CORS_ORIGIN");
-        }
+        env::set_var("CORS_ORIGIN", "http://localhost:3000");
+        let origin = env::var("CORS_ORIGIN").unwrap();
+        assert_eq!(origin, "http://localhost:3000");
+        env::remove_var("CORS_ORIGIN");
     }
 
     #[test]
@@ -89,12 +87,10 @@ mod tests {
         // Test server port configuration
         use std::env;
 
-        unsafe {
-            env::set_var("PORT", "8080");
-            let port = env::var("PORT").unwrap();
-            assert_eq!(port, "8080");
-            env::remove_var("PORT");
-        }
+        env::set_var("PORT", "8080");
+        let port = env::var("PORT").unwrap();
+        assert_eq!(port, "8080");
+        env::remove_var("PORT");
     }
 
     #[test]
@@ -102,11 +98,9 @@ mod tests {
         // Test database URL configuration
         use std::env;
 
-        unsafe {
-            env::set_var("DATABASE_URL", "postgresql://localhost/test");
-            let db_url = env::var("DATABASE_URL").unwrap();
-            assert_eq!(db_url, "postgresql://localhost/test");
-            env::remove_var("DATABASE_URL");
-        }
+        env::set_var("DATABASE_URL", "postgresql://localhost/test");
+        let db_url = env::var("DATABASE_URL").unwrap();
+        assert_eq!(db_url, "postgresql://localhost/test");
+        env::remove_var("DATABASE_URL");
     }
 }

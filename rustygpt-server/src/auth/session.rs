@@ -102,7 +102,7 @@ impl SessionMetadata {
         let fingerprint = client_meta
             .and_then(|meta| meta.get("fingerprint"))
             .and_then(|value| value.as_str())
-            .map(|value| value.to_string());
+            .map(ToString::to_string);
 
         Self::default()
             .with_user_agent(user_agent)
@@ -112,19 +112,27 @@ impl SessionMetadata {
 
     #[must_use]
     pub fn suspicious_mismatch(&self, current: &Self) -> bool {
-        fn changed<F>(stored: &Option<String>, current: &Option<String>, cmp: F) -> bool
+        fn changed<F>(stored: Option<&String>, current: Option<&String>, cmp: F) -> bool
         where
             F: Fn(&str, &str) -> bool,
         {
-            match (stored.as_ref(), current.as_ref()) {
+            match (stored, current) {
                 (Some(stored), Some(now)) => cmp(stored, now),
                 _ => false,
             }
         }
 
-        let ua_changed = changed(&self.user_agent, &current.user_agent, |a, b| a != b);
-        let ip_changed = changed(&self.ip, &current.ip, |a, b| a != b);
-        let fingerprint_changed = changed(&self.fingerprint, &current.fingerprint, |a, b| a != b);
+        let ua_changed = changed(
+            self.user_agent.as_ref(),
+            current.user_agent.as_ref(),
+            |a, b| a != b,
+        );
+        let ip_changed = changed(self.ip.as_ref(), current.ip.as_ref(), |a, b| a != b);
+        let fingerprint_changed = changed(
+            self.fingerprint.as_ref(),
+            current.fingerprint.as_ref(),
+            |a, b| a != b,
+        );
 
         ua_changed || ip_changed || fingerprint_changed
     }
@@ -213,7 +221,8 @@ impl SessionService {
     fn rotation_threshold(&self) -> Duration {
         let idle = self.config.session.idle_seconds.max(1);
         let threshold = (idle / 2).max(1);
-        Duration::seconds(threshold as i64)
+        let threshold_i64 = i64::try_from(threshold).unwrap_or(i64::MAX);
+        Duration::seconds(threshold_i64)
     }
 
     fn build_cookie(
@@ -282,12 +291,12 @@ impl SessionService {
         }
     }
 
-    fn new_token() -> Result<(String, Vec<u8>), SessionError> {
+    fn new_token() -> (String, Vec<u8>) {
         let mut raw = [0u8; 32];
         OsRng.fill_bytes(&mut raw);
         let token = URL_SAFE_NO_PAD.encode(raw);
         let hash = Sha256::digest(token.as_bytes());
-        Ok((token, hash.to_vec()))
+        (token, hash.to_vec())
     }
 
     fn new_csrf_token() -> String {
@@ -308,7 +317,7 @@ impl SessionService {
         self.config
             .session
             .max_sessions_per_user
-            .map(|value| value as i32)
+            .map(|value| i32::try_from(value).unwrap_or(i32::MAX))
     }
 
     #[instrument(skip(self, password), fields(identifier = %identifier))]
@@ -339,17 +348,11 @@ impl SessionService {
         .bind(identifier)
         .fetch_optional(conn.as_mut())
         .await
-        .map_err(|err| {
-            record_login_metric("error");
-            err
-        })?;
+        .inspect_err(|_| record_login_metric("error"))?;
 
-        let row = match record {
-            Some(row) => row,
-            None => {
-                record_login_metric("invalid_credentials");
-                return Err(SessionError::InvalidCredentials);
-            }
+        let Some(row) = record else {
+            record_login_metric("invalid_credentials");
+            return Err(SessionError::InvalidCredentials);
         };
 
         if row.disabled_at.is_some() {
@@ -402,6 +405,7 @@ impl SessionService {
     }
 
     #[instrument(skip(self, token, metadata))]
+    #[allow(clippy::too_many_lines)] // Tracking: session-validate-refactor
     pub async fn validate_session(
         &self,
         token: &str,
@@ -478,7 +482,7 @@ impl SessionService {
         }
 
         let roles = self.load_roles(&mut conn, row.user_id).await?;
-        let snapshot_mismatch = roles_snapshot_changed(&roles, &row.roles_snapshot);
+        let snapshot_mismatch = roles_snapshot_changed(&roles, row.roles_snapshot.as_ref());
 
         let threshold = self.rotation_threshold();
         let rotation_cause = if row.requires_rotation {
@@ -540,9 +544,8 @@ impl SessionService {
         token: &str,
         metadata: &SessionMetadata,
     ) -> Result<Option<(SessionUser, SessionBundle)>, SessionError> {
-        let validation = match self.validate_session(token, metadata).await? {
-            Some(value) => value,
-            None => return Ok(None),
+        let Some(validation) = self.validate_session(token, metadata).await? else {
+            return Ok(None);
         };
 
         let SessionValidation {
@@ -610,12 +613,13 @@ impl SessionService {
         roles: &[UserRole],
         metadata: &SessionMetadata,
     ) -> Result<SessionBundle, SessionError> {
-        let (token, hash) = Self::new_token()?;
+        let (token, hash) = Self::new_token();
         let csrf_token = Self::new_csrf_token();
         let roles_text: Vec<String> = roles.iter().map(|role| role.as_str().to_string()).collect();
         let client_meta = Json(metadata.as_json());
-        let idle_seconds = self.config.session.idle_seconds as i32;
-        let absolute_seconds = self.config.session.absolute_seconds as i32;
+        let idle_seconds = i32::try_from(self.config.session.idle_seconds).unwrap_or(i32::MAX);
+        let absolute_seconds =
+            i32::try_from(self.config.session.absolute_seconds).unwrap_or(i32::MAX);
 
         let record = sqlx::query_as::<_, SessionLoginRow>(
             "SELECT session_id,
@@ -676,11 +680,11 @@ impl SessionService {
         metadata: &SessionMetadata,
         cause: RotationCause,
     ) -> Result<SessionBundle, SessionError> {
-        let (token, hash) = Self::new_token()?;
+        let (token, hash) = Self::new_token();
         let csrf_token = Self::new_csrf_token();
         let roles_text: Vec<String> = roles.iter().map(|role| role.as_str().to_string()).collect();
         let client_meta = Json(metadata.as_json());
-        let idle_seconds = self.config.session.idle_seconds as i32;
+        let idle_seconds = i32::try_from(self.config.session.idle_seconds).unwrap_or(i32::MAX);
 
         let record = sqlx::query_as::<_, SessionRefreshRow>(
             "SELECT next_session_id,
@@ -804,7 +808,7 @@ impl SessionService {
         conn: &mut PoolConnection<Postgres>,
     ) -> Result<(), SessionError> {
         let rows = sqlx::query(
-            r#"
+            r"
             SELECT role, COUNT(*)::BIGINT AS count
             FROM (
                 SELECT COALESCE(role_text, 'member') AS role
@@ -818,7 +822,7 @@ impl SessionService {
                 WHERE s.revoked_at IS NULL
             ) stats
             GROUP BY role
-            "#,
+            ",
         )
         .fetch_all(conn.as_mut())
         .await
@@ -835,15 +839,19 @@ impl SessionService {
 
         for role in ALL_ROLES {
             let value = counts.remove(role.as_str()).unwrap_or(0);
+            #[allow(clippy::cast_precision_loss)]
+            let value_f64 = value as f64;
             metrics::gauge!(
                 ACTIVE_SESSIONS_METRIC_NAME,
                 "role" => role.as_str().to_string()
             )
-            .set(value as f64);
+            .set(value_f64);
         }
 
         for (role, value) in counts {
-            metrics::gauge!(ACTIVE_SESSIONS_METRIC_NAME, "role" => role).set(value as f64);
+            #[allow(clippy::cast_precision_loss)]
+            let value_f64 = value as f64;
+            metrics::gauge!(ACTIVE_SESSIONS_METRIC_NAME, "role" => role).set(value_f64);
         }
 
         Ok(())
@@ -863,9 +871,10 @@ impl SessionService {
 
         let mut roles = Vec::with_capacity(rows.len().max(1));
         for role in rows {
-            match UserRole::from_str(&role) {
-                Ok(parsed) => roles.push(parsed),
-                Err(_) => warn!(user_id = %user_id, role = %role, "unknown user role in database"),
+            if let Ok(parsed) = UserRole::from_str(&role) {
+                roles.push(parsed);
+            } else {
+                warn!(user_id = %user_id, role = %role, "unknown user role in database");
             }
         }
 
@@ -921,14 +930,11 @@ impl SessionManager for SessionService {
     }
 }
 
-fn roles_snapshot_changed(roles: &[UserRole], snapshot: &Option<Vec<String>>) -> bool {
-    snapshot
-        .as_ref()
-        .map(|stored| {
-            let current: Vec<String> = roles.iter().map(|role| role.as_str().to_string()).collect();
-            &current != stored
-        })
-        .unwrap_or(false)
+fn roles_snapshot_changed(roles: &[UserRole], snapshot: Option<&Vec<String>>) -> bool {
+    snapshot.is_some_and(|stored| {
+        let current: Vec<String> = roles.iter().map(|role| role.as_str().to_string()).collect();
+        &current != stored
+    })
 }
 
 fn record_login_metric(result: &'static str) {
@@ -1109,7 +1115,7 @@ mod tests {
     fn privilege_change_forces_rotation_on_next_request() {
         let roles = vec![UserRole::Admin];
         let snapshot = Some(vec!["member".to_string()]);
-        assert!(roles_snapshot_changed(&roles, &snapshot));
+        assert!(roles_snapshot_changed(&roles, snapshot.as_ref()));
     }
 
     #[test]

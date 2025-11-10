@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt::Write, sync::Arc};
 
 use axum::{
     Json, Router,
@@ -165,8 +165,7 @@ async fn post_root(
         .await?
         .into_iter()
         .find(|item| item.root_id == response.root_id)
-        .map(|item| item.unread)
-        .unwrap_or(0);
+        .map_or(0, |item| item.unread);
 
     let unread_event = ConversationStreamEvent::UnreadUpdate {
         payload: UnreadUpdateEvent {
@@ -230,8 +229,7 @@ async fn reply_message(
 
     let conversation_id = summary
         .as_ref()
-        .map(|summary| summary.conversation_id)
-        .unwrap_or(response.conversation_id);
+        .map_or(response.conversation_id, |summary| summary.conversation_id);
 
     let now = Timestamp(Utc::now());
 
@@ -259,8 +257,7 @@ async fn reply_message(
         .await?
         .into_iter()
         .find(|item| item.root_id == response.root_id)
-        .map(|item| item.unread)
-        .unwrap_or(0);
+        .map_or(0, |item| item.unread);
 
     let unread_event = ConversationStreamEvent::UnreadUpdate {
         payload: UnreadUpdateEvent {
@@ -331,8 +328,7 @@ async fn mark_thread_read(
     let unread = summaries
         .into_iter()
         .find(|item| item.root_id == root_id)
-        .map(|item| item.unread)
-        .unwrap_or(0);
+        .map_or(0, |item| item.unread);
 
     let event = ConversationStreamEvent::UnreadUpdate {
         payload: UnreadUpdateEvent { root_id, unread },
@@ -454,7 +450,7 @@ async fn set_typing(
         .await?;
 
     if payload.seconds > 0 {
-        let expires_at = Timestamp(Utc::now() + Duration::seconds(payload.seconds as i64));
+        let expires_at = Timestamp(Utc::now() + Duration::seconds(i64::from(payload.seconds)));
         let event = ConversationStreamEvent::TypingUpdate {
             payload: shared::models::TypingUpdate {
                 conversation_id: payload.conversation_id,
@@ -517,16 +513,29 @@ struct StreamOutcome {
     next_chunk_index: i32,
 }
 
-async fn process_assistant_stream(
-    service: &ChatService,
-    hub: &SharedStreamHub,
+struct AssistantStreamContext<'a> {
+    service: &'a ChatService,
+    hub: &'a SharedStreamHub,
     supervisor: Option<SharedStreamSupervisor>,
     session: Option<Arc<StreamSession>>,
+    persist_chunks: bool,
+}
+
+#[allow(clippy::too_many_lines)] // Tracking: threads-assistant-stream-refactor
+async fn process_assistant_stream(
+    context: AssistantStreamContext<'_>,
     actor: Uuid,
     parent_message_id: Uuid,
     stream: &mut StreamingResponseStream,
-    persist_chunks: bool,
 ) -> Result<StreamOutcome, ChatServiceError> {
+    let AssistantStreamContext {
+        service,
+        hub,
+        supervisor,
+        session,
+        persist_chunks,
+    } = context;
+
     let cancellation_token = session.as_ref().map(|handle| handle.cancellation_token());
 
     let mut accumulated = String::new();
@@ -542,7 +551,7 @@ async fn process_assistant_stream(
     loop {
         let next_item = if let Some(token) = cancellation_token.as_ref() {
             tokio::select! {
-                _ = token.cancelled() => {
+                () = token.cancelled() => {
                     break;
                 }
                 next = stream.next() => next
@@ -581,17 +590,16 @@ async fn process_assistant_stream(
                     continue;
                 }
 
-                if !registered && reply_response.is_some() {
-                    if let Some(message_id) =
+                if !registered
+                    && let Some(message_id) =
                         reply_response.as_ref().map(|created| created.message_id)
+                {
+                    if let (Some(supervisor), Some(session_handle)) =
+                        (supervisor.as_ref(), session.as_ref().map(Arc::clone))
                     {
-                        if let (Some(supervisor), Some(session_handle)) =
-                            (supervisor.as_ref(), session.as_ref().map(Arc::clone))
-                        {
-                            supervisor.register(message_id, session_handle).await;
-                        }
-                        registered = true;
+                        supervisor.register(message_id, session_handle).await;
                     }
+                    registered = true;
                 }
 
                 let Some(created) = reply_response.as_ref() else {
@@ -662,13 +670,12 @@ pub async fn ensure_reply_response(
             .await
             .ok();
         *reply_response = Some(created);
-    } else if let Some(created) = reply_response.as_ref() {
-        if let Err(err) = service
+    } else if let Some(created) = reply_response.as_ref()
+        && let Err(err) = service
             .update_message_content(actor, created.message_id, accumulated.to_string())
             .await
-        {
-            warn!(error = %err, "failed to update assistant message content");
-        }
+    {
+        warn!(error = %err, "failed to update assistant message content");
     }
 
     Ok(false)
@@ -682,8 +689,9 @@ pub async fn persist_chunk_if_needed(
     persist_chunks: bool,
     text_delta: &str,
 ) {
-    if persist_chunks && !text_delta.is_empty() {
-        if let Err(err) = service
+    if persist_chunks
+        && !text_delta.is_empty()
+        && let Err(err) = service
             .append_chunk(
                 actor,
                 created.message_id,
@@ -691,9 +699,8 @@ pub async fn persist_chunk_if_needed(
                 text_delta.to_string(),
             )
             .await
-        {
-            warn!(error = %err, "failed to store assistant chunk");
-        }
+    {
+        warn!(error = %err, "failed to store assistant chunk");
     }
 }
 
@@ -771,6 +778,7 @@ fn spawn_assistant_reply(
 }
 
 #[allow(clippy::cognitive_complexity)]
+#[allow(clippy::too_many_lines)] // Tracking: threads-assistant-reply-refactor
 async fn run_assistant_reply(
     pool: PgPool,
     hub: SharedStreamHub,
@@ -809,6 +817,14 @@ async fn run_assistant_reply(
     let persist_chunks = assistant.persist_stream_chunks();
     let stream_session = supervisor.as_ref().map(|sup| sup.create_session());
 
+    let stream_context = AssistantStreamContext {
+        service: &service,
+        hub: &hub,
+        supervisor: supervisor.clone(),
+        session: stream_session.clone(),
+        persist_chunks,
+    };
+
     let StreamOutcome {
         accumulated: initial_content,
         reply_response: initial_reply,
@@ -818,17 +834,7 @@ async fn run_assistant_reply(
         usage,
         stream_error: outcome_stream_error,
         next_chunk_index,
-    } = process_assistant_stream(
-        &service,
-        &hub,
-        supervisor.clone(),
-        stream_session.clone(),
-        actor,
-        parent_message_id,
-        &mut stream,
-        persist_chunks,
-    )
-    .await?;
+    } = process_assistant_stream(stream_context, actor, parent_message_id, &mut stream).await?;
 
     if let Some(handle) = stream_session.as_ref() {
         handle.mark_completed();
@@ -877,7 +883,7 @@ async fn run_assistant_reply(
         if !accumulated.is_empty() {
             accumulated.push_str("\n\n");
         }
-        accumulated.push_str(&format!("⚠️ {}", message));
+        let _ = write!(accumulated, "⚠️ {message}");
         error_event = Some(StreamErrorEvent {
             code: "assistant_timeout".to_string(),
             message,
@@ -885,18 +891,18 @@ async fn run_assistant_reply(
         stream_error = None;
     }
 
-    if error_event.is_none() {
-        if let Some(error) = stream_error.take() {
-            let message = format!("Assistant stream error: {error}");
-            if !accumulated.is_empty() {
-                accumulated.push_str("\n\n");
-            }
-            accumulated.push_str(&format!("⚠️ {}", message));
-            error_event = Some(StreamErrorEvent {
-                code: "assistant_stream_error".to_string(),
-                message,
-            });
+    if error_event.is_none()
+        && let Some(error) = stream_error.take()
+    {
+        let message = format!("Assistant stream error: {error}");
+        if !accumulated.is_empty() {
+            accumulated.push_str("\n\n");
         }
+        let _ = write!(accumulated, "⚠️ {message}");
+        error_event = Some(StreamErrorEvent {
+            code: "assistant_stream_error".to_string(),
+            message,
+        });
     }
 
     if let Err(err) = service
@@ -906,11 +912,10 @@ async fn run_assistant_reply(
         warn!(error = %err, "failed to persist final assistant message content");
     }
 
-    let usage_breakdown = usage
-        .map(|usage| {
-            token_usage_to_breakdown(&usage, assistant_session.prompt_tokens, &accumulated)
-        })
-        .unwrap_or_else(|| infer_usage_from_text(assistant_session.prompt_tokens, &accumulated));
+    let usage_breakdown = usage.map_or_else(
+        || infer_usage_from_text(assistant_session.prompt_tokens, &accumulated),
+        |usage| token_usage_to_breakdown(&usage, assistant_session.prompt_tokens, &accumulated),
+    );
 
     let finish_reason_value = match stop_reason {
         Some(StreamStopReason::Cancelled) => "cancelled".to_string(),
@@ -964,20 +969,6 @@ async fn run_assistant_reply(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn spawn_guard_allows_only_user_role() {
-        assert!(should_spawn_assistant(None));
-        assert!(should_spawn_assistant(Some(MessageRole::User)));
-        assert!(!should_spawn_assistant(Some(MessageRole::Assistant)));
-        assert!(!should_spawn_assistant(Some(MessageRole::System)));
-        assert!(!should_spawn_assistant(Some(MessageRole::Tool)));
-    }
-}
-
 fn require_user(context: &RequestContext) -> AppResult<Uuid> {
     context
         .user_id()
@@ -1006,19 +997,19 @@ pub fn token_usage_to_breakdown(
     content: &str,
 ) -> UsageBreakdown {
     let prompt_tokens = if usage.prompt_tokens > 0 {
-        usage.prompt_tokens as i64
+        i64::from(usage.prompt_tokens)
     } else {
         prompt_fallback
     };
 
     let completion_tokens = if usage.completion_tokens > 0 {
-        usage.completion_tokens as i64
+        i64::from(usage.completion_tokens)
     } else {
         approximate_text_tokens(content)
     };
 
     let total_tokens = if usage.total_tokens > 0 {
-        usage.total_tokens as i64
+        i64::from(usage.total_tokens)
     } else {
         prompt_tokens + completion_tokens
     };
@@ -1044,7 +1035,7 @@ fn approximate_text_tokens(text: &str) -> i64 {
     if trimmed.is_empty() {
         0
     } else {
-        trimmed.split_whitespace().count() as i64
+        i64::try_from(trimmed.split_whitespace().count()).unwrap_or(i64::MAX)
     }
 }
 
@@ -1080,8 +1071,7 @@ fn build_stream_request(
         append_assistant = true;
     } else if !lines
         .last()
-        .map(|line| line.starts_with("Assistant:"))
-        .unwrap_or(false)
+        .is_some_and(|line| line.starts_with("Assistant:"))
     {
         append_assistant = true;
     }
@@ -1123,4 +1113,18 @@ fn build_stream_request(
 
     request = request.with_metadata("model", json!(model_name));
     request
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_guard_allows_only_user_role() {
+        assert!(should_spawn_assistant(None));
+        assert!(should_spawn_assistant(Some(MessageRole::User)));
+        assert!(!should_spawn_assistant(Some(MessageRole::Assistant)));
+        assert!(!should_spawn_assistant(Some(MessageRole::System)));
+        assert!(!should_spawn_assistant(Some(MessageRole::Tool)));
+    }
 }

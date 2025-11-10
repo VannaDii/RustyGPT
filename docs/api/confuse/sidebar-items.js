@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["icon_for_color","main","parse_color","parse_command","spawn_and_stream","stream_output"],"struct":["Cli","ProcessInfo","Task"]};

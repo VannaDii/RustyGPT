@@ -16,10 +16,10 @@ const SESSION_ROTATED_HEADER: &str = "x-session-rotated";
 const DEFAULT_BASE_URL: &str = "/api";
 
 thread_local! {
-    static SHARED_CLIENT: OnceCell<RustyGPTClient> = OnceCell::new();
+    static SHARED_CLIENT: OnceCell<RustyGPTClient> = const { OnceCell::new() };
 }
 
-/// Lightweight API client for RustyGPT web interactions.
+/// Lightweight API client for `RustyGPT` web interactions.
 #[derive(Clone, Debug)]
 pub struct RustyGPTClient {
     base_url: String,
@@ -76,12 +76,10 @@ impl RustyGPTClient {
         if response
             .headers()
             .get(SESSION_ROTATED_HEADER)
-            .map(|value| value == "1")
-            .unwrap_or(false)
+            .is_some_and(|value| value == "1")
+            && let Some(token) = read_cookie(CSRF_COOKIE_NAME)
         {
-            if let Some(token) = read_cookie(CSRF_COOKIE_NAME) {
-                self.set_csrf_token(Some(token));
-            }
+            self.set_csrf_token(Some(token));
         }
     }
 
@@ -170,8 +168,8 @@ impl RustyGPTClient {
         after: Option<&str>,
         limit: Option<i32>,
     ) -> Result<ThreadListResponse, Error> {
-        let url = self.api_url(&format!("conversations/{}/threads", conversation_id));
-        let after_param = after.map(|value| value.to_string());
+        let url = self.api_url(&format!("conversations/{conversation_id}/threads"));
+        let after_param = after.map(ToString::to_string);
         let limit_param = limit;
         let response = self
             .send_with_refresh(move || {
@@ -196,8 +194,8 @@ impl RustyGPTClient {
         cursor_path: Option<&str>,
         limit: Option<i32>,
     ) -> Result<ThreadTreeResponse, Error> {
-        let url = self.api_url(&format!("threads/{}/tree", root_id));
-        let cursor_param = cursor_path.map(|value| value.to_string());
+        let url = self.api_url(&format!("threads/{root_id}/tree"));
+        let cursor_param = cursor_path.map(ToString::to_string);
         let limit_param = limit;
         let response = self
             .send_with_refresh(move || {
@@ -220,7 +218,7 @@ impl RustyGPTClient {
         &self,
         conversation_id: &Uuid,
     ) -> Result<UnreadSummaryResponse, Error> {
-        let url = self.api_url(&format!("conversations/{}/unread", conversation_id));
+        let url = self.api_url(&format!("conversations/{conversation_id}/unread"));
         let response = self
             .send_with_refresh(move || self.client.get(url.clone()))
             .await?;
@@ -234,7 +232,7 @@ impl RustyGPTClient {
         conversation_id: &Uuid,
         request: &PostRootMessageRequest,
     ) -> Result<PostRootMessageResponse, Error> {
-        let url = self.api_url(&format!("threads/{}/root", conversation_id));
+        let url = self.api_url(&format!("threads/{conversation_id}/root"));
         let payload = request.clone();
         let response = self
             .send_with_refresh(move || {
@@ -252,7 +250,7 @@ impl RustyGPTClient {
         parent_id: &Uuid,
         request: &ReplyMessageRequest,
     ) -> Result<ReplyMessageResponse, Error> {
-        let url = self.api_url(&format!("messages/{}/reply", parent_id));
+        let url = self.api_url(&format!("messages/{parent_id}/reply"));
         let payload = request.clone();
         let response = self
             .send_with_refresh(move || {
@@ -266,7 +264,7 @@ impl RustyGPTClient {
 
     /// Helper to construct the SSE conversation stream URL.
     pub fn conversation_stream_url(&self, conversation_id: &Uuid) -> String {
-        self.api_url(&format!("stream/conversations/{}", conversation_id))
+        self.api_url(&format!("stream/conversations/{conversation_id}"))
     }
 }
 

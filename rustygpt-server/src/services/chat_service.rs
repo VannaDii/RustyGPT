@@ -13,6 +13,23 @@ use thiserror::Error;
 use tracing::instrument;
 use uuid::Uuid;
 
+#[derive(sqlx::FromRow)]
+struct PostRootResponseRow {
+    message_id: Uuid,
+    root_id: Uuid,
+    conversation_id: Uuid,
+    depth: i32,
+}
+
+#[derive(sqlx::FromRow)]
+struct ReplyResponseRow {
+    message_id: Uuid,
+    root_id: Uuid,
+    conversation_id: Uuid,
+    parent_id: Option<Uuid>,
+    depth: i32,
+}
+
 #[derive(Debug, Error)]
 pub enum ChatServiceError {
     #[error("database error: {0}")]
@@ -124,7 +141,7 @@ impl ChatService {
     ) -> ChatServiceResult<ConversationRole> {
         let mut tx = self.begin_for(actor).await?;
         let role: String = sqlx::query_scalar(
-            r#"SELECT rustygpt.sp_add_participant($1, $2, $3::rustygpt.conversation_role)::TEXT"#,
+            r"SELECT rustygpt.sp_add_participant($1, $2, $3::rustygpt.conversation_role)::TEXT",
         )
         .bind(conversation_id)
         .bind(request.user_id)
@@ -547,17 +564,9 @@ impl ChatService {
         request: PostRootMessageRequest,
     ) -> ChatServiceResult<PostRootMessageResponse> {
         let mut tx = self.begin_for(actor).await?;
-        #[derive(sqlx::FromRow)]
-        struct ResponseRow {
-            message_id: Uuid,
-            root_id: Uuid,
-            conversation_id: Uuid,
-            depth: i32,
-        }
-
         let role = request.role.unwrap_or(MessageRole::User);
 
-        let row = sqlx::query_as::<_, ResponseRow>(
+        let row = sqlx::query_as::<_, PostRootResponseRow>(
             "SELECT message_id, root_id, conversation_id, depth FROM rustygpt.sp_post_root_message($1, $2, $3::rustygpt.message_role, $4)"
         )
         .bind(conversation_id)
@@ -615,16 +624,7 @@ impl ChatService {
         content: String,
     ) -> ChatServiceResult<ReplyMessageResponse> {
         let mut tx = self.begin_for(actor).await?;
-        #[derive(sqlx::FromRow)]
-        struct ResponseRow {
-            message_id: Uuid,
-            root_id: Uuid,
-            conversation_id: Uuid,
-            parent_id: Option<Uuid>,
-            depth: i32,
-        }
-
-        let row = sqlx::query_as::<_, ResponseRow>(
+        let row = sqlx::query_as::<_, ReplyResponseRow>(
             "SELECT message_id, root_id, conversation_id, parent_id, depth FROM rustygpt.sp_reply_message($1, $2, $3::rustygpt.message_role, $4)"
         )
         .bind(parent_message)
@@ -776,7 +776,7 @@ impl ChatService {
             .into_iter()
             .map(|row| UnreadThreadSummary {
                 root_id: row.root_id,
-                unread: row.unread as i64,
+                unread: i64::from(row.unread),
             })
             .collect())
     }

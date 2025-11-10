@@ -88,15 +88,15 @@ fn normalize_path(path: &str) -> String {
     if path.starts_with('/') {
         path.to_string()
     } else {
-        format!("/{}", path)
+        format!("/{path}")
     }
 }
 
 async fn reload_limits(state: &Arc<AppState>) {
-    if let Some(rate_limits) = state.rate_limits.clone() {
-        if let Err(err) = rate_limits.reload_from_db().await {
-            warn!(error = %err, "failed to reload rate limit configuration after admin change");
-        }
+    if let Some(rate_limits) = state.rate_limits.clone()
+        && let Err(err) = rate_limits.reload_from_db().await
+    {
+        warn!(error = %err, "failed to reload rate limit configuration after admin change");
     }
 }
 
@@ -210,7 +210,6 @@ struct DbAssignmentRow {
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[axum::debug_handler]
 pub async fn list_profiles(
     Extension(state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
@@ -227,7 +226,6 @@ pub async fn list_profiles(
     Ok(Json(rows.into_iter().map(apply_profile).collect()))
 }
 
-#[axum::debug_handler]
 pub async fn create_profile(
     Extension(state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
@@ -260,7 +258,6 @@ pub async fn create_profile(
     Ok((StatusCode::CREATED, Json(response)).into_response())
 }
 
-#[axum::debug_handler]
 pub async fn update_profile(
     Extension(state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
@@ -284,7 +281,6 @@ pub async fn update_profile(
     Ok(Json(apply_profile(row)))
 }
 
-#[axum::debug_handler]
 pub async fn delete_profile(
     Extension(state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
@@ -307,7 +303,6 @@ pub async fn delete_profile(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-#[axum::debug_handler]
 pub async fn list_assignments(
     Extension(state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
@@ -324,7 +319,6 @@ pub async fn list_assignments(
     Ok(Json(rows.into_iter().map(apply_assignment).collect()))
 }
 
-#[axum::debug_handler]
 pub async fn assign_route(
     Extension(state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,
@@ -358,7 +352,6 @@ pub async fn assign_route(
     Ok((StatusCode::CREATED, Json(apply_assignment(row))).into_response())
 }
 
-#[axum::debug_handler]
 pub async fn delete_assignment(
     Extension(state): Extension<Arc<AppState>>,
     Extension(context): Extension<RequestContext>,

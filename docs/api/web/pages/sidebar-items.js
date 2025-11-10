@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["chat","dashboard","error","login","profile","roles","settings","users"]};

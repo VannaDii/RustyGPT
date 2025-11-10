@@ -1,0 +1,9 @@
+(function() {
+    var implementors = Object.fromEntries([["shared",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"shared/config/server/enum.ConfigError.html\" title=\"enum shared::config::server::ConfigError\">ConfigError</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"shared/llms/errors/enum.LLMError.html\" title=\"enum shared::llms::errors::LLMError\">LLMError</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"shared/llms/hardware/enum.HardwareError.html\" title=\"enum shared::llms::hardware::HardwareError\">HardwareError</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"struct\" href=\"shared/models/errors/struct.ErrorResponse.html\" title=\"struct shared::models::errors::ErrorResponse\">ErrorResponse</a>"]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":57,"fragment_lengths":[1153]}

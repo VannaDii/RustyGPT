@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_client","csrf_token_from_jar","ensure_parent","load_cookie_jar","login","logout","me","persist_cookie_jar","print_session_summary","prompt","session_path"],"struct":["LoginArgs","LogoutArgs","MeArgs"]};

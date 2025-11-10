@@ -1,7 +1,8 @@
 use anyhow::Result;
-use assert_fs::prelude::*;
 use assert_fs::TempDir;
+use assert_fs::prelude::*;
 use std::collections::HashSet;
+use std::time::Instant;
 
 // Import the module we're testing
 use i18n_agent::scanner::{find_file, handle_dynamic_route_keys, scan_codebase, scan_file};
@@ -359,8 +360,8 @@ fn test_find_file_performance_with_many_files() -> Result<()> {
 
     // Create 100 random files
     for i in 0..100 {
-        let file = temp_dir.child(format!("file_{}.txt", i));
-        file.write_str(&format!("Content {}", i))?;
+        let file = temp_dir.child(format!("file_{i}.txt"));
+        file.write_str(&format!("Content {i}"))?;
     }
 
     // Create the target file
@@ -368,7 +369,6 @@ fn test_find_file_performance_with_many_files() -> Result<()> {
     target_file.write_str("needle content")?;
 
     // Measure the time to find the file
-    use std::time::Instant;
     let start = Instant::now();
     let result = find_file(temp_dir.path(), "needle.txt")?;
     let duration = start.elapsed();

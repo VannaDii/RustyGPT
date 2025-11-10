@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["header","layout","page_content","setup","setup_validation"]};

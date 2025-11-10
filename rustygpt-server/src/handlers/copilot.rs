@@ -1,5 +1,6 @@
 use std::{
     convert::Infallible,
+    fmt::Write,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -154,20 +155,19 @@ impl StatefulStreamController {
             return Ok(());
         }
 
-        if !self.registered && self.reply_response.is_some() {
-            if let Some(message_id) = self
+        if !self.registered
+            && let Some(message_id) = self
                 .reply_response
                 .as_ref()
                 .map(|created| created.message_id)
-            {
-                if let (Some(supervisor), Some(session_handle)) = (
-                    self.supervisor.as_ref(),
-                    self.stream_session.as_ref().map(Arc::clone),
-                ) {
-                    supervisor.register(message_id, session_handle).await;
-                }
-                self.registered = true;
+        {
+            if let (Some(supervisor), Some(session_handle)) = (
+                self.supervisor.as_ref(),
+                self.stream_session.as_ref().map(Arc::clone),
+            ) {
+                supervisor.register(message_id, session_handle).await;
             }
+            self.registered = true;
         }
 
         let Some(created) = self.reply_response.as_ref() else {
@@ -202,7 +202,7 @@ impl StatefulStreamController {
         Ok(())
     }
 
-    #[allow(clippy::cognitive_complexity)]
+    #[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // Tracking: copilot-stream-refactor
     async fn finalize(
         mut self,
         prompt_tokens: i64,
@@ -241,17 +241,17 @@ impl StatefulStreamController {
             stream_error = None;
         }
 
-        if warning_message.is_none() {
-            if let Some(error) = stream_error.clone() {
-                warning_message = Some(format!("assistant stream error: {error}"));
-            }
+        if warning_message.is_none()
+            && let Some(error) = stream_error.clone()
+        {
+            warning_message = Some(format!("assistant stream error: {error}"));
         }
 
         if let Some(message) = warning_message.as_ref() {
             if !self.accumulated.is_empty() {
                 self.accumulated.push_str("\n\n");
             }
-            self.accumulated.push_str(&format!("⚠️ {}", message));
+            let _ = write!(self.accumulated, "⚠️ {message}");
         }
 
         if let Err(err) = self
@@ -266,10 +266,10 @@ impl StatefulStreamController {
             warn!(error = %err, "failed to persist assistant final content");
         }
 
-        let usage_breakdown = usage
-            .as_ref()
-            .map(|usage| token_usage_to_breakdown(usage, prompt_tokens, &self.accumulated))
-            .unwrap_or_else(|| infer_usage_from_text(prompt_tokens, &self.accumulated));
+        let usage_breakdown = usage.as_ref().map_or_else(
+            || infer_usage_from_text(prompt_tokens, &self.accumulated),
+            |usage| token_usage_to_breakdown(usage, prompt_tokens, &self.accumulated),
+        );
 
         let default_finish = finish_reason.unwrap_or_else(|| "stop".to_string());
 
@@ -384,7 +384,7 @@ fn gather_warnings(request: &ChatCompletionRequest) -> Vec<String> {
     warnings
 }
 
-fn parse_stop_sequences(value: &Option<Value>) -> AppResult<Vec<String>> {
+fn parse_stop_sequences(value: Option<&Value>) -> AppResult<Vec<String>> {
     match value {
         None => Ok(Vec::new()),
         Some(Value::String(single)) => Ok(vec![single.clone()]),
@@ -410,7 +410,7 @@ fn parse_stop_sequences(value: &Option<Value>) -> AppResult<Vec<String>> {
     }
 }
 
-fn parse_rustygpt_metadata(value: &Option<Value>) -> AppResult<Option<RustyMetadata>> {
+fn parse_rustygpt_metadata(value: Option<&Value>) -> AppResult<Option<RustyMetadata>> {
     let Some(Value::Object(root)) = value else {
         return Ok(None);
     };
@@ -583,10 +583,13 @@ pub async fn get_models(Extension(config): Extension<Arc<Config>>) -> Json<Model
         .map(|(id, model)| Model {
             id: id.clone(),
             object: OBJECT_MODEL.to_string(),
-            created: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64,
+            created: i64::try_from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            )
+            .unwrap_or(i64::MAX),
             owned_by: model.provider.clone(),
             name: Some(model.display_name.clone()),
             model_type: Some(if model.capabilities.chat_format {
@@ -657,24 +660,15 @@ fn finalize_llm_request(
         request = request.with_system_message(system);
     }
 
-    if let Some(max_tokens) = overrides
-        .max_tokens
-        .or_else(|| default_config.max_tokens.map(|value| value as u32))
-    {
+    if let Some(max_tokens) = overrides.max_tokens.or(default_config.max_tokens) {
         request = request.with_max_tokens(max_tokens);
     }
 
-    if let Some(temperature) = overrides
-        .temperature
-        .or_else(|| default_config.temperature.map(|value| value as f32))
-    {
+    if let Some(temperature) = overrides.temperature.or(default_config.temperature) {
         request = request.with_temperature(temperature);
     }
 
-    if let Some(top_p) = overrides
-        .top_p
-        .or_else(|| default_config.top_p.map(|value| value as f32))
-    {
+    if let Some(top_p) = overrides.top_p.or(default_config.top_p) {
         request = request.with_metadata("top_p", json!(top_p));
     }
 
@@ -690,15 +684,14 @@ fn finalize_llm_request(
         request = request.with_stop_sequence(stop.clone());
     }
 
-    if overrides.stop_sequences.is_empty() {
-        if let Some(stops) = default_config
+    if overrides.stop_sequences.is_empty()
+        && let Some(stops) = default_config
             .additional_params
             .get("stop_sequences")
             .and_then(|value| value.as_array())
-        {
-            for stop in stops.iter().filter_map(|value| value.as_str()) {
-                request = request.with_stop_sequence(stop.to_string());
-            }
+    {
+        for stop in stops.iter().filter_map(|value| value.as_str()) {
+            request = request.with_stop_sequence(stop.to_string());
         }
     }
 
@@ -731,8 +724,7 @@ fn build_prompt_from_messages(messages: &[ChatCompletionMessage]) -> (String, Op
 
     if !lines
         .last()
-        .map(|line| line.starts_with("Assistant:"))
-        .unwrap_or(false)
+        .is_some_and(|line| line.starts_with("Assistant:"))
     {
         lines.push("Assistant:".to_string());
     }
@@ -775,8 +767,7 @@ fn build_prompt_from_thread(
 
     if !lines
         .last()
-        .map(|line| line.starts_with("Assistant:"))
-        .unwrap_or(false)
+        .is_some_and(|line| line.starts_with("Assistant:"))
     {
         lines.push("Assistant:".to_string());
     }
@@ -859,7 +850,7 @@ async fn complete_non_streaming(
     }
 }
 
-async fn stream_completion(
+fn stream_completion(
     session: AssistantStreamingSession,
     completion_id: String,
     created: i64,
@@ -867,7 +858,7 @@ async fn stream_completion(
     warnings: Vec<String>,
     stateful: Option<StatefulContext>,
     persist_chunks: bool,
-) -> AppResult<Response> {
+) -> Response {
     let (tx, rx) = mpsc::channel::<Event>(32);
 
     tokio::spawn(async move {
@@ -887,18 +878,18 @@ async fn stream_completion(
         }
     });
 
-    let stream = ReceiverStream::new(rx).map(|event| Ok::<Event, Infallible>(event));
-    let response = Sse::new(stream)
+    let stream = ReceiverStream::new(rx).map(Ok::<Event, Infallible>);
+    Sse::new(stream)
         .keep_alive(
             KeepAlive::new()
                 .interval(Duration::from_secs(15))
                 .text("ping"),
         )
-        .into_response();
-    Ok(response)
+        .into_response()
 }
 
 #[allow(clippy::cognitive_complexity)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // Tracking: copilot-stream-refactor
 async fn run_streaming_session(
     session: AssistantStreamingSession,
     completion_id: String,
@@ -942,7 +933,7 @@ async fn run_streaming_session(
                 .map(|handle| handle.cancellation_token())
             {
                 tokio::select! {
-                    _ = token.cancelled() => {
+                    () = token.cancelled() => {
                         break 'stream_loop;
                     }
                     item = &mut next_future => item
@@ -1058,14 +1049,10 @@ async fn run_streaming_session(
         if let Some(error) = error_opt.clone() {
             warnings.push(format!("assistant stream error: {error}"));
         }
-        let usage_breakdown = usage
-            .as_ref()
-            .map(|usage| {
-                token_usage_to_breakdown(usage, session.prompt_tokens, &stateless_accumulated)
-            })
-            .unwrap_or_else(|| {
-                infer_usage_from_text(session.prompt_tokens, &stateless_accumulated)
-            });
+        let usage_breakdown = usage.as_ref().map_or_else(
+            || infer_usage_from_text(session.prompt_tokens, &stateless_accumulated),
+            |usage| token_usage_to_breakdown(usage, session.prompt_tokens, &stateless_accumulated),
+        );
         let finish = if error_opt.is_some() {
             "error".to_string()
         } else {
@@ -1113,184 +1100,6 @@ fn done_event() -> Event {
     Event::default().data("[DONE]")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::{extract::Extension, http::StatusCode};
-    use axum_test::TestServer;
-    use chrono::Utc;
-    use futures::stream;
-    use shared::{
-        config::server::{Config, Profile},
-        llms::errors::LLMError,
-        llms::types::{FinishReason, LLMConfig},
-        models::ChatCompletionResponse,
-    };
-    use std::{collections::HashMap, sync::Arc};
-
-    use crate::{
-        handlers::streaming::StreamHub, middleware::request_context::RequestContext,
-        routes::copilot::create_router_copilot, services::assistant_service::AssistantRuntime,
-    };
-    use serde_json::json;
-
-    struct StubAssistant {
-        model: String,
-        chunks: Vec<StreamingResponse>,
-        config: LLMConfig,
-    }
-
-    impl StubAssistant {
-        fn new(model: &str, chunks: Vec<StreamingResponse>) -> Self {
-            Self {
-                model: model.to_string(),
-                chunks,
-                config: LLMConfig {
-                    model_path: "stub.gguf".into(),
-                    max_tokens: Some(128),
-                    temperature: Some(0.7),
-                    top_p: Some(1.0),
-                    top_k: None,
-                    repetition_penalty: None,
-                    n_threads: None,
-                    n_gpu_layers: None,
-                    context_size: None,
-                    batch_size: None,
-                    additional_params: HashMap::new(),
-                },
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl AssistantRuntime for StubAssistant {
-        async fn stream_reply(
-            &self,
-            _request: LLMRequest,
-        ) -> Result<AssistantStreamingSession, AssistantError> {
-            let stream = stream::iter(
-                self.chunks
-                    .clone()
-                    .into_iter()
-                    .map(|chunk| Ok::<StreamingResponse, LLMError>(chunk)),
-            );
-
-            Ok(AssistantStreamingSession::from_stream(Box::pin(stream), 4))
-        }
-
-        fn persist_stream_chunks(&self) -> bool {
-            false
-        }
-
-        fn default_model_name(&self) -> &str {
-            &self.model
-        }
-
-        fn default_chat_config(&self) -> Result<LLMConfig, AssistantError> {
-            Ok(self.config.clone())
-        }
-    }
-
-    fn stub_chunks() -> Vec<StreamingResponse> {
-        vec![
-            StreamingResponse {
-                request_id: Uuid::new_v4(),
-                text_delta: "Hello".to_string(),
-                is_final: false,
-                current_text: Some("Hello".to_string()),
-                finish_reason: None,
-                usage: TokenUsage::new(4, 1),
-                timestamp: Utc::now(),
-            },
-            StreamingResponse {
-                request_id: Uuid::new_v4(),
-                text_delta: " world".to_string(),
-                is_final: true,
-                current_text: Some("Hello world".to_string()),
-                finish_reason: Some(FinishReason::EndOfText),
-                usage: TokenUsage::new(4, 2),
-                timestamp: Utc::now(),
-            },
-        ]
-    }
-
-    fn test_app(assistant: Arc<dyn AssistantRuntime>) -> TestServer {
-        let config = Arc::new(Config::default_for_profile(Profile::Test));
-        let hub: SharedStreamHub = Arc::new(StreamHub::new(32, None, None));
-        let context = RequestContext {
-            request_id: "req".into(),
-            session: None,
-        };
-
-        let app_state = Arc::new(AppState {
-            assistant: Some(assistant),
-            ..AppState::default()
-        });
-
-        let app = create_router_copilot()
-            .layer(Extension(app_state.clone()))
-            .layer(Extension(config))
-            .layer(Extension(context))
-            .layer(Extension(hub))
-            .with_state(app_state);
-
-        TestServer::new(app).expect("test server")
-    }
-
-    #[tokio::test]
-    async fn get_models_uses_configuration() {
-        let config = Arc::new(Config::default_for_profile(Profile::Test));
-        let response = super::get_models(Extension(config.clone())).await;
-        assert!(!response.models.is_empty());
-        assert_eq!(response.models[0].object, OBJECT_MODEL);
-    }
-
-    #[tokio::test]
-    async fn post_chat_completions_returns_final_message() {
-        let assistant: Arc<dyn AssistantRuntime> =
-            Arc::new(StubAssistant::new("stub-model", stub_chunks()));
-        let server = test_app(assistant);
-
-        let response = server
-            .post("/v1/chat/completions")
-            .json(&json!({
-                "model": "stub-model",
-                "messages": [
-                    { "role": "user", "content": "Hello" }
-                ]
-            }))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::OK);
-        let body: ChatCompletionResponse = response.json();
-        assert_eq!(body.choices.len(), 1);
-        assert_eq!(body.choices[0].message.content, "Hello world");
-        assert_eq!(body.choices[0].finish_reason.as_deref(), Some("stop"));
-        assert_eq!(body.usage.as_ref().unwrap().prompt_tokens, 4);
-    }
-
-    #[tokio::test]
-    async fn post_chat_completions_streams_sse() {
-        let assistant: Arc<dyn AssistantRuntime> =
-            Arc::new(StubAssistant::new("stub-model", stub_chunks()));
-        let server = test_app(assistant);
-
-        let response = server
-            .post("/v1/chat/completions")
-            .json(&json!({
-                "model": "stub-model",
-                "stream": true,
-                "messages": [
-                    { "role": "user", "content": "Hello" }
-                ]
-            }))
-            .await;
-        assert_eq!(response.status_code(), StatusCode::OK);
-        let body = response.text();
-        assert!(body.contains("\"content\":\"Hello\""));
-        assert!(body.contains("[DONE]"));
-    }
-}
-
 async fn complete_stateless_non_streaming(
     session: AssistantStreamingSession,
     completion_id: String,
@@ -1327,10 +1136,10 @@ async fn complete_stateless_non_streaming(
         }
     }
 
-    let usage_breakdown = usage
-        .as_ref()
-        .map(|usage| token_usage_to_breakdown(usage, session.prompt_tokens, &accumulated))
-        .unwrap_or_else(|| infer_usage_from_text(session.prompt_tokens, &accumulated));
+    let usage_breakdown = usage.as_ref().map_or_else(
+        || infer_usage_from_text(session.prompt_tokens, &accumulated),
+        |usage| token_usage_to_breakdown(usage, session.prompt_tokens, &accumulated),
+    );
 
     let finish_reason_value = finish_reason.unwrap_or_else(|| "stop".to_string());
 
@@ -1464,7 +1273,7 @@ pub async fn post_chat_completions(
     })?;
 
     let stream = payload.stream.unwrap_or(false);
-    let stop_sequences = parse_stop_sequences(&payload.stop)?;
+    let stop_sequences = parse_stop_sequences(payload.stop.as_ref())?;
     let overrides = CompletionOverrides::from_request(&payload, stop_sequences);
     let warnings = gather_warnings(&payload);
 
@@ -1472,7 +1281,7 @@ pub async fn post_chat_completions(
     let created = Utc::now().timestamp();
 
     let auth_session = authenticate_request(&state, &config, &headers).await?;
-    let metadata = parse_rustygpt_metadata(&payload.metadata)?;
+    let metadata = parse_rustygpt_metadata(payload.metadata.as_ref())?;
 
     if metadata.is_some() && auth_session.is_none() {
         return Err(ApiError::new(
@@ -1524,7 +1333,6 @@ pub async fn post_chat_completions(
             stateful_context,
             persist_chunks,
         )
-        .await?
     } else {
         complete_non_streaming(
             session,
@@ -1543,3 +1351,6 @@ pub async fn post_chat_completions(
 }
 
 const OBJECT_MODEL: &str = "model";
+
+#[cfg(test)]
+mod tests;

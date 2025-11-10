@@ -59,7 +59,7 @@ pub async fn enforce_csrf(
         .headers()
         .get(&state.header_name)
         .and_then(|value| value.to_str().ok())
-        .map(|s| s.to_string());
+        .map(ToString::to_string);
 
     let cookie_token = extract_cookie(&request, &state.cookie_name);
 

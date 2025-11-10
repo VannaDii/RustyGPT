@@ -4,11 +4,16 @@ use std::fs;
 use std::path::Path;
 
 use crate::analyzer::{
-    get_missing_translations, get_value_by_path, remove_key_from_json, set_value_by_path,
-    AuditResult,
+    AuditResult, get_missing_translations, get_value_by_path, remove_key_from_json,
+    set_value_by_path,
 };
 
-/// Creates backups of translation files
+/// Creates backups of translation files.
+///
+/// # Errors
+///
+/// Returns an error if the backup directories cannot be created or any file
+/// copy operation fails.
 pub fn create_backups(trans_dir: &Path) -> Result<()> {
     // Create backup directory
     let backup_dir = trans_dir.join("backups");
@@ -26,22 +31,28 @@ pub fn create_backups(trans_dir: &Path) -> Result<()> {
         let path = entry.path();
 
         if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
-            let file_name = path.file_name().unwrap();
+            let Some(file_name) = path.file_name() else {
+                continue;
+            };
             let backup_path = timestamped_backup_dir.join(file_name);
 
             fs::copy(&path, &backup_path)?;
-            println!("Backed up {:?} to {:?}", path, backup_path);
+            println!("Backed up {} to {}", path.display(), backup_path.display());
         }
     }
 
     Ok(())
 }
 
-/// Cleans translation files by removing unused keys
+/// Cleans translation files by removing unused keys.
+///
+/// # Errors
+///
+/// Returns an error if serialization or writing cleaned translations fails.
 pub fn clean_translation_files(_trans_dir: &Path, audit_result: &AuditResult) -> Result<()> {
     for (lang_code, data) in &audit_result.translations {
         if data.unused_keys.is_empty() {
-            println!("No unused keys to remove from {}.json", lang_code);
+            println!("No unused keys to remove from {lang_code}.json");
             continue;
         }
 
@@ -58,14 +69,11 @@ pub fn clean_translation_files(_trans_dir: &Path, audit_result: &AuditResult) ->
 
         // Ensure we're not removing all keys
         let used_keys = audit_result.keys_in_use.intersection(&data.all_keys);
-        let has_entries = content
-            .as_object()
-            .map_or(false, |object| !object.is_empty());
+        let has_entries = content.as_object().is_some_and(|object| !object.is_empty());
 
         if used_keys.count() == 0 && has_entries {
             println!(
-                "Warning: Would remove all keys from {}.json, skipping to avoid data loss",
-                lang_code
+                "Warning: Would remove all keys from {lang_code}.json, skipping to avoid data loss"
             );
             continue;
         }
@@ -75,23 +83,23 @@ pub fn clean_translation_files(_trans_dir: &Path, audit_result: &AuditResult) ->
         let json_str = serde_json::to_string_pretty(&content)?;
         fs::write(file_path, json_str)?;
 
-        println!(
-            "Removed {} unused keys from {}.json",
-            removed_count, lang_code
-        );
+        println!("Removed {removed_count} unused keys from {lang_code}.json");
     }
 
     Ok(())
 }
 
-/// Creates template files for missing translations
+/// Creates template files for missing translations.
+///
+/// # Errors
+///
+/// Returns an error when template files cannot be created or written.
 pub fn create_translation_templates(audit_result: &AuditResult, output_dir: &Path) -> Result<()> {
     let reference_lang = &audit_result.reference_language;
 
     if !audit_result.translations.contains_key(reference_lang) {
         return Err(anyhow::anyhow!(
-            "Reference language {} not found in translations",
-            reference_lang
+            "Reference language {reference_lang} not found in translations"
         ));
     }
 
@@ -105,7 +113,7 @@ pub fn create_translation_templates(audit_result: &AuditResult, output_dir: &Pat
         let missing = get_missing_translations(audit_result, lang_code);
 
         if missing.is_empty() {
-            println!("No missing translations for {}.json", lang_code);
+            println!("No missing translations for {lang_code}.json");
             continue;
         }
 
@@ -122,25 +130,28 @@ pub fn create_translation_templates(audit_result: &AuditResult, output_dir: &Pat
         }
 
         // Write the template to a file
-        let template_path = output_dir.join(format!("{}_missing.json", lang_code));
+        let template_path = output_dir.join(format!("{lang_code}_missing.json"));
         let json_str = serde_json::to_string_pretty(&template)?;
-        fs::write(&template_path, json_str).context(format!(
-            "Failed to write template file: {:?}",
-            template_path
-        ))?;
+        fs::write(&template_path, json_str).with_context(|| {
+            format!("Failed to write template file: {}", template_path.display())
+        })?;
 
         println!(
-            "Created template for {}.json with {} missing translations: {:?}",
+            "Created template for {}.json with {} missing translations: {}",
             lang_code,
             missing.len(),
-            template_path
+            template_path.display()
         );
     }
 
     Ok(())
 }
 
-/// Creates a merged translation file with all keys from the reference language
+/// Creates a merged translation file with all keys from the reference language.
+///
+/// # Errors
+///
+/// Returns an error when merged translations cannot be written to disk.
 pub fn create_merged_translation(
     audit_result: &AuditResult,
     lang_code: &str,
@@ -150,15 +161,13 @@ pub fn create_merged_translation(
 
     if !audit_result.translations.contains_key(reference_lang) {
         return Err(anyhow::anyhow!(
-            "Reference language {} not found in translations",
-            reference_lang
+            "Reference language {reference_lang} not found in translations"
         ));
     }
 
     if !audit_result.translations.contains_key(lang_code) {
         return Err(anyhow::anyhow!(
-            "Language {} not found in translations",
-            lang_code
+            "Language {lang_code} not found in translations"
         ));
     }
 
@@ -186,13 +195,13 @@ pub fn create_merged_translation(
     }
 
     // Write the merged file
-    let merged_path = output_dir.join(format!("{}_merged.json", lang_code));
+    let merged_path = output_dir.join(format!("{lang_code}_merged.json"));
     let json_str = serde_json::to_string_pretty(&merged)?;
     fs::write(&merged_path, json_str)?;
 
     println!(
-        "Created merged translation file for {}.json: {:?}",
-        lang_code, merged_path
+        "Created merged translation file for {lang_code}.json: {}",
+        merged_path.display()
     );
 
     Ok(())
@@ -202,8 +211,8 @@ pub fn create_merged_translation(
 #[allow(clippy::similar_names)]
 mod tests {
     use super::*;
-    use assert_fs::prelude::*;
     use assert_fs::TempDir;
+    use assert_fs::prelude::*;
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
@@ -236,7 +245,7 @@ mod tests {
         // There should be one timestamped directory inside the backups directory
         let entries = fs::read_dir(&backup_dir)?;
         let timestamped_dirs: Vec<_> = entries
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .filter(|e| e.path().is_dir())
             .collect();
         assert_eq!(timestamped_dirs.len(), 1);
@@ -244,7 +253,7 @@ mod tests {
         // Inside the timestamped directory, there should be two JSON files
         let timestamped_dir = &timestamped_dirs[0].path();
         let backup_files: Vec<_> = fs::read_dir(timestamped_dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .collect();
         assert_eq!(backup_files.len(), 2);
 
@@ -260,6 +269,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // Comprehensive integration test exercises multiple scenarios.
     fn test_clean_translation_files() -> Result<()> {
         // Create a temporary directory for translation files
         let temp_dir = TempDir::new()?;
@@ -636,11 +646,13 @@ mod tests {
         // Missing translations should be marked
         let cancel_value = get_value_by_path(&es_merged, "common.button.cancel");
         assert!(cancel_value.is_some());
-        assert!(cancel_value
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .starts_with("MISSING:"));
+        assert!(
+            cancel_value
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .starts_with("MISSING:")
+        );
 
         Ok(())
     }
@@ -660,10 +672,12 @@ mod tests {
 
         // Verify the function returns an error
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Reference language en not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Reference language en not found")
+        );
 
         Ok(())
     }
@@ -702,10 +716,12 @@ mod tests {
 
         // Verify the function returns an error
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Language es not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Language es not found")
+        );
 
         Ok(())
     }
@@ -725,10 +741,12 @@ mod tests {
 
         // Verify the function returns an error
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Reference language en not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Reference language en not found")
+        );
 
         Ok(())
     }

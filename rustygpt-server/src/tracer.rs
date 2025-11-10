@@ -36,15 +36,13 @@ impl<B> MakeSpan<B> for HttpMakeSpan {
         let request_id = request
             .extensions()
             .get::<RequestContext>()
-            .map(|ctx| ctx.request_id.clone())
-            .unwrap_or_else(|| "n/a".into());
+            .map_or_else(|| "n/a".into(), |ctx| ctx.request_id.clone());
 
         let method = request.method().to_string();
-        let path = request
-            .extensions()
-            .get::<MatchedPath>()
-            .map(|p| p.as_str().to_string())
-            .unwrap_or_else(|| request.uri().path().to_string());
+        let path = request.extensions().get::<MatchedPath>().map_or_else(
+            || request.uri().path().to_string(),
+            |p| p.as_str().to_string(),
+        );
 
         let span = tracing::info_span!(
             "http_request",
@@ -56,12 +54,12 @@ impl<B> MakeSpan<B> for HttpMakeSpan {
             latency_seconds = tracing::field::Empty
         );
         span.with_subscriber(|(id, dispatch)| {
-            if let Some(registry) = dispatch.downcast_ref::<Registry>() {
-                if let Some(span_ref) = registry.span(id) {
-                    span_ref
-                        .extensions_mut()
-                        .insert(RequestMetadata { method, path });
-                }
+            if let Some(registry) = dispatch.downcast_ref::<Registry>()
+                && let Some(span_ref) = registry.span(id)
+            {
+                span_ref
+                    .extensions_mut()
+                    .insert(RequestMetadata { method, path });
             }
         });
         span
@@ -97,12 +95,11 @@ impl<B> OnResponse<B> for HttpOnResponse {
 
         let mut meta = None;
         span.with_subscriber(|(id, dispatch)| {
-            if let Some(registry) = dispatch.downcast_ref::<Registry>() {
-                if let Some(span_ref) = registry.span(id) {
-                    if let Some(stored) = span_ref.extensions().get::<RequestMetadata>() {
-                        meta = Some(stored.clone());
-                    }
-                }
+            if let Some(registry) = dispatch.downcast_ref::<Registry>()
+                && let Some(span_ref) = registry.span(id)
+                && let Some(stored) = span_ref.extensions().get::<RequestMetadata>()
+            {
+                meta = Some(stored.clone());
             }
         });
 
@@ -136,10 +133,11 @@ pub fn on_request_handler(req: &Request<Body>, span: &Span) {
             version = ?req.version(),
             "started processing request"
         );
-    })
+    });
 }
 
 /// Handle failure logging
+#[allow(clippy::needless_pass_by_value)] // tower_http::TraceLayer requires ownership
 pub fn on_failure_handler(error: ServerErrorsFailureClass, latency: Duration, span: &Span) {
     span.in_scope(|| {
         error!(
@@ -147,14 +145,14 @@ pub fn on_failure_handler(error: ServerErrorsFailureClass, latency: Duration, sp
             latency = ?latency,
             "error processing request"
         );
-    })
+    });
 }
 
 /// Create a trace layer for HTTP request logging
 pub fn create_trace_layer() -> TraceLayerType {
     TraceLayer::new_for_http()
-        .make_span_with(HttpMakeSpan::default())
+        .make_span_with(HttpMakeSpan)
         .on_request(on_request_handler as fn(&Request<Body>, &Span))
-        .on_response(HttpOnResponse::default())
+        .on_response(HttpOnResponse)
         .on_failure(on_failure_handler as fn(ServerErrorsFailureClass, Duration, &Span))
 }

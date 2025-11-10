@@ -1,0 +1,9 @@
+(function() {
+    var implementors = Object.fromEntries([["shared",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"enum\" href=\"shared/config/server/enum.CookieSameSite.html\" title=\"enum shared::config::server::CookieSameSite\">CookieSameSite</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"enum\" href=\"shared/config/server/enum.LogFormat.html\" title=\"enum shared::config::server::LogFormat\">LogFormat</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"enum\" href=\"shared/config/server/enum.Profile.html\" title=\"enum shared::config::server::Profile\">Profile</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"enum\" href=\"shared/config/server/enum.SseDropStrategy.html\" title=\"enum shared::config::server::SseDropStrategy\">SseDropStrategy</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.91.0/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"enum\" href=\"shared/models/user/enum.UserRole.html\" title=\"enum shared::models::user::UserRole\">UserRole</a>"]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":57,"fragment_lengths":[1507]}

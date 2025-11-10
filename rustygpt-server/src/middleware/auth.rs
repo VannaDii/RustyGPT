@@ -18,11 +18,11 @@ use crate::{
 };
 
 // Middleware to check if a user is authenticated
+#[allow(clippy::too_many_lines)] // Tracking: auth-middleware-refactor
 #[instrument(skip(next, req))]
 pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Response, StatusCode> {
-    let config = match req.extensions().get::<Arc<Config>>().cloned() {
-        Some(config) => config,
-        None => return Err(StatusCode::UNAUTHORIZED),
+    let Some(config) = req.extensions().get::<Arc<Config>>().cloned() else {
+        return Err(StatusCode::UNAUTHORIZED);
     };
 
     if !config.features.auth_v1 {
@@ -40,16 +40,15 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let session_cookie_name = &config.session.session_cookie_name;
-    let token = match extract_session_cookie(req.headers(), session_cookie_name) {
-        Some(token) => token,
-        None => return Ok(unauthorized_response()),
+    let Some(token) = extract_session_cookie(req.headers(), session_cookie_name) else {
+        return Ok(unauthorized_response());
     };
 
     let user_agent = req
         .headers()
         .get(header::USER_AGENT)
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string());
+        .map(ToString::to_string);
 
     let forwarded_ip = req
         .headers()
@@ -58,7 +57,7 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
         .and_then(|raw| raw.split(',').next())
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
-        .map(|segment| segment.to_string());
+        .map(ToString::to_string);
 
     let real_ip = req
         .headers()
@@ -71,7 +70,7 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
         .headers()
         .get("x-client-fingerprint")
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string());
+        .map(ToString::to_string);
 
     let ip_source = forwarded_ip.or(real_ip);
     let mut metadata = SessionMetadata::default()
@@ -114,7 +113,7 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
             req.headers()
                 .get(&header)
                 .and_then(|value| value.to_str().ok())
-                .map(|value| value.to_string())
+                .map(ToString::to_string)
         })
         .unwrap_or_default();
 
@@ -128,7 +127,7 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Result<Respo
     }
 
     let mut response = next.run(req).await;
-    let rotation_header_set = bundle.as_ref().map_or(false, |bundle| {
+    let rotation_header_set = bundle.as_ref().is_some_and(|bundle| {
         if let Ok(value) = http::HeaderValue::from_str(&bundle.session_cookie.to_string()) {
             response.headers_mut().append(header::SET_COOKIE, value);
         }
@@ -170,7 +169,6 @@ fn unauthorized_response_with(scheme: &'static str) -> Response {
         .header(header::WWW_AUTHENTICATE, scheme)
         .body(Body::empty())
         .unwrap()
-        .into()
 }
 
 fn conflict_response() -> Response {
@@ -178,7 +176,6 @@ fn conflict_response() -> Response {
         .status(StatusCode::CONFLICT)
         .body(Body::empty())
         .unwrap()
-        .into()
 }
 
 fn locked_response() -> Response {
@@ -186,7 +183,6 @@ fn locked_response() -> Response {
         .status(StatusCode::LOCKED)
         .body(Body::empty())
         .unwrap()
-        .into()
 }
 
 fn map_session_error(error: SessionError) -> Response {

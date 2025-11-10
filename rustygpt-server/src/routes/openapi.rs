@@ -10,7 +10,7 @@ async fn openapi_yaml() -> impl IntoResponse {
         Ok(yaml) => (StatusCode::OK, yaml),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("YAML error: {}", e),
+            format!("YAML error: {e}"),
         ),
     }
 }

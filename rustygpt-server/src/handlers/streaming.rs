@@ -123,7 +123,7 @@ impl fmt::Debug for StreamHub {
         f.debug_struct("StreamHub")
             .field("history_capacity", &self.history_capacity)
             .field("has_persistence", &self.persistence.is_some())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -305,7 +305,7 @@ async fn persist_event(hub: &StreamHub, conversation_id: Uuid, envelope: &EventE
     match serde_json::to_value(&envelope.event) {
         Ok(json_payload) => {
             let record = StreamEventRecord {
-                sequence: envelope.sequence as i64,
+                sequence: i64::try_from(envelope.sequence).unwrap_or(i64::MAX),
                 event_id: envelope.event_id(),
                 event_type: event_name(&envelope.event).to_string(),
                 payload: json_payload,
@@ -479,10 +479,10 @@ fn validate_persisted_event(
 ) {
     warn_on_type_mismatch(stored_event_type, event);
     warn_on_root_mismatch(stored_root_id, event);
-    if let Some(root_from_id) = parsed_id.root_id {
-        if Some(root_from_id) != event_root_id(event) {
-            warn!(stored = %root_from_id, "SSE event id root mismatch in persistence");
-        }
+    if let Some(root_from_id) = parsed_id.root_id
+        && Some(root_from_id) != event_root_id(event)
+    {
+        warn!(stored = %root_from_id, "SSE event id root mismatch in persistence");
     }
 }
 
@@ -494,10 +494,10 @@ fn warn_on_type_mismatch(stored_event_type: &str, event: &ConversationStreamEven
 }
 
 fn warn_on_root_mismatch(stored_root_id: Option<Uuid>, event: &ConversationStreamEvent) {
-    if let Some(root_id) = stored_root_id {
-        if Some(root_id) != event_root_id(event) {
-            warn!(stored = %root_id, "SSE event root mismatch in persistence");
-        }
+    if let Some(root_id) = stored_root_id
+        && Some(root_id) != event_root_id(event)
+    {
+        warn!(stored = %root_id, "SSE event root mismatch in persistence");
     }
 }
 
@@ -536,10 +536,10 @@ pub async fn conversation_stream(
     replay = merge_replay_events(replay, chunk_events);
 
     let initial =
-        stream::iter(replay).filter_map(|envelope| async move { convert_event(envelope) });
+        stream::iter(replay).filter_map(|envelope| async move { convert_event(&envelope) });
     let broadcast = BroadcastStream::new(receiver).filter_map(|result| async move {
         match result {
-            Ok(envelope) => convert_event(envelope),
+            Ok(envelope) => convert_event(&envelope),
             Err(err) => {
                 tracing::warn!(error = %err, "stream subscriber lagged");
                 None
@@ -547,7 +547,7 @@ pub async fn conversation_stream(
         }
     });
 
-    let combined = initial.chain(broadcast).map(|event| Ok(event));
+    let combined = initial.chain(broadcast).map(Ok);
 
     Ok(Sse::new(combined).keep_alive(
         KeepAlive::new()
@@ -556,7 +556,7 @@ pub async fn conversation_stream(
     ))
 }
 
-fn convert_event(envelope: EventEnvelope) -> Option<Event> {
+fn convert_event(envelope: &EventEnvelope) -> Option<Event> {
     envelope.as_sse_event()
 }
 
@@ -689,8 +689,9 @@ fn chunk_event_envelope(
     chunk_index: i32,
     timestamp_ms: i64,
 ) -> EventEnvelope {
+    let safe_sequence = u64::try_from(chunk_index.max(0)).unwrap_or(u64::MAX);
     EventEnvelope {
-        sequence: chunk_index.max(0) as u64,
+        sequence: safe_sequence,
         timestamp_ms,
         metadata: EventMetadata::with_chunk_index(chunk_index),
         event,
@@ -784,7 +785,7 @@ mod tests {
             };
             let filtered = events
                 .into_iter()
-                .filter(|record| since.map_or(true, |threshold| record.created_at > threshold))
+                .filter(|record| since.is_none_or(|threshold| record.created_at > threshold))
                 .take(limit)
                 .collect();
             Ok(filtered)
@@ -800,12 +801,11 @@ mod tests {
             {
                 let mut guard = self.records.lock().unwrap();
                 if let (Some(records), Some(limit)) = (guard.get_mut(&conversation_id), hard_limit)
+                    && records.len() > limit
                 {
-                    if records.len() > limit {
-                        let excess = records.len().saturating_sub(limit);
-                        let remove = excess.min(prune_batch);
-                        records.drain(0..remove);
-                    }
+                    let excess = records.len().saturating_sub(limit);
+                    let remove = excess.min(prune_batch);
+                    records.drain(0..remove);
                 }
                 drop(guard);
             }
@@ -882,7 +882,7 @@ mod tests {
     ) -> ConversationStreamEvent {
         ConversationStreamEvent::MessageDelta {
             payload: ChatDeltaChunk {
-                id: format!("{}:0", message_id),
+                id: format!("{message_id}:0"),
                 object: "chat.completion.chunk".to_string(),
                 root_id,
                 message_id,

@@ -1,4 +1,11 @@
-use crate::{containers::layout::Layout, models::app_state::AppState, pages::*};
+use crate::{
+    containers::layout::Layout,
+    models::app_state::AppState,
+    pages::{
+        ChatPage, DashboardPage, ErrorPage, LoginPage, ProfilePage, RolesPage, SettingsPage,
+        UsersPage,
+    },
+};
 use shared::models::UserRole;
 use strum::{EnumIter, IntoEnumIterator};
 use wasm_bindgen::prelude::*;
@@ -85,14 +92,11 @@ fn main_route_view(props: &MainRouteViewProps) -> Html {
     let user = use_selector(|state: &AppState| state.user.clone());
     let user_opt = (*user).clone();
     let is_authenticated = user_opt.is_some();
-    let is_admin = user_opt
-        .as_ref()
-        .map(|user| {
-            user.roles
-                .iter()
-                .any(|role| matches!(role, UserRole::Admin))
-        })
-        .unwrap_or(false);
+    let is_admin = user_opt.as_ref().is_some_and(|user| {
+        user.roles
+            .iter()
+            .any(|role| matches!(role, UserRole::Admin))
+    });
     match props.route.clone() {
         MainRoute::Login => {
             if is_authenticated {
@@ -164,13 +168,13 @@ fn main_route_view(props: &MainRouteViewProps) -> Html {
 
 /// Switch function for the main routes.
 pub fn switch_with_logout(route: MainRoute, on_logout: Callback<()>) -> Html {
-    log(std::format!("Switching to main route: {:?}", route).as_str());
+    log(std::format!("Switching to main route: {route:?}").as_str());
     html! { <MainRouteView {route} {on_logout} /> }
 }
 
 /// Switch function for the admin routes.
 fn switch_admin(route: AdminRoute, on_logout: Callback<()>) -> Html {
-    log(std::format!("Switching to admin route: {:?}", route).as_str());
+    log(std::format!("Switching to admin route: {route:?}").as_str());
     let header_routes = AdminRoute::iter()
         .filter(|route| {
             // Filter out the error routes

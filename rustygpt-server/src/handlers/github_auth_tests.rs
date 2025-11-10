@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use crate::{
     app_state::AppState,
     handlers::{
@@ -14,30 +16,38 @@ use axum::{
     http::StatusCode,
 };
 use shared::models::oauth::{OAuthCallback, OAuthRequest};
-use std::{env, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
 
-    fn set_test_env() {
+    fn set_env_var(key: &str, value: &str) {
         unsafe {
-            env::set_var("GITHUB_CLIENT_ID", "test_client_id");
-            env::set_var("GITHUB_REDIRECT_URI", "http://localhost:8080/callback");
-            env::set_var(
-                "GITHUB_AUTH_URL",
-                "https://github.com/login/oauth/authorize",
-            );
+            std::env::set_var(key, value);
         }
     }
 
-    fn clean_test_env() {
+    fn remove_env_var(key: &str) {
         unsafe {
-            env::remove_var("GITHUB_CLIENT_ID");
-            env::remove_var("GITHUB_REDIRECT_URI");
-            env::remove_var("GITHUB_AUTH_URL");
+            std::env::remove_var(key);
         }
+    }
+
+    fn set_test_env() {
+        set_env_var("GITHUB_CLIENT_ID", "test_client_id");
+        set_env_var("GITHUB_REDIRECT_URI", "http://localhost:8080/callback");
+        set_env_var(
+            "GITHUB_AUTH_URL",
+            "https://github.com/login/oauth/authorize",
+        );
+    }
+
+    fn clean_test_env() {
+        remove_env_var("GITHUB_CLIENT_ID");
+        remove_env_var("GITHUB_REDIRECT_URI");
+        remove_env_var("GITHUB_AUTH_URL");
     }
 
     #[tokio::test]
@@ -82,7 +92,7 @@ mod tests {
     async fn test_github_oauth_callback_empty_code() {
         let state = Arc::new(AppState::default());
         let callback = OAuthCallback {
-            code: "".to_string(),
+            code: String::new(),
             state: None,
         };
 
@@ -110,17 +120,15 @@ mod tests {
         let router = github_auth_routes();
 
         // Test that the router was created successfully
-        assert!(!format!("{:?}", router).is_empty());
+        assert!(!format!("{router:?}").is_empty());
     }
 
     #[tokio::test]
     #[serial]
     async fn test_github_oauth_init_response_format() {
-        unsafe {
-            env::set_var("GITHUB_CLIENT_ID", "client123");
-            env::set_var("GITHUB_REDIRECT_URI", "http://example.com/callback");
-            env::set_var("GITHUB_AUTH_URL", "https://auth.example.com");
-        }
+        set_env_var("GITHUB_CLIENT_ID", "client123");
+        set_env_var("GITHUB_REDIRECT_URI", "http://example.com/callback");
+        set_env_var("GITHUB_AUTH_URL", "https://auth.example.com");
 
         let response = github_oauth_init().await;
 
@@ -141,17 +149,15 @@ mod tests {
     #[serial]
     async fn test_env_var_edge_cases() {
         // Test with special characters in env vars
-        unsafe {
-            env::set_var("GITHUB_CLIENT_ID", "client-123_abc");
-            env::set_var(
-                "GITHUB_REDIRECT_URI",
-                "https://app.com/oauth/callback?param=value",
-            );
-            env::set_var(
-                "GITHUB_AUTH_URL",
-                "https://github.com/login/oauth/authorize",
-            );
-        }
+        set_env_var("GITHUB_CLIENT_ID", "client-123_abc");
+        set_env_var(
+            "GITHUB_REDIRECT_URI",
+            "https://app.com/oauth/callback?param=value",
+        );
+        set_env_var(
+            "GITHUB_AUTH_URL",
+            "https://github.com/login/oauth/authorize",
+        );
 
         let response = github_oauth_init().await;
 

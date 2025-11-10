@@ -3,7 +3,7 @@
 //! This module defines the core traits for LLM providers and models.
 
 use crate::llms::{
-    errors::LLMResult,
+    errors::{LLMError, LLMResult},
     types::{LLMConfig, LLMRequest, LLMResponse, ModelInfo, StreamingResponse},
 };
 use async_trait::async_trait;
@@ -174,7 +174,9 @@ pub trait LLMModel: Send + Sync {
     /// Returns an error if tokenization fails
     async fn count_tokens(&self, text: &str) -> LLMResult<u32> {
         let tokens = self.tokenize(text).await?;
-        Ok(tokens.len() as u32)
+        u32::try_from(tokens.len()).map_err(|_| LLMError::TokenizationError {
+            details: "token count exceeds u32::MAX".to_string(),
+        })
     }
 }
 
@@ -298,7 +300,9 @@ mod tests {
         }
 
         fn is_model_supported(&self, model_path: &str) -> bool {
-            model_path.ends_with(".mock")
+            std::path::Path::new(model_path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("mock"))
         }
     }
 
@@ -354,7 +358,7 @@ mod tests {
             Ok(text
                 .split_whitespace()
                 .enumerate()
-                .map(|(i, _)| i as u32)
+                .map(|(i, _)| u32::try_from(i).unwrap_or(u32::MAX))
                 .collect())
         }
     }

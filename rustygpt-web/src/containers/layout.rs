@@ -27,15 +27,14 @@ pub struct LayoutProps {
 #[function_component(Layout)]
 pub fn layout(props: &LayoutProps) -> Html {
     // Adds data-theme attribute to html tag for theme support
-    use_effect_with((), |_| {
-        if let Some(window) = window() {
-            if let Some(document) = window.document() {
-                if let Some(html_element) = document.document_element() {
-                    html_element
-                        .set_attribute("data-theme", "dark")
-                        .unwrap_or_default();
-                }
-            }
+    use_effect_with((), |()| {
+        if let Some(window) = window()
+            && let Some(document) = window.document()
+            && let Some(html_element) = document.document_element()
+        {
+            html_element
+                .set_attribute("data-theme", "dark")
+                .unwrap_or_default();
         }
         || {}
     });

@@ -64,7 +64,7 @@ pub async fn login(args: LoginArgs) -> Result<()> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        bail!("login failed with {}: {}", status, body);
+        bail!("login failed with {status}: {body}");
     }
 
     let login: LoginResponse = response.json().await?;
@@ -94,7 +94,7 @@ pub async fn me(args: MeArgs) -> Result<()> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        bail!("refresh failed with {}: {}", status, body);
+        bail!("refresh failed with {status}: {body}");
     }
 
     let profile: MeResponse = response.json().await?;
@@ -118,11 +118,11 @@ pub async fn logout(args: LogoutArgs) -> Result<()> {
             if response.status() != StatusCode::UNAUTHORIZED && !response.status().is_success() {
                 let status = response.status();
                 let body = response.text().await.unwrap_or_default();
-                eprintln!("warning: logout request failed with {}: {}", status, body);
+                eprintln!("warning: logout request failed with {status}: {body}");
             }
         }
         Err(err) => {
-            eprintln!("warning: {}", err);
+            eprintln!("warning: {err}");
         }
     }
 
@@ -138,13 +138,14 @@ pub async fn logout(args: LogoutArgs) -> Result<()> {
 }
 
 pub fn session_path() -> PathBuf {
-    BaseDirs::new()
-        .map(|dirs| dirs.config_dir().join("rustygpt").join("session.cookies"))
-        .unwrap_or_else(|| PathBuf::from("./session.cookies"))
+    BaseDirs::new().map_or_else(
+        || PathBuf::from("./session.cookies"),
+        |dirs| dirs.config_dir().join("rustygpt").join("session.cookies"),
+    )
 }
 
 fn prompt(message: &str) -> Result<String> {
-    print!("{}", message);
+    print!("{message}");
     io::stdout().flush().ok();
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
@@ -207,13 +208,11 @@ pub fn persist_cookie_jar(jar: &Arc<Jar>, origin: &Url, path: &Path) -> Result<(
 
 pub fn csrf_token_from_jar(jar: &Arc<Jar>, origin: &Url) -> Option<String> {
     jar.cookies(origin)
-        .and_then(|value| value.to_str().ok().map(|s| s.to_string()))
+        .and_then(|value| value.to_str().ok().map(ToString::to_string))
         .and_then(|cookie_header| {
             cookie_header.split(';').find_map(|entry| {
                 let trimmed = entry.trim();
-                trimmed
-                    .strip_prefix("CSRF-TOKEN=")
-                    .map(|token| token.to_string())
+                trimmed.strip_prefix("CSRF-TOKEN=").map(str::to_string)
             })
         })
 }
@@ -221,7 +220,7 @@ pub fn csrf_token_from_jar(jar: &Arc<Jar>, origin: &Url) -> Option<String> {
 fn print_session_summary(user: &AuthenticatedUser, session: &SessionSummary, jar_path: &Path) {
     println!("Logged in as {}", user.email);
     if let Some(display) = &user.display_name {
-        println!("display name: {}", display);
+        println!("display name: {display}");
     }
     println!(
         "roles: {}",

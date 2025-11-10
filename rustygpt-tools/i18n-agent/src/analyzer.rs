@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 
 /// Represents the result of a translation audit
@@ -33,9 +34,18 @@ pub struct TranslationData {
     pub content: Value,
 }
 
-/// Audits translation files against the keys used in the codebase
-pub fn audit_translations(trans_dir: &Path, keys_in_use: &HashSet<String>) -> Result<AuditResult> {
+/// Audits translation files against the keys used in the codebase.
+///
+/// # Errors
+///
+/// Returns an error when the translations directory cannot be read, a file cannot
+/// be read from disk, or a translation file contains invalid JSON.
+pub fn audit_translations<S: BuildHasher>(
+    trans_dir: &Path,
+    keys_in_use: &HashSet<String, S>,
+) -> Result<AuditResult> {
     let mut translations = HashMap::new();
+    let keys_in_use_owned: HashSet<String> = keys_in_use.iter().cloned().collect();
     let reference_language = "en".to_string(); // Assuming English is the reference language
 
     // Find all JSON files in the translations directory
@@ -44,7 +54,10 @@ pub fn audit_translations(trans_dir: &Path, keys_in_use: &HashSet<String>) -> Re
         let path = entry.path();
 
         if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
-            let lang_code = path.file_stem().unwrap().to_string_lossy().to_string();
+            let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let lang_code = stem.to_string();
 
             // Parse the JSON file
             let content = fs::read_to_string(&path)?;
@@ -54,7 +67,8 @@ pub fn audit_translations(trans_dir: &Path, keys_in_use: &HashSet<String>) -> Re
             let all_keys = extract_keys_from_json(&json_value, "");
 
             // Determine unused keys
-            let unused_keys: HashSet<_> = all_keys.difference(keys_in_use).cloned().collect();
+            let unused_keys: HashSet<_> =
+                all_keys.difference(&keys_in_use_owned).cloned().collect();
 
             translations.insert(
                 lang_code,
@@ -69,13 +83,14 @@ pub fn audit_translations(trans_dir: &Path, keys_in_use: &HashSet<String>) -> Re
     }
 
     Ok(AuditResult {
-        keys_in_use: keys_in_use.clone(),
+        keys_in_use: keys_in_use_owned,
         translations,
         reference_language,
     })
 }
 
 /// Extracts all keys from a JSON object with their full path using an iterative approach
+#[must_use]
 pub fn extract_keys_from_json(json: &Value, initial_prefix: &str) -> HashSet<String> {
     let mut keys = HashSet::new();
     let mut stack = Vec::new();
@@ -86,7 +101,7 @@ pub fn extract_keys_from_json(json: &Value, initial_prefix: &str) -> HashSet<Str
             let prefix = if initial_prefix.is_empty() {
                 key.clone()
             } else {
-                format!("{}.{}", initial_prefix, key)
+                format!("{initial_prefix}.{key}")
             };
             stack.push((prefix, value));
         }
@@ -102,7 +117,7 @@ pub fn extract_keys_from_json(json: &Value, initial_prefix: &str) -> HashSet<Str
                 } else {
                     // Non-empty object, add its children to the stack
                     for (key, child_value) in obj {
-                        let new_prefix = format!("{}.{}", prefix, key);
+                        let new_prefix = format!("{prefix}.{key}");
                         stack.push((new_prefix, child_value));
                     }
                 }
@@ -118,6 +133,7 @@ pub fn extract_keys_from_json(json: &Value, initial_prefix: &str) -> HashSet<Str
 }
 
 /// Gets missing translations for a language compared to the reference language
+#[must_use]
 pub fn get_missing_translations(audit_result: &AuditResult, lang_code: &str) -> HashSet<String> {
     let reference_lang = &audit_result.reference_language;
 
@@ -146,6 +162,8 @@ pub fn get_missing_translations(audit_result: &AuditResult, lang_code: &str) -> 
 }
 
 /// Calculates translation coverage percentage
+#[must_use]
+#[allow(clippy::cast_precision_loss)] // Translation key counts remain far below f64 precision limits.
 pub fn calculate_coverage(audit_result: &AuditResult, lang_code: &str) -> f64 {
     let reference_lang = &audit_result.reference_language;
 
@@ -172,8 +190,9 @@ pub fn calculate_coverage(audit_result: &AuditResult, lang_code: &str) -> f64 {
             return 100.0;
         }
 
-        let translated_keys = used_lang_keys.len();
-        (translated_keys as f64 / total_keys as f64) * 100.0
+        let translated_keys = used_lang_keys.len() as f64;
+        let total_keys = total_keys as f64;
+        (translated_keys / total_keys) * 100.0
     } else {
         0.0
     }
@@ -230,6 +249,7 @@ pub fn remove_key_from_json(json: &mut Value, key_path: &str) -> bool {
 }
 
 /// Gets a nested value from a JSON object by key path (already iterative)
+#[must_use]
 pub fn get_value_by_path<'a>(json: &'a Value, key_path: &str) -> Option<&'a Value> {
     let parts: Vec<&str> = key_path.split('.').collect();
     let mut current = json;
@@ -260,7 +280,7 @@ pub fn set_value_by_path(json: &mut Value, key_path: &str, new_value: Value) -> 
         if i == parts.len() - 1 {
             // Last part, set the value
             if let Value::Object(map) = current {
-                map.insert(part.to_string(), new_value);
+                map.insert((*part).to_string(), new_value);
                 return true;
             }
             return false;
@@ -270,7 +290,7 @@ pub fn set_value_by_path(json: &mut Value, key_path: &str, new_value: Value) -> 
         if let Value::Object(map) = current {
             if !map.contains_key(*part) {
                 // Create intermediate objects if they don't exist
-                map.insert(part.to_string(), Value::Object(Map::new()));
+                map.insert((*part).to_string(), Value::Object(Map::new()));
             }
 
             if let Some(next) = map.get_mut(*part) {
@@ -286,11 +306,11 @@ pub fn set_value_by_path(json: &mut Value, key_path: &str, new_value: Value) -> 
 }
 
 #[cfg(test)]
-#[allow(clippy::similar_names)]
+#[allow(clippy::similar_names, clippy::unnecessary_wraps)] // Tests return Result for ergonomic use of the ? operator.
 mod tests {
     use super::*;
-    use assert_fs::prelude::*;
     use assert_fs::TempDir;
+    use assert_fs::prelude::*;
     use serde_json::json;
 
     #[test]
@@ -445,9 +465,11 @@ mod tests {
         let english_translation = &audit_result.translations["en"];
         assert_eq!(english_translation.all_keys.len(), 4);
         assert_eq!(english_translation.unused_keys.len(), 1);
-        assert!(english_translation
-            .unused_keys
-            .contains("common.button.reset"));
+        assert!(
+            english_translation
+                .unused_keys
+                .contains("common.button.reset")
+        );
 
         // Check Spanish translation data
         let spanish_translation = &audit_result.translations["es"];
@@ -582,10 +604,22 @@ mod tests {
         let german_coverage = calculate_coverage(&audit_result, "de"); // Non-existent language
 
         // Verify results
-        assert_eq!(english_coverage, 100.0); // Reference language has 100% coverage
-        assert_eq!(spanish_coverage, 50.0); // 2 out of 4 keys
-        assert_eq!(french_coverage, 75.0); // 3 out of 4 keys
-        assert_eq!(german_coverage, 0.0); // Non-existent language has 0% coverage
+        assert!(
+            (english_coverage - 100.0).abs() < f64::EPSILON,
+            "expected 100%, got {english_coverage}"
+        );
+        assert!(
+            (spanish_coverage - 50.0).abs() < f64::EPSILON,
+            "expected 50%, got {spanish_coverage}"
+        );
+        assert!(
+            (french_coverage - 75.0).abs() < f64::EPSILON,
+            "expected 75%, got {french_coverage}"
+        );
+        assert!(
+            german_coverage.abs() < f64::EPSILON,
+            "expected 0%, got {german_coverage}"
+        );
 
         Ok(())
     }

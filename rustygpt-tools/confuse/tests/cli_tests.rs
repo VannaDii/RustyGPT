@@ -1,9 +1,9 @@
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn test_cli_no_args() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("required"));
@@ -11,7 +11,7 @@ fn test_cli_no_args() {
 
 #[test]
 fn test_cli_help() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg("--help")
         .assert()
         .success()
@@ -27,7 +27,7 @@ fn test_cli_help() {
 fn test_cli_version() {
     // Skip this test as version flag is not implemented
     // Basic sanity check that the binary runs
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
 
     // Instead of testing version, just make sure we can see the help output
     cmd.arg("--help").assert().success();
@@ -35,7 +35,7 @@ fn test_cli_version() {
 
 #[test]
 fn test_cli_invalid_color() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     // Even invalid colors should be accepted, they'll default to white
     cmd.arg("echo hello")
         .args(["-p", "invalid_color"])
@@ -46,7 +46,7 @@ fn test_cli_invalid_color() {
 
 #[test]
 fn test_cli_missing_name() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     // Even if names are missing for some commands, it should still work
     cmd.args(["echo hello", "echo world"])
         .args(["--names", "OnlyOne"])
@@ -58,7 +58,7 @@ fn test_cli_missing_name() {
 
 #[test]
 fn test_cli_invalid_command() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
 
     // The command is accepted by the CLI parser but fails at runtime with
     // a panic when the command is not found.
@@ -71,7 +71,7 @@ fn test_cli_invalid_command() {
 
 #[test]
 fn test_cli_empty_names() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg("echo hello")
         .args(["--names", ""])
         .assert()
@@ -81,7 +81,7 @@ fn test_cli_empty_names() {
 
 #[test]
 fn test_cli_empty_colors() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.arg("echo hello")
         .args(["-p", ""])
         .assert()
@@ -91,7 +91,7 @@ fn test_cli_empty_colors() {
 
 #[test]
 fn test_cli_comma_separated_values() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.args(["echo foo", "echo bar"])
         .args(["--names", "FIRST,SECOND"])
         .args(["-p", "red,blue"])
@@ -105,7 +105,7 @@ fn test_cli_comma_separated_values() {
 
 #[test]
 fn test_cli_many_commands() {
-    let mut cmd = Command::cargo_bin("confuse").unwrap();
+    let mut cmd = cargo_bin_cmd!("confuse");
     cmd.args([
         "echo one",
         "echo two",

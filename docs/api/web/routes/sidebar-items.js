@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AdminRoute","AppRoute","MainRoute"],"fn":["log","switch_admin","switch_with_logout"],"struct":["AdminRouteIter","MainRouteIter","MainRouteView","MainRouteViewProps"]};

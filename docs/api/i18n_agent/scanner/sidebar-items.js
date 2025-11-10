@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["find_file","handle_dynamic_route_keys","scan_codebase","scan_file"]};

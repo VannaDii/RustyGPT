@@ -12,6 +12,7 @@ pub struct ThreadContextBuilder {
 
 impl ThreadContextBuilder {
     /// Creates a new builder with messages ordered by depth-first traversal.
+    #[must_use]
     pub fn new(mut messages: Vec<MessageView>) -> Self {
         messages.sort_by(|a, b| match a.depth.cmp(&b.depth) {
             std::cmp::Ordering::Equal => a.path.cmp(&b.path),
@@ -21,16 +22,17 @@ impl ThreadContextBuilder {
     }
 
     /// Returns the root message (thread head) if present.
+    #[must_use]
     pub fn root(&self) -> Option<&MessageView> {
         self.messages.iter().find(|msg| msg.id == msg.root_id)
     }
 
     /// Returns the ancestor chain for the provided parent message identifier.
     /// The chain is ordered from root to the parent inclusive.
+    #[must_use]
     pub fn ancestor_chain(&self, parent_id: Uuid) -> Vec<MessageView> {
-        let parent = match self.messages.iter().find(|msg| msg.id == parent_id) {
-            Some(msg) => msg,
-            None => return Vec::new(),
+        let Some(parent) = self.messages.iter().find(|msg| msg.id == parent_id) else {
+            return Vec::new();
         };
 
         let prefixes = path_prefix_set(&parent.path);
@@ -43,6 +45,7 @@ impl ThreadContextBuilder {
     }
 
     /// Returns the full thread in depth-first order, truncated optionally by depth.
+    #[must_use]
     pub fn full_thread(&self, max_depth: Option<i32>) -> Vec<MessageView> {
         max_depth.map_or_else(
             || self.messages.clone(),
@@ -57,6 +60,7 @@ impl ThreadContextBuilder {
     }
 
     /// Returns the immediate children of a given parent ordered by path.
+    #[must_use]
     pub fn children(&self, parent_id: Uuid) -> Vec<MessageView> {
         let Some(parent) = self.messages.iter().find(|msg| msg.id == parent_id) else {
             return Vec::new();

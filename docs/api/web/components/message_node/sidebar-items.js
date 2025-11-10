@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["format_timestamp","indent_style","role_classes","role_label"],"struct":["MessageNode","MessageNodeProps"]};

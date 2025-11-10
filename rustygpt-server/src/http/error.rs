@@ -85,7 +85,7 @@ impl From<sqlx::Error> for ApiError {
         if let sqlx::Error::Database(db_err) = &err {
             let code = db_err
                 .code()
-                .unwrap_or_else(|| std::borrow::Cow::Borrowed("unknown"));
+                .unwrap_or(std::borrow::Cow::Borrowed("unknown"));
             let message = format!("database error {code}");
             return Self::internal_server_error(message)
                 .with_details(json!({ "sqlstate": code, "message": db_err.message() }));
@@ -141,7 +141,7 @@ mod tests {
             error
                 .details
                 .as_ref()
-                .is_some_and(|details| details["reason"] == Value::from("policy"))
+                .is_some_and(|details| details["reason"] == "policy")
         );
     }
 
@@ -179,10 +179,7 @@ mod tests {
         ));
         assert_eq!(forbidden.status, StatusCode::FORBIDDEN);
 
-        let other = ApiError::from(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "something else",
-        ));
+        let other = ApiError::from(std::io::Error::other("something else"));
         assert_eq!(other.status, StatusCode::INTERNAL_SERVER_ERROR);
     }
 

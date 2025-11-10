@@ -1,11 +1,11 @@
 //! Integration tests for the CLI chat command.
 
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::PredicateBooleanExt;
 
 #[tokio::test]
 async fn test_chat_command_help() {
-    let mut cmd = Command::cargo_bin("cli").unwrap();
+    let mut cmd = cargo_bin_cmd!("cli");
     cmd.arg("chat").arg("--help");
 
     cmd.assert()
@@ -21,7 +21,7 @@ async fn test_chat_command_help() {
 
 #[tokio::test]
 async fn test_chat_command_requires_conversation() {
-    let mut cmd = Command::cargo_bin("cli").unwrap();
+    let mut cmd = cargo_bin_cmd!("cli");
     cmd.arg("chat").timeout(std::time::Duration::from_secs(5));
 
     cmd.assert()
@@ -34,7 +34,7 @@ async fn test_chat_command_requires_conversation() {
 
 #[tokio::test]
 async fn test_chat_command_invalid_conversation_uuid() {
-    let mut cmd = Command::cargo_bin("cli").unwrap();
+    let mut cmd = cargo_bin_cmd!("cli");
     cmd.arg("chat")
         .arg("--conversation")
         .arg("not-a-uuid")
@@ -48,7 +48,7 @@ async fn test_chat_command_invalid_conversation_uuid() {
 
 #[tokio::test]
 async fn test_chat_command_connection_failure() {
-    let mut cmd = Command::cargo_bin("cli").unwrap();
+    let mut cmd = cargo_bin_cmd!("cli");
     cmd.arg("chat")
         .arg("--conversation")
         .arg("00000000-0000-0000-0000-000000000001")

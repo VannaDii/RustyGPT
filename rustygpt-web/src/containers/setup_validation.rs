@@ -315,20 +315,12 @@ mod tests {
         // Verify all error variants can be matched and handled
         for error in errors {
             match error {
-                ValidationError::Required => {
-                    // Test that required error is handled
-                }
-                ValidationError::UsernameTooShort => {
-                    // Test that username too short error is handled
-                }
-                ValidationError::InvalidEmail => {
-                    // Test that invalid email error is handled
-                }
-                ValidationError::PasswordTooShort => {
-                    // Test that password too short error is handled
-                }
-                ValidationError::PasswordsDoNotMatch => {
-                    // Test that passwords don't match error is handled
+                ValidationError::Required
+                | ValidationError::UsernameTooShort
+                | ValidationError::InvalidEmail
+                | ValidationError::PasswordTooShort
+                | ValidationError::PasswordsDoNotMatch => {
+                    // Test that validation errors can be matched
                 }
             }
         }

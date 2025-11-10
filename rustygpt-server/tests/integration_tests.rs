@@ -4,6 +4,18 @@ use serial_test::serial;
 use std::env;
 use std::process::Command;
 
+fn set_env_var(key: &str, value: &str) {
+    unsafe {
+        env::set_var(key, value);
+    }
+}
+
+fn remove_env_var(key: &str) {
+    unsafe {
+        env::remove_var(key);
+    }
+}
+
 #[test]
 fn test_server_help_command() {
     // Test that the server binary shows help when run with --help
@@ -36,145 +48,127 @@ fn test_server_invalid_command() {
 #[serial]
 fn test_env_var_parsing() {
     // Test environment variable handling without actually running the server
-    unsafe {
-        env::set_var("RUST_LOG", "debug");
-        env::set_var("SERVER_PORT", "8080");
+    set_env_var("RUST_LOG", "debug");
+    set_env_var("SERVER_PORT", "8080");
 
-        // Verify environment variables are set correctly
-        assert_eq!(env::var("RUST_LOG").unwrap(), "debug");
-        assert_eq!(env::var("SERVER_PORT").unwrap(), "8080");
+    // Verify environment variables are set correctly
+    assert_eq!(env::var("RUST_LOG").unwrap(), "debug");
+    assert_eq!(env::var("SERVER_PORT").unwrap(), "8080");
 
-        // Clean up
-        env::remove_var("RUST_LOG");
-        env::remove_var("SERVER_PORT");
-    }
+    // Clean up
+    remove_env_var("RUST_LOG");
+    remove_env_var("SERVER_PORT");
 }
 
 #[test]
 fn test_default_port_behavior() {
     // Test that default port is used when no environment variable is set
-    unsafe {
-        env::remove_var("SERVER_PORT");
+    remove_env_var("SERVER_PORT");
 
-        // Verify no port is set
-        assert!(env::var("SERVER_PORT").is_err());
-    }
+    // Verify no port is set
+    assert!(env::var("SERVER_PORT").is_err());
 }
 
 #[test]
 #[serial]
 fn test_config_file_env_var() {
     // Test configuration file environment variable handling
-    unsafe {
-        env::set_var("CONFIG_FILE", "test_config.yaml");
+    set_env_var("CONFIG_FILE", "test_config.yaml");
 
-        assert_eq!(env::var("CONFIG_FILE").unwrap(), "test_config.yaml");
+    assert_eq!(env::var("CONFIG_FILE").unwrap(), "test_config.yaml");
 
-        env::remove_var("CONFIG_FILE");
-    }
+    remove_env_var("CONFIG_FILE");
 }
 
 #[test]
 #[serial]
 fn test_database_url_env_var() {
     // Test database URL environment variable handling
-    unsafe {
-        env::set_var("DATABASE_URL", "postgresql://localhost/test");
+    set_env_var("DATABASE_URL", "postgresql://localhost/test");
 
-        assert_eq!(
-            env::var("DATABASE_URL").unwrap(),
-            "postgresql://localhost/test"
-        );
+    assert_eq!(
+        env::var("DATABASE_URL").unwrap(),
+        "postgresql://localhost/test"
+    );
 
-        env::remove_var("DATABASE_URL");
-    }
+    remove_env_var("DATABASE_URL");
 }
 
 #[test]
 #[serial]
 fn test_oauth_env_vars() {
     // Test OAuth-related environment variables
-    unsafe {
-        env::set_var("GITHUB_CLIENT_ID", "test_github_id");
-        env::set_var("GITHUB_CLIENT_SECRET", "test_github_secret");
-        env::set_var("APPLE_CLIENT_ID", "test_apple_id");
-        env::set_var("APPLE_CLIENT_SECRET", "test_apple_secret");
+    set_env_var("GITHUB_CLIENT_ID", "test_github_id");
+    set_env_var("GITHUB_CLIENT_SECRET", "test_github_secret");
+    set_env_var("APPLE_CLIENT_ID", "test_apple_id");
+    set_env_var("APPLE_CLIENT_SECRET", "test_apple_secret");
 
-        assert_eq!(env::var("GITHUB_CLIENT_ID").unwrap(), "test_github_id");
-        assert_eq!(
-            env::var("GITHUB_CLIENT_SECRET").unwrap(),
-            "test_github_secret"
-        );
-        assert_eq!(env::var("APPLE_CLIENT_ID").unwrap(), "test_apple_id");
-        assert_eq!(
-            env::var("APPLE_CLIENT_SECRET").unwrap(),
-            "test_apple_secret"
-        );
+    assert_eq!(env::var("GITHUB_CLIENT_ID").unwrap(), "test_github_id");
+    assert_eq!(
+        env::var("GITHUB_CLIENT_SECRET").unwrap(),
+        "test_github_secret"
+    );
+    assert_eq!(env::var("APPLE_CLIENT_ID").unwrap(), "test_apple_id");
+    assert_eq!(
+        env::var("APPLE_CLIENT_SECRET").unwrap(),
+        "test_apple_secret"
+    );
 
-        // Clean up
-        env::remove_var("GITHUB_CLIENT_ID");
-        env::remove_var("GITHUB_CLIENT_SECRET");
-        env::remove_var("APPLE_CLIENT_ID");
-        env::remove_var("APPLE_CLIENT_SECRET");
-    }
+    // Clean up
+    remove_env_var("GITHUB_CLIENT_ID");
+    remove_env_var("GITHUB_CLIENT_SECRET");
+    remove_env_var("APPLE_CLIENT_ID");
+    remove_env_var("APPLE_CLIENT_SECRET");
 }
 
 #[test]
 #[serial]
 fn test_jwt_secret_env_var() {
     // Test JWT secret environment variable
-    unsafe {
-        env::set_var("JWT_SECRET", "test_jwt_secret_key");
+    set_env_var("JWT_SECRET", "test_jwt_secret_key");
 
-        assert_eq!(env::var("JWT_SECRET").unwrap(), "test_jwt_secret_key");
+    assert_eq!(env::var("JWT_SECRET").unwrap(), "test_jwt_secret_key");
 
-        env::remove_var("JWT_SECRET");
-    }
+    remove_env_var("JWT_SECRET");
 }
 
 #[test]
 #[serial]
 fn test_cors_origin_env_var() {
     // Test CORS origin environment variable
-    unsafe {
-        env::set_var("CORS_ORIGIN", "http://localhost:3000");
+    set_env_var("CORS_ORIGIN", "http://localhost:3000");
 
-        assert_eq!(env::var("CORS_ORIGIN").unwrap(), "http://localhost:3000");
+    assert_eq!(env::var("CORS_ORIGIN").unwrap(), "http://localhost:3000");
 
-        env::remove_var("CORS_ORIGIN");
-    }
+    remove_env_var("CORS_ORIGIN");
 }
 
 #[test]
 #[serial]
 fn test_multiple_env_vars_simultaneously() {
     // Test setting multiple environment variables at once
-    unsafe {
-        env::set_var("SERVER_PORT", "9000");
-        env::set_var("RUST_LOG", "info");
-        env::set_var("DATABASE_URL", "postgresql://localhost/rusty_gpt");
+    set_env_var("SERVER_PORT", "9000");
+    set_env_var("RUST_LOG", "info");
+    set_env_var("DATABASE_URL", "postgresql://localhost/rusty_gpt");
 
-        assert_eq!(env::var("SERVER_PORT").unwrap(), "9000");
-        assert_eq!(env::var("RUST_LOG").unwrap(), "info");
-        assert_eq!(
-            env::var("DATABASE_URL").unwrap(),
-            "postgresql://localhost/rusty_gpt"
-        );
+    assert_eq!(env::var("SERVER_PORT").unwrap(), "9000");
+    assert_eq!(env::var("RUST_LOG").unwrap(), "info");
+    assert_eq!(
+        env::var("DATABASE_URL").unwrap(),
+        "postgresql://localhost/rusty_gpt"
+    );
 
-        // Clean up
-        env::remove_var("SERVER_PORT");
-        env::remove_var("RUST_LOG");
-        env::remove_var("DATABASE_URL");
-    }
+    // Clean up
+    remove_env_var("SERVER_PORT");
+    remove_env_var("RUST_LOG");
+    remove_env_var("DATABASE_URL");
 }
 
 #[test]
 #[serial]
 fn test_env_var_error_handling() {
     // Test behavior when environment variables are not set
-    unsafe {
-        env::remove_var("NONEXISTENT_VAR");
+    remove_env_var("NONEXISTENT_VAR");
 
-        assert!(env::var("NONEXISTENT_VAR").is_err());
-    }
+    assert!(env::var("NONEXISTENT_VAR").is_err());
 }

@@ -14,8 +14,8 @@ pub struct LoginPageProps {
 
 #[function_component(LoginPage)]
 pub fn login_page(props: &LoginPageProps) -> Html {
-    let email = use_state(|| String::new());
-    let password = use_state(|| String::new());
+    let email = use_state(String::new);
+    let password = use_state(String::new);
     let error = use_state(|| None::<String>);
     let loading = use_state(|| false);
     let navigator = use_navigator();
@@ -53,13 +53,13 @@ pub fn login_page(props: &LoginPageProps) -> Html {
                         }
                     }
                     Err(err) => {
-                        let message = err
-                            .status()
-                            .map(|status| match status {
+                        let message = err.status().map_or_else(
+                            || "Unable to connect to server".to_string(),
+                            |status| match status {
                                 StatusCode::UNAUTHORIZED => "Invalid credentials".to_string(),
-                                _ => format!("Login failed: {}", status),
-                            })
-                            .unwrap_or_else(|| "Unable to connect to server".to_string());
+                                _ => format!("Login failed: {status}"),
+                            },
+                        );
                         error_ref.set(Some(message));
                     }
                 }

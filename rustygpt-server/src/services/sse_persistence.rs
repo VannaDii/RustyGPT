@@ -103,10 +103,10 @@ impl SsePersistence for SsePersistenceStore {
             .min(i32::MAX as u64)
             .try_into()
             .unwrap_or(i32::MAX);
-        let batch = prune_batch.max(1).min(i32::MAX as usize) as i32;
+        let batch = i32::try_from(prune_batch.max(1).min(i32::MAX as usize)).unwrap_or(i32::MAX);
         let hard_limit = hard_limit
             .filter(|value| *value > 0)
-            .map(|value| value.min(i32::MAX as usize) as i32);
+            .map(|value| i32::try_from(value.min(i32::MAX as usize)).unwrap_or(i32::MAX));
 
         sqlx::query("CALL rustygpt.sp_prune_sse_events($1, $2, $3, $4)")
             .bind(conversation_id)
@@ -133,7 +133,7 @@ impl SsePersistenceStore {
         )
         .bind(conversation_id)
         .bind(since)
-        .bind(limit.min(i32::MAX as usize) as i32)
+        .bind(i32::try_from(limit.min(i32::MAX as usize)).unwrap_or(i32::MAX))
         .fetch_all(&self.pool)
         .await?;
 

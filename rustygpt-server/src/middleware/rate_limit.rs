@@ -36,9 +36,9 @@ pub struct RateLimitState {
 impl RateLimitState {
     pub fn new(config: &Config, pool: Option<PgPool>) -> Self {
         let default_refill = f64::from(config.rate_limits.default_rps.max(0.1_f32));
-        let default = Strategy::new(config.rate_limits.burst as f64, default_refill);
+        let default = Strategy::new(f64::from(config.rate_limits.burst), default_refill);
 
-        let auth_per_min = config.rate_limits.auth_login_per_ip_per_min.max(1) as f64;
+        let auth_per_min = f64::from(config.rate_limits.auth_login_per_ip_per_min.max(1));
         let auth = Strategy::new(auth_per_min, auth_per_min / 60.0);
 
         Self {
@@ -58,8 +58,12 @@ impl RateLimitState {
         let profile_map = load_profile_strategies(&pool).await?;
         let routes = load_route_assignments(&pool, &profile_map).await?;
 
-        gauge!("rustygpt_limits_profiles").set(profile_map.len() as f64);
-        gauge!("rustygpt_limits_assignments").set(routes.len() as f64);
+        #[allow(clippy::cast_precision_loss)]
+        let profile_total = profile_map.len() as f64;
+        gauge!("rustygpt_limits_profiles").set(profile_total);
+        #[allow(clippy::cast_precision_loss)]
+        let assignment_total = routes.len() as f64;
+        gauge!("rustygpt_limits_assignments").set(assignment_total);
 
         self.replace_routes(routes).await;
 
@@ -98,7 +102,7 @@ impl RateLimitState {
         }
     }
 
-    pub fn spawn_auto_refresh(self: Arc<Self>, interval: Duration) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_auto_refresh(self: Arc<Self>, interval: Duration) {
         tokio::spawn(async move {
             let mut ticker = time::interval(interval);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -109,7 +113,7 @@ impl RateLimitState {
                     warn!(error = %err, "failed to refresh rate limit configuration from database");
                 }
             }
-        })
+        });
     }
 
     async fn replace_routes(&self, routes: Vec<RouteStrategy>) {
@@ -232,22 +236,22 @@ impl Bucket {
 
         if self.tokens >= 1.0 {
             self.tokens -= 1.0;
-            let remaining = self.tokens.floor() as u32;
+            let remaining = saturating_f64_to_u32(self.tokens.floor());
             let deficit = (self.strategy.capacity - self.tokens).max(0.0);
             let reset_after = if self.tokens >= self.strategy.capacity {
                 0
             } else {
-                (deficit / self.strategy.refill_per_sec).ceil() as u64
+                saturating_f64_to_u64((deficit / self.strategy.refill_per_sec).ceil())
             };
 
             RateLimitOutcome::Allowed {
-                limit: self.strategy.capacity as u32,
+                limit: saturating_f64_to_u32(self.strategy.capacity),
                 remaining,
                 reset_after,
             }
         } else {
             let needed = 1.0 - self.tokens;
-            let retry_after = (needed / self.strategy.refill_per_sec).ceil() as u64;
+            let retry_after = saturating_f64_to_u64((needed / self.strategy.refill_per_sec).ceil());
             RateLimitOutcome::Denied { retry_after }
         }
     }
@@ -278,6 +282,35 @@ enum RateLimitOutcome {
         retry_after: u64,
     },
 }
+
+fn saturating_f64_to_u32(value: f64) -> u32 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    if value >= f64::from(u32::MAX) {
+        return u32::MAX;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    {
+        value as u32
+    }
+}
+
+fn saturating_f64_to_u64(value: f64) -> u64 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    if value >= U64_MAX_AS_F64 {
+        return u64::MAX;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    {
+        value as u64
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+const U64_MAX_AS_F64: f64 = u64::MAX as f64;
 
 pub async fn enforce_rate_limits(
     State(state): State<RateLimitState>,
@@ -312,13 +345,15 @@ pub async fn enforce_rate_limits(
                 "key" => key.clone(),
                 "profile" => applied.profile.clone()
             )
-            .set(remaining as f64);
+            .set(f64::from(remaining));
+            #[allow(clippy::cast_precision_loss)]
+            let reset_seconds = reset_after as f64;
             gauge!(
                 "http_rate_limit_reset_seconds",
                 "key" => key.clone(),
                 "profile" => applied.profile.clone()
             )
-            .set(reset_after as f64);
+            .set(reset_seconds);
             let mut response = next.run(request).await;
             attach_rate_limit_headers(
                 &mut response,
@@ -337,12 +372,14 @@ pub async fn enforce_rate_limits(
                 "result" => "denied"
             )
             .increment(1);
+            #[allow(clippy::cast_precision_loss)]
+            let retry_seconds = retry_after as f64;
             gauge!(
                 "http_rate_limit_reset_seconds",
                 "key" => key.clone(),
                 "profile" => applied.profile.clone()
             )
-            .set(retry_after as f64);
+            .set(retry_seconds);
             Err(ApiError::too_many_requests("rate limit exceeded")
                 .with_details(serde_json::json!({ "retry_after_seconds": retry_after })))
         }
@@ -373,13 +410,13 @@ fn attach_rate_limit_headers(
     const PROFILE: &str = "X-RateLimit-Profile";
 
     let headers = response.headers_mut();
-    headers.insert(LIMIT, header_value(limit));
-    headers.insert(REMAINING, header_value(remaining));
-    headers.insert(RESET, header_value(reset_after));
-    headers.insert(PROFILE, header_value(profile));
+    headers.insert(LIMIT, header_value(&limit));
+    headers.insert(REMAINING, header_value(&remaining));
+    headers.insert(RESET, header_value(&reset_after));
+    headers.insert(PROFILE, header_value(&profile));
 }
 
-fn header_value<T: ToString>(value: T) -> http::HeaderValue {
+fn header_value<T: ToString>(value: &T) -> http::HeaderValue {
     http::HeaderValue::from_str(&value.to_string())
         .unwrap_or_else(|_| http::HeaderValue::from_static("0"))
 }
@@ -425,6 +462,7 @@ fn strategy_from_profile(algorithm: &str, params: &Value) -> Option<Strategy> {
                 .get("requests_per_second")
                 .and_then(Value::as_f64)
                 .unwrap_or(1.0);
+            #[allow(clippy::cast_precision_loss)]
             let burst = params
                 .get("burst")
                 .and_then(Value::as_i64)

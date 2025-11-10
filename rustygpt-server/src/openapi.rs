@@ -1,3 +1,5 @@
+#![allow(clippy::needless_for_each)] // Derive macro emits a for_each internally
+
 use shared::models::{ErrorResponse, SetupRequest, SetupResponse};
 use utoipa::OpenApi;
 

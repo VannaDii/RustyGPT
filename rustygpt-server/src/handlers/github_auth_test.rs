@@ -5,6 +5,22 @@ use http::StatusCode;
 use serde_json::json;
 use std::sync::Arc;
 
+fn set_env_vars(vars: &[(&str, &str)]) {
+    for (key, value) in vars {
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+}
+
+fn remove_env_vars(keys: &[&str]) {
+    for key in keys {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_github_auth_routes_exist() {
     tracing::info!("Testing GitHub auth routes creation");
@@ -34,14 +50,14 @@ async fn test_github_oauth_init() {
 #[serial_test::serial]
 async fn test_github_oauth_init_with_env_vars() {
     // Test GitHub OAuth initialization with environment variables set
-    unsafe {
-        std::env::set_var("GITHUB_CLIENT_ID", "test_client_id");
-        std::env::set_var("GITHUB_REDIRECT_URI", "http://localhost:8080/callback");
-        std::env::set_var(
+    set_env_vars(&[
+        ("GITHUB_CLIENT_ID", "test_client_id"),
+        ("GITHUB_REDIRECT_URI", "http://localhost:8080/callback"),
+        (
             "GITHUB_AUTH_URL",
             "https://github.com/login/oauth/authorize",
-        );
-    }
+        ),
+    ]);
 
     let app_state = Arc::new(AppState::default());
     let app = github_auth_routes().with_state(app_state);
@@ -61,11 +77,7 @@ async fn test_github_oauth_init_with_env_vars() {
     assert!(!auth_url.is_empty());
 
     // Clean up environment variables
-    unsafe {
-        std::env::remove_var("GITHUB_CLIENT_ID");
-        std::env::remove_var("GITHUB_REDIRECT_URI");
-        std::env::remove_var("GITHUB_AUTH_URL");
-    }
+    remove_env_vars(&["GITHUB_CLIENT_ID", "GITHUB_REDIRECT_URI", "GITHUB_AUTH_URL"]);
 }
 
 #[tokio::test]
@@ -219,17 +231,17 @@ async fn test_github_oauth_manual_with_malformed_json() {
 #[serial_test::serial]
 fn test_github_env_var_behavior_with_special_characters() {
     // Test handling of environment variables with special characters
-    unsafe {
-        std::env::set_var("GITHUB_CLIENT_ID", "client@123");
-        std::env::set_var(
+    set_env_vars(&[
+        ("GITHUB_CLIENT_ID", "client@123"),
+        (
             "GITHUB_REDIRECT_URI",
             "http://localhost:8080/callback?state=test",
-        );
-        std::env::set_var(
+        ),
+        (
             "GITHUB_AUTH_URL",
             "https://github.com/login/oauth/authorize",
-        );
-    }
+        ),
+    ]);
 
     let client_id = std::env::var("GITHUB_CLIENT_ID").unwrap_or_default();
     let redirect_uri = std::env::var("GITHUB_REDIRECT_URI").unwrap_or_default();
@@ -240,11 +252,7 @@ fn test_github_env_var_behavior_with_special_characters() {
     assert!(!auth_base_url.is_empty());
 
     // Clean up
-    unsafe {
-        std::env::remove_var("GITHUB_CLIENT_ID");
-        std::env::remove_var("GITHUB_REDIRECT_URI");
-        std::env::remove_var("GITHUB_AUTH_URL");
-    }
+    remove_env_vars(&["GITHUB_CLIENT_ID", "GITHUB_REDIRECT_URI", "GITHUB_AUTH_URL"]);
 }
 
 #[tokio::test]
@@ -282,10 +290,8 @@ fn test_github_auth_url_construction() {
     let redirect_uri = "http://localhost/callback";
     let auth_base_url = "https://github.com/login/oauth/authorize";
 
-    let auth_url = format!(
-        "{}?client_id={}&redirect_uri={}&scope=user",
-        auth_base_url, client_id, redirect_uri
-    );
+    let auth_url =
+        format!("{auth_base_url}?client_id={client_id}&redirect_uri={redirect_uri}&scope=user");
 
     assert!(auth_url.contains("test_client"));
     assert!(auth_url.contains("http://localhost/callback"));
@@ -296,11 +302,7 @@ fn test_github_auth_url_construction() {
 #[serial_test::serial]
 fn test_github_environment_variable_defaults() {
     // Test behavior when environment variables are not set
-    unsafe {
-        std::env::remove_var("GITHUB_CLIENT_ID");
-        std::env::remove_var("GITHUB_REDIRECT_URI");
-        std::env::remove_var("GITHUB_AUTH_URL");
-    }
+    remove_env_vars(&["GITHUB_CLIENT_ID", "GITHUB_REDIRECT_URI", "GITHUB_AUTH_URL"]);
 
     let client_id = std::env::var("GITHUB_CLIENT_ID").unwrap_or_default();
     let redirect_uri = std::env::var("GITHUB_REDIRECT_URI").unwrap_or_default();
@@ -314,12 +316,12 @@ fn test_github_environment_variable_defaults() {
 #[tokio::test]
 async fn test_github_oauth_callback_with_state_parameter() {
     // Test GitHub OAuth callback with state parameter
-    unsafe {
-        std::env::set_var("GITHUB_CLIENT_ID", "test_client_id");
-        std::env::set_var("GITHUB_CLIENT_SECRET", "test_client_secret");
-        std::env::set_var("GITHUB_TOKEN_URL", "https://valid.token.url");
-        std::env::set_var("GITHUB_REDIRECT_URI", "http://localhost:8080/callback");
-    }
+    set_env_vars(&[
+        ("GITHUB_CLIENT_ID", "test_client_id"),
+        ("GITHUB_CLIENT_SECRET", "test_client_secret"),
+        ("GITHUB_TOKEN_URL", "https://valid.token.url"),
+        ("GITHUB_REDIRECT_URI", "http://localhost:8080/callback"),
+    ]);
 
     let app_state = Arc::new(AppState::default());
     let app = github_auth_routes().with_state(app_state);
@@ -336,12 +338,12 @@ async fn test_github_oauth_callback_with_state_parameter() {
     );
 
     // Clean up
-    unsafe {
-        std::env::remove_var("GITHUB_CLIENT_ID");
-        std::env::remove_var("GITHUB_CLIENT_SECRET");
-        std::env::remove_var("GITHUB_TOKEN_URL");
-        std::env::remove_var("GITHUB_REDIRECT_URI");
-    }
+    remove_env_vars(&[
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+        "GITHUB_TOKEN_URL",
+        "GITHUB_REDIRECT_URI",
+    ]);
 }
 
 #[tokio::test]
@@ -391,12 +393,12 @@ async fn test_github_oauth_callback_invalid_code_handling() {
 #[tokio::test]
 async fn test_github_oauth_manual_with_valid_payload() {
     // Test manual GitHub OAuth with valid payload
-    unsafe {
-        std::env::set_var("GITHUB_CLIENT_ID", "test_client_id");
-        std::env::set_var("GITHUB_CLIENT_SECRET", "test_client_secret");
-        std::env::set_var("GITHUB_TOKEN_URL", "https://valid.token.url");
-        std::env::set_var("GITHUB_REDIRECT_URI", "http://localhost:8080/callback");
-    }
+    set_env_vars(&[
+        ("GITHUB_CLIENT_ID", "test_client_id"),
+        ("GITHUB_CLIENT_SECRET", "test_client_secret"),
+        ("GITHUB_TOKEN_URL", "https://valid.token.url"),
+        ("GITHUB_REDIRECT_URI", "http://localhost:8080/callback"),
+    ]);
 
     let app_state = Arc::new(AppState::default());
     let app = github_auth_routes().with_state(app_state);
@@ -415,12 +417,12 @@ async fn test_github_oauth_manual_with_valid_payload() {
     );
 
     // Clean up
-    unsafe {
-        std::env::remove_var("GITHUB_CLIENT_ID");
-        std::env::remove_var("GITHUB_CLIENT_SECRET");
-        std::env::remove_var("GITHUB_TOKEN_URL");
-        std::env::remove_var("GITHUB_REDIRECT_URI");
-    }
+    remove_env_vars(&[
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+        "GITHUB_TOKEN_URL",
+        "GITHUB_REDIRECT_URI",
+    ]);
 }
 
 #[tokio::test]
@@ -485,17 +487,17 @@ async fn test_github_oauth_init_json_response() {
 #[serial_test::serial]
 fn test_github_env_vars_with_special_chars() {
     // Test handling of environment variables with special characters
-    unsafe {
-        std::env::set_var("GITHUB_CLIENT_ID", "client@123");
-        std::env::set_var(
+    set_env_vars(&[
+        ("GITHUB_CLIENT_ID", "client@123"),
+        (
             "GITHUB_REDIRECT_URI",
             "http://localhost:8080/callback?state=test",
-        );
-        std::env::set_var(
+        ),
+        (
             "GITHUB_AUTH_URL",
             "https://github.com/login/oauth/authorize",
-        );
-    }
+        ),
+    ]);
 
     let client_id = std::env::var("GITHUB_CLIENT_ID").unwrap_or_default();
     let redirect_uri = std::env::var("GITHUB_REDIRECT_URI").unwrap_or_default();
@@ -506,25 +508,21 @@ fn test_github_env_vars_with_special_chars() {
     assert!(!auth_base_url.is_empty());
 
     // Clean up
-    unsafe {
-        std::env::remove_var("GITHUB_CLIENT_ID");
-        std::env::remove_var("GITHUB_REDIRECT_URI");
-        std::env::remove_var("GITHUB_AUTH_URL");
-    }
+    remove_env_vars(&["GITHUB_CLIENT_ID", "GITHUB_REDIRECT_URI", "GITHUB_AUTH_URL"]);
 }
 
 #[tokio::test]
 #[serial_test::serial]
 async fn test_github_auth_url_format_validation() {
     // Test auth URL construction with various environment variable combinations
-    unsafe {
-        std::env::set_var("GITHUB_CLIENT_ID", "test_client_123");
-        std::env::set_var("GITHUB_REDIRECT_URI", "https://example.com/callback");
-        std::env::set_var(
+    set_env_vars(&[
+        ("GITHUB_CLIENT_ID", "test_client_123"),
+        ("GITHUB_REDIRECT_URI", "https://example.com/callback"),
+        (
             "GITHUB_AUTH_URL",
             "https://github.com/login/oauth/authorize",
-        );
-    }
+        ),
+    ]);
 
     let app_state = Arc::new(AppState::default());
     let app = github_auth_routes().with_state(app_state);
@@ -543,9 +541,5 @@ async fn test_github_auth_url_format_validation() {
     assert!(auth_url.starts_with("https://github.com/login/oauth/authorize"));
 
     // Clean up
-    unsafe {
-        std::env::remove_var("GITHUB_CLIENT_ID");
-        std::env::remove_var("GITHUB_REDIRECT_URI");
-        std::env::remove_var("GITHUB_AUTH_URL");
-    }
+    remove_env_vars(&["GITHUB_CLIENT_ID", "GITHUB_REDIRECT_URI", "GITHUB_AUTH_URL"]);
 }

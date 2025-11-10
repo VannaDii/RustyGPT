@@ -21,13 +21,13 @@ mod tests {
         };
 
         // Test Debug trait
-        assert!(format!("{:?}", home).contains("Home"));
-        assert!(format!("{:?}", chat).contains("Chat"));
-        assert!(format!("{:?}", login).contains("Login"));
-        assert!(format!("{:?}", admin_root).contains("AdminRoot"));
-        assert!(format!("{:?}", admin).contains("Admin"));
-        assert!(format!("{:?}", not_found).contains("NotFound"));
-        assert!(format!("{:?}", chat_conv).contains("ChatConversation"));
+        assert!(format!("{home:?}").contains("Home"));
+        assert!(format!("{chat:?}").contains("Chat"));
+        assert!(format!("{login:?}").contains("Login"));
+        assert!(format!("{admin_root:?}").contains("AdminRoot"));
+        assert!(format!("{admin:?}").contains("Admin"));
+        assert!(format!("{not_found:?}").contains("NotFound"));
+        assert!(format!("{chat_conv:?}").contains("ChatConversation"));
     }
 
     /// Tests route equality
@@ -98,29 +98,16 @@ mod tests {
         ];
 
         for route in routes {
-            match route {
-                MainRoute::Home => {
-                    // Route validation passes by reaching this point
-                }
-                MainRoute::Chat => {
-                    // Route validation passes by reaching this point
-                }
-                MainRoute::ChatConversation { .. } => {
-                    // Route validation passes by reaching this point
-                }
-                MainRoute::Login => {
-                    // Route validation passes by reaching this point
-                }
-                MainRoute::AdminRoot => {
-                    // Route validation passes by reaching this point
-                }
-                MainRoute::Admin => {
-                    // Route validation passes by reaching this point
-                }
-                MainRoute::NotFound => {
-                    // Route validation passes by reaching this point
-                }
-            }
+            assert!(matches!(
+                route,
+                MainRoute::Home
+                    | MainRoute::Chat
+                    | MainRoute::ChatConversation { .. }
+                    | MainRoute::Login
+                    | MainRoute::AdminRoot
+                    | MainRoute::Admin
+                    | MainRoute::NotFound
+            ));
         }
     }
 
@@ -132,9 +119,9 @@ mod tests {
         let not_found = MainRoute::NotFound;
 
         // Test that routes can be converted to debug strings
-        let home_str = format!("{:?}", home);
-        let chat_str = format!("{:?}", chat);
-        let not_found_str = format!("{:?}", not_found);
+        let home_str = format!("{home:?}");
+        let chat_str = format!("{chat:?}");
+        let not_found_str = format!("{not_found:?}");
 
         assert!(!home_str.is_empty());
         assert!(!chat_str.is_empty());
@@ -170,7 +157,7 @@ mod tests {
     #[test]
     fn test_empty_conversation_id() {
         let route = MainRoute::ChatConversation {
-            conversation_id: "".to_string(),
+            conversation_id: String::new(),
         };
 
         match route {
@@ -233,8 +220,8 @@ mod tests {
         assert_ne!(admin_root, admin);
 
         // Test debug output
-        assert!(format!("{:?}", admin_root).contains("AdminRoot"));
-        assert!(format!("{:?}", admin).contains("Admin"));
-        assert!(!format!("{:?}", admin).contains("Root"));
+        assert!(format!("{admin_root:?}").contains("AdminRoot"));
+        assert!(format!("{admin:?}").contains("Admin"));
+        assert!(!format!("{admin:?}").contains("Root"));
     }
 }

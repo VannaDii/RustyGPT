@@ -1,4 +1,6 @@
-#![allow(clippy::all, clippy::pedantic)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![deny(warnings, clippy::pedantic)]
+#![allow(clippy::multiple_crate_versions)] // TODO(deps-001): remove once transitive dependencies converge.
 
 mod api;
 mod app;
@@ -55,9 +57,9 @@ fn main() {
     // Disable truncation of panic payloads to debug any panics
     std::panic::set_hook(Box::new(|info| {
         if let Some(s) = info.payload().downcast_ref::<String>() {
-            web_sys::console::log_1(&format!("Panic: {}", s).into());
+            web_sys::console::log_1(&format!("Panic: {s}").into());
         } else if let Some(s) = info.payload().downcast_ref::<&str>() {
-            web_sys::console::log_1(&format!("Panic: {}", s).into());
+            web_sys::console::log_1(&format!("Panic: {s}").into());
         } else {
             web_sys::console::log_1(&"Unknown panic".into());
         }

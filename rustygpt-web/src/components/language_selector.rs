@@ -1,5 +1,4 @@
 use i18nrs::yew::use_translation;
-use std::ops::Deref;
 use yew::use_state_eq; // Changed to use_state_eq for better performance
 use yew::{Callback, function_component, html, use_effect_with};
 
@@ -30,7 +29,7 @@ pub fn language_selector() -> yew::Html {
         })
     };
 
-    let lang_code = language_state.deref();
+    let lang_code = &*language_state;
     let lang_info = language::get_language_info(lang_code.as_str()).unwrap();
     let active_lang_flag = lang_info.flag;
     let supported = language::supported_languages();

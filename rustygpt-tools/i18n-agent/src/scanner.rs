@@ -1,10 +1,15 @@
 use anyhow::Result;
 use regex::Regex;
 use std::collections::HashSet;
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// Scans the codebase for translation key usage and returns a set of unique keys
+/// Scans the codebase for translation key usage and returns a set of unique keys.
+///
+/// # Errors
+///
+/// Returns an error when directory traversal or file reading fails.
 pub fn scan_codebase(src_dir: &Path) -> Result<HashSet<String>> {
     let mut keys = HashSet::new();
 
@@ -16,7 +21,7 @@ pub fn scan_codebase(src_dir: &Path) -> Result<HashSet<String>> {
     // Walk through all .rs files in the source directory
     for entry in WalkDir::new(src_dir)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
     {
         let file_path = entry.path();
@@ -35,10 +40,14 @@ pub fn scan_codebase(src_dir: &Path) -> Result<HashSet<String>> {
     Ok(keys)
 }
 
-/// Scans a single file for translation key usage
-pub fn scan_file(
+/// Scans a single file for translation key usage.
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be read.
+pub fn scan_file<S: BuildHasher>(
     file_path: &Path,
-    keys: &mut HashSet<String>,
+    keys: &mut HashSet<String, S>,
     static_key_pattern: &Regex,
     translate_pattern: &Regex,
     dynamic_key_pattern: &Regex,
@@ -81,36 +90,42 @@ pub fn scan_file(
     Ok(())
 }
 
-/// Special handling for dynamic keys in header_nav_item.rs that are based on routes
-pub fn handle_dynamic_route_keys(keys: &mut HashSet<String>, src_dir: &Path) -> Result<()> {
+/// Special handling for dynamic keys in `header_nav_item.rs` that are based on routes.
+///
+/// # Errors
+///
+/// Returns an error when route files cannot be located or read.
+pub fn handle_dynamic_route_keys<S: BuildHasher>(
+    keys: &mut HashSet<String, S>,
+    src_dir: &Path,
+) -> Result<()> {
     // Find the routes.rs file
-    let routes_file = find_file(src_dir, "routes.rs")?;
-    if routes_file.is_none() {
+    let Some(routes_file) = find_file(src_dir, "routes.rs")? else {
         log::warn!("Could not find routes.rs file for dynamic key analysis");
         return Ok(());
-    }
+    };
 
-    let routes_content = std::fs::read_to_string(routes_file.unwrap())?;
+    let routes_content = std::fs::read_to_string(routes_file)?;
 
     // Extract AdminRoute enum variants
     let admin_route_pattern = Regex::new(r"enum\s+AdminRoute\s*\{([\s\S]*?)\}")?;
-    if let Some(cap) = admin_route_pattern.captures(&routes_content) {
-        if let Some(enum_content) = cap.get(1) {
-            let variant_pattern = Regex::new(r#"#\[at\("([^"]+)"\)\]\s*([A-Za-z0-9_]+)"#)?;
+    if let Some(cap) = admin_route_pattern.captures(&routes_content)
+        && let Some(enum_content) = cap.get(1)
+    {
+        let variant_pattern = Regex::new(r#"#\[at\("([^"]+)"\)\]\s*([A-Za-z0-9_]+)"#)?;
 
-            for var_cap in variant_pattern.captures_iter(enum_content.as_str()) {
-                if let (Some(path), Some(_variant)) = (var_cap.get(1), var_cap.get(2)) {
-                    let route_path = path.as_str().replace("/admin", "").replace("/", ".");
-                    if route_path.is_empty() {
-                        // Root admin route
-                        keys.insert("admin.routes.title".to_string());
-                        keys.insert("admin.routes.icon".to_string());
-                    } else {
-                        // Nested admin route
-                        let key_base = format!("admin.routes{}", route_path);
-                        keys.insert(format!("{}.title", key_base));
-                        keys.insert(format!("{}.icon", key_base));
-                    }
+        for var_cap in variant_pattern.captures_iter(enum_content.as_str()) {
+            if let (Some(path), Some(_variant)) = (var_cap.get(1), var_cap.get(2)) {
+                let route_path = path.as_str().replace("/admin", "").replace('/', ".");
+                if route_path.is_empty() {
+                    // Root admin route
+                    keys.insert("admin.routes.title".to_string());
+                    keys.insert("admin.routes.icon".to_string());
+                } else {
+                    // Nested admin route
+                    let key_base = format!("admin.routes{route_path}");
+                    keys.insert(format!("{key_base}.title"));
+                    keys.insert(format!("{key_base}.icon"));
                 }
             }
         }
@@ -119,7 +134,12 @@ pub fn handle_dynamic_route_keys(keys: &mut HashSet<String>, src_dir: &Path) -> 
     Ok(())
 }
 
-/// Helper function to find a file by name in a directory (recursively)
+/// Helper function to find a file by name in a directory (recursively).
+///
+/// # Errors
+///
+/// This function currently never returns an error; the `Result` type is kept for
+/// future extensions when directory traversal failures need to be surfaced.
 #[allow(clippy::unnecessary_wraps)]
 pub fn find_file(dir: &Path, filename: &str) -> Result<Option<PathBuf>> {
     for entry in WalkDir::new(dir)
@@ -138,8 +158,8 @@ pub fn find_file(dir: &Path, filename: &str) -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_fs::prelude::*;
     use assert_fs::TempDir;
+    use assert_fs::prelude::*;
 
     #[test]
     fn test_scan_file_with_static_keys() -> Result<()> {
@@ -386,10 +406,10 @@ mod tests {
         // Create a routes.rs file without AdminRoute enum
         let routes_file = temp_dir.child("routes.rs");
         routes_file.write_str(
-            r#"
+            r"
             // No AdminRoute enum here
             struct SomethingElse {}
-        "#,
+        ",
         )?;
 
         // Test handle_dynamic_route_keys

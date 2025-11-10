@@ -179,8 +179,7 @@ mod tests {
     #[serial]
     async fn readyz_returns_service_unavailable_when_database_fails() {
         let _ = crate::server::metrics_handle();
-        crate::db::bootstrap::set_readiness_override(Some(Err(sqlx::Error::Io(io::Error::new(
-            io::ErrorKind::Other,
+        crate::db::bootstrap::set_readiness_override(Some(Err(sqlx::Error::Io(io::Error::other(
             "simulated failure",
         )))));
 

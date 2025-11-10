@@ -77,7 +77,7 @@ mod tests {
                 self.chunks
                     .clone()
                     .into_iter()
-                    .map(|chunk| Ok::<StreamingResponse, LLMError>(chunk)),
+                    .map(Ok::<StreamingResponse, LLMError>),
             );
 
             Ok(AssistantStreamingSession::from_stream(Box::pin(stream), 4))
@@ -87,7 +87,7 @@ mod tests {
             false
         }
 
-        fn default_model_name(&self) -> &str {
+        fn default_model_name(&self) -> &'static str {
             "stub-model"
         }
 

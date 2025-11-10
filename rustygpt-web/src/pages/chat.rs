@@ -40,10 +40,17 @@ pub struct ChatPageProps {
     pub conversation_id: Option<String>,
 }
 
+type ListenerRegistry = Rc<RefCell<Vec<Closure<dyn FnMut(MessageEvent)>>>>;
+
+#[allow(
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::too_many_lines
+)] // Tracking: TODO web-chat-001
 fn register_stream_listeners(
     event_source: &EventSource,
     conversation_id: Uuid,
-    listeners: &Rc<RefCell<Vec<Closure<dyn FnMut(MessageEvent)>>>>,
+    listeners: &ListenerRegistry,
     threads: &UseStateHandle<Vec<ThreadSummary>>,
     selected_thread: &UseStateHandle<Option<Uuid>>,
     messages: &UseStateHandle<Vec<MessageView>>,
@@ -60,16 +67,16 @@ fn register_stream_listeners(
         let threads = threads.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::ThreadNew { payload }) = from_str(&data) {
-                        threads.set({
-                            let mut next = (*threads).clone();
-                            next.retain(|item| item.root_id != payload.root_id);
-                            next.push(payload.summary.clone());
-                            next.sort_by(|a, b| b.last_activity_at.0.cmp(&a.last_activity_at.0));
-                            next
-                        });
-                    }
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::ThreadNew { payload }) = from_str(&data)
+                {
+                    threads.set({
+                        let mut next = (*threads).clone();
+                        next.retain(|item| item.root_id != payload.root_id);
+                        next.push(payload.summary.clone());
+                        next.sort_by(|a, b| b.last_activity_at.0.cmp(&a.last_activity_at.0));
+                        next
+                    });
                 }
             }));
         event_source
@@ -87,51 +94,46 @@ fn register_stream_listeners(
         let pending_activity = pending_activity.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::ThreadActivity { payload }) = from_str(&data)
-                    {
-                        let skip_fetch = (*pending_activity).contains(&payload.root_id);
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::ThreadActivity { payload }) = from_str(&data)
+                {
+                    let skip_fetch = (*pending_activity).contains(&payload.root_id);
 
-                        threads.set({
-                            let mut next = (*threads).clone();
-                            if let Some(thread) =
-                                next.iter_mut().find(|t| t.root_id == payload.root_id)
+                    threads.set({
+                        let mut next = (*threads).clone();
+                        if let Some(thread) = next.iter_mut().find(|t| t.root_id == payload.root_id)
+                        {
+                            thread.last_activity_at = payload.last_activity_at.clone();
+                            if skip_fetch {
+                                thread.message_count += 1;
+                            }
+                        }
+                        next.sort_by(|a, b| b.last_activity_at.0.cmp(&a.last_activity_at.0));
+                        next
+                    });
+
+                    if skip_fetch {
+                        let mut updated = (*pending_activity).clone();
+                        updated.remove(&payload.root_id);
+                        pending_activity.set(updated);
+                    } else if (*selected_thread).is_some_and(|id| id == payload.root_id) {
+                        let messages = messages.clone();
+                        let error = error.clone();
+                        spawn_local(async move {
+                            let client = RustyGPTClient::shared();
+                            match client
+                                .get_thread_tree(&payload.root_id, None, Some(200))
+                                .await
                             {
-                                thread.last_activity_at = payload.last_activity_at.clone();
-                                if skip_fetch {
-                                    thread.message_count += 1;
+                                Ok(tree) => {
+                                    messages.set(tree.messages);
+                                    error.set(None);
+                                }
+                                Err(err) => {
+                                    error.set(Some(format!("Failed to refresh thread: {err}")));
                                 }
                             }
-                            next.sort_by(|a, b| b.last_activity_at.0.cmp(&a.last_activity_at.0));
-                            next
                         });
-
-                        if skip_fetch {
-                            let mut updated = (*pending_activity).clone();
-                            updated.remove(&payload.root_id);
-                            pending_activity.set(updated);
-                        } else if (*selected_thread)
-                            .map(|id| id == payload.root_id)
-                            .unwrap_or(false)
-                        {
-                            let messages = messages.clone();
-                            let error = error.clone();
-                            spawn_local(async move {
-                                let client = RustyGPTClient::shared();
-                                match client
-                                    .get_thread_tree(&payload.root_id, None, Some(200))
-                                    .await
-                                {
-                                    Ok(tree) => {
-                                        messages.set(tree.messages);
-                                        error.set(None);
-                                    }
-                                    Err(err) => {
-                                        error.set(Some(format!("Failed to refresh thread: {err}")));
-                                    }
-                                }
-                            });
-                        }
                     }
                 }
             }));
@@ -149,49 +151,46 @@ fn register_stream_listeners(
         let streaming = streaming.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::MessageDelta { payload }) = from_str(&data) {
-                        if let Some(chunk) = payload
-                            .choices
-                            .iter()
-                            .filter_map(|choice| choice.delta.content.clone())
-                            .reduce(|mut acc, part| {
-                                acc.push_str(&part);
-                                acc
-                            })
-                        {
-                            streaming.set({
-                                let mut next = (*streaming).clone();
-                                next.entry(payload.message_id)
-                                    .and_modify(|entry| {
-                                        entry.content.push_str(&chunk);
-                                        entry.depth = payload.depth.unwrap_or(entry.depth);
-                                        entry.parent_id = payload.parent_id;
-                                        entry.root_id = payload.root_id;
-                                        entry.conversation_id = payload.conversation_id;
-                                    })
-                                    .or_insert_with(|| StreamingEntry {
-                                        message_id: payload.message_id,
-                                        root_id: payload.root_id,
-                                        parent_id: payload.parent_id,
-                                        conversation_id: payload.conversation_id,
-                                        depth: payload.depth.unwrap_or(1),
-                                        content: chunk.clone(),
-                                    });
-                                next
-                            });
-                        }
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::MessageDelta { payload }) = from_str(&data)
+                {
+                    if let Some(chunk) = payload
+                        .choices
+                        .iter()
+                        .filter_map(|choice| choice.delta.content.clone())
+                        .reduce(|mut acc, part| {
+                            acc.push_str(&part);
+                            acc
+                        })
+                    {
+                        streaming.set({
+                            let mut next = (*streaming).clone();
+                            next.entry(payload.message_id)
+                                .and_modify(|entry| {
+                                    entry.content.push_str(&chunk);
+                                    entry.depth = payload.depth.unwrap_or(entry.depth);
+                                    entry.parent_id = payload.parent_id;
+                                    entry.root_id = payload.root_id;
+                                    entry.conversation_id = payload.conversation_id;
+                                })
+                                .or_insert_with(|| StreamingEntry {
+                                    message_id: payload.message_id,
+                                    root_id: payload.root_id,
+                                    parent_id: payload.parent_id,
+                                    conversation_id: payload.conversation_id,
+                                    depth: payload.depth.unwrap_or(1),
+                                    content: chunk.clone(),
+                                });
+                            next
+                        });
+                    }
 
-                        if (*selected_thread)
-                            .map(|id| id == payload.root_id)
-                            .unwrap_or(false)
+                    if (*selected_thread).is_some_and(|id| id == payload.root_id) {
+                        typing.set(true);
                         {
-                            typing.set(true);
-                            {
-                                let mut guard = typing_timer.borrow_mut();
-                                if let Some(existing) = guard.take() {
-                                    existing.cancel();
-                                }
+                            let mut guard = typing_timer.borrow_mut();
+                            if let Some(existing) = guard.take() {
+                                existing.cancel();
                             }
                         }
                     }
@@ -213,56 +212,56 @@ fn register_stream_listeners(
         let pending_activity = pending_activity.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::MessageDone { payload }) = from_str(&data) {
-                        {
-                            let mut guard = typing_timer.borrow_mut();
-                            if let Some(existing) = guard.take() {
-                                existing.cancel();
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::MessageDone { payload }) = from_str(&data)
+                {
+                    {
+                        let mut guard = typing_timer.borrow_mut();
+                        if let Some(existing) = guard.take() {
+                            existing.cancel();
+                        }
+                    }
+                    typing.set(false);
+                    error.set(None);
+
+                    let entry = {
+                        let mut buffer = (*streaming).clone();
+                        let removed = buffer.remove(&payload.message_id);
+                        streaming.set(buffer);
+                        removed
+                    };
+
+                    if let Some(entry) = entry {
+                        messages.set({
+                            let mut next = (*messages).clone();
+                            if let Some(existing) =
+                                next.iter_mut().find(|msg| msg.id == payload.message_id)
+                            {
+                                existing.content.clone_from(&entry.content);
+                                existing.role = MessageRole::Assistant;
+                            } else {
+                                next.push(MessageView {
+                                    id: payload.message_id,
+                                    root_id: entry.root_id,
+                                    parent_id: entry.parent_id,
+                                    conversation_id: entry.conversation_id,
+                                    author_user_id: None,
+                                    role: MessageRole::Assistant,
+                                    content: entry.content.clone(),
+                                    path: String::new(),
+                                    depth: entry.depth,
+                                    created_at: Timestamp(Utc::now()),
+                                });
                             }
-                        }
-                        typing.set(false);
-                        error.set(None);
+                            next.sort_by(|a, b| a.created_at.0.cmp(&b.created_at.0));
+                            next
+                        });
 
-                        let entry = {
-                            let mut buffer = (*streaming).clone();
-                            let removed = buffer.remove(&payload.message_id);
-                            streaming.set(buffer);
-                            removed
-                        };
-
-                        if let Some(entry) = entry {
-                            messages.set({
-                                let mut next = (*messages).clone();
-                                if let Some(existing) =
-                                    next.iter_mut().find(|msg| msg.id == payload.message_id)
-                                {
-                                    existing.content = entry.content.clone();
-                                    existing.role = MessageRole::Assistant;
-                                } else {
-                                    next.push(MessageView {
-                                        id: payload.message_id,
-                                        root_id: entry.root_id,
-                                        parent_id: entry.parent_id,
-                                        conversation_id: entry.conversation_id,
-                                        author_user_id: None,
-                                        role: MessageRole::Assistant,
-                                        content: entry.content.clone(),
-                                        path: String::new(),
-                                        depth: entry.depth,
-                                        created_at: Timestamp(Utc::now()),
-                                    });
-                                }
-                                next.sort_by(|a, b| a.created_at.0.cmp(&b.created_at.0));
-                                next
-                            });
-
-                            pending_activity.set({
-                                let mut roots = (*pending_activity).clone();
-                                roots.insert(entry.root_id);
-                                roots
-                            });
-                        }
+                        pending_activity.set({
+                            let mut roots = (*pending_activity).clone();
+                            roots.insert(entry.root_id);
+                            roots
+                        });
                     }
                 }
             }));
@@ -279,44 +278,43 @@ fn register_stream_listeners(
         let typing_timer = typing_timer.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::TypingUpdate { payload }) = from_str(&data) {
-                        if payload.conversation_id == conversation_id {
-                            if (*selected_thread)
-                                .map(|root| root == payload.root_id)
-                                .unwrap_or(false)
-                            {
-                                let expires_at = payload.expires_at.0;
-                                let now = Utc::now();
-                                let remaining_ms = (expires_at - now).num_milliseconds();
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::TypingUpdate { payload }) = from_str(&data)
+                    && payload.conversation_id == conversation_id
+                    && (*selected_thread).is_some_and(|root| root == payload.root_id)
+                {
+                    let expires_at = payload.expires_at.0;
+                    let now = Utc::now();
+                    let remaining_ms = (expires_at - now).num_milliseconds();
 
-                                if remaining_ms <= 0 {
-                                    {
-                                        let mut guard = typing_timer.borrow_mut();
-                                        if let Some(existing) = guard.take() {
-                                            existing.cancel();
-                                        }
-                                    }
-                                    typing.set(false);
-                                } else {
-                                    let duration_ms = remaining_ms.min(u32::MAX as i64) as u32;
-                                    let typing_clone = typing.clone();
-                                    let timer_handle = typing_timer.clone();
-                                    {
-                                        let mut guard = typing_timer.borrow_mut();
-                                        if let Some(existing) = guard.take() {
-                                            existing.cancel();
-                                        }
-                                        let timeout = Timeout::new(duration_ms, move || {
-                                            typing_clone.set(false);
-                                            timer_handle.borrow_mut().take();
-                                        });
-                                        *guard = Some(timeout);
-                                    }
-                                    typing.set(true);
-                                }
+                    if remaining_ms <= 0 {
+                        {
+                            let mut guard = typing_timer.borrow_mut();
+                            if let Some(existing) = guard.take() {
+                                existing.cancel();
                             }
                         }
+                        typing.set(false);
+                    } else {
+                        let capped = remaining_ms.min(i64::from(u32::MAX));
+                        let Ok(duration_ms) = u32::try_from(capped) else {
+                            typing.set(false);
+                            return;
+                        };
+                        let typing_clone = typing.clone();
+                        let timer_handle = typing_timer.clone();
+                        {
+                            let mut guard = typing_timer.borrow_mut();
+                            if let Some(existing) = guard.take() {
+                                existing.cancel();
+                            }
+                            let timeout = Timeout::new(duration_ms, move || {
+                                typing_clone.set(false);
+                                timer_handle.borrow_mut().take();
+                            });
+                            *guard = Some(timeout);
+                        }
+                        typing.set(true);
                     }
                 }
             }));
@@ -331,22 +329,21 @@ fn register_stream_listeners(
         let online_users = online_users.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::PresenceUpdate { payload }) = from_str(&data)
-                    {
-                        online_users.set({
-                            let mut current = (*online_users).clone();
-                            match payload.status {
-                                PresenceStatus::Offline => {
-                                    current.remove(&payload.user_id);
-                                }
-                                _ => {
-                                    current.insert(payload.user_id);
-                                }
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::PresenceUpdate { payload }) = from_str(&data)
+                {
+                    online_users.set({
+                        let mut current = (*online_users).clone();
+                        match payload.status {
+                            PresenceStatus::Offline => {
+                                current.remove(&payload.user_id);
                             }
-                            current
-                        });
-                    }
+                            _ => {
+                                current.insert(payload.user_id);
+                            }
+                        }
+                        current
+                    });
                 }
             }));
         event_source
@@ -360,14 +357,14 @@ fn register_stream_listeners(
         let unread_counts = unread_counts.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::UnreadUpdate { payload }) = from_str(&data) {
-                        unread_counts.set({
-                            let mut map = (*unread_counts).clone();
-                            map.insert(payload.root_id, payload.unread);
-                            map
-                        });
-                    }
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::UnreadUpdate { payload }) = from_str(&data)
+                {
+                    unread_counts.set({
+                        let mut map = (*unread_counts).clone();
+                        map.insert(payload.root_id, payload.unread);
+                        map
+                    });
                 }
             }));
         event_source
@@ -385,74 +382,66 @@ fn register_stream_listeners(
         let online_users = online_users.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::MembershipChanged { payload }) =
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::MembershipChanged { payload }) =
                         from_str(&data)
-                    {
-                        if payload.conversation_id == conversation_id {
-                            // Adjust online set for removals
-                            if matches!(payload.action, MembershipChangeAction::Removed) {
-                                online_users.set({
-                                    let mut set = (*online_users).clone();
-                                    set.remove(&payload.user_id);
-                                    set
+                    && payload.conversation_id == conversation_id
+                {
+                    if matches!(payload.action, MembershipChangeAction::Removed) {
+                        online_users.set({
+                            let mut set = (*online_users).clone();
+                            set.remove(&payload.user_id);
+                            set
+                        });
+                    }
+
+                    let current_selected = *selected_thread;
+                    let threads_state = threads.clone();
+                    let selected_state = selected_thread.clone();
+                    let error_state = error.clone();
+                    let unread_state = unread_counts.clone();
+                    spawn_local(async move {
+                        let client = RustyGPTClient::shared();
+                        match client.list_threads(&conversation_id, None, Some(50)).await {
+                            Ok(mut response) => {
+                                response.threads.sort_by(|a, b| {
+                                    b.last_activity_at.0.cmp(&a.last_activity_at.0)
                                 });
-                            }
+                                let threads_vec = response.threads.clone();
+                                threads_state.set(threads_vec.clone());
 
-                            let current_selected = (*selected_thread).clone();
-                            let threads_state = threads.clone();
-                            let selected_state = selected_thread.clone();
-                            let error_state = error.clone();
-                            let unread_state = unread_counts.clone();
-                            spawn_local(async move {
-                                let client = RustyGPTClient::shared();
-                                match client.list_threads(&conversation_id, None, Some(50)).await {
-                                    Ok(mut response) => {
-                                        response.threads.sort_by(|a, b| {
-                                            b.last_activity_at.0.cmp(&a.last_activity_at.0)
-                                        });
-                                        let threads_vec = response.threads.clone();
-                                        threads_state.set(threads_vec.clone());
+                                if let Some(selected) = current_selected {
+                                    if !threads_vec.iter().any(|item| item.root_id == selected) {
+                                        let next = threads_vec.first().map(|item| item.root_id);
+                                        selected_state.set(next);
+                                    }
+                                } else {
+                                    let next = threads_vec.first().map(|item| item.root_id);
+                                    selected_state.set(next);
+                                }
 
-                                        if let Some(selected) = current_selected {
-                                            if !threads_vec
-                                                .iter()
-                                                .any(|item| item.root_id == selected)
-                                            {
-                                                let next =
-                                                    threads_vec.first().map(|item| item.root_id);
-                                                selected_state.set(next);
-                                            }
-                                        } else {
-                                            let next = threads_vec.first().map(|item| item.root_id);
-                                            selected_state.set(next);
-                                        }
-
-                                        match client.unread_summary(&conversation_id).await {
-                                            Ok(summary) => {
-                                                let map = summary
-                                                    .threads
-                                                    .into_iter()
-                                                    .map(|entry| (entry.root_id, entry.unread))
-                                                    .collect();
-                                                unread_state.set(map);
-                                                error_state.set(None);
-                                            }
-                                            Err(err) => {
-                                                error_state.set(Some(format!(
-                                                    "Failed to refresh unread summary: {err}"
-                                                )));
-                                            }
-                                        }
+                                match client.unread_summary(&conversation_id).await {
+                                    Ok(summary) => {
+                                        let map = summary
+                                            .threads
+                                            .into_iter()
+                                            .map(|entry| (entry.root_id, entry.unread))
+                                            .collect();
+                                        unread_state.set(map);
+                                        error_state.set(None);
                                     }
                                     Err(err) => {
-                                        error_state
-                                            .set(Some(format!("Failed to refresh threads: {err}")));
+                                        error_state.set(Some(format!(
+                                            "Failed to refresh unread summary: {err}"
+                                        )));
                                     }
                                 }
-                            });
+                            }
+                            Err(err) => {
+                                error_state.set(Some(format!("Failed to refresh threads: {err}")));
+                            }
                         }
-                    }
+                    });
                 }
             }));
         event_source
@@ -469,13 +458,13 @@ fn register_stream_listeners(
         let error = error.clone();
         let listener =
             Closure::<dyn FnMut(MessageEvent)>::wrap(Box::new(move |event: MessageEvent| {
-                if let Some(data) = event.data().as_string() {
-                    if let Ok(ConversationStreamEvent::Error { payload }) = from_str(&data) {
-                        error.set(Some(format!(
-                            "Stream error {}: {}",
-                            payload.code, payload.message
-                        )));
-                    }
+                if let Some(data) = event.data().as_string()
+                    && let Ok(ConversationStreamEvent::Error { payload }) = from_str(&data)
+                {
+                    error.set(Some(format!(
+                        "Stream error {}: {}",
+                        payload.code, payload.message
+                    )));
                 }
             }));
         event_source
@@ -506,10 +495,10 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
     let composer_busy = use_state(|| false);
     let typing_active = use_state(|| false);
     let typing_timer = use_mut_ref(|| None::<Timeout>);
-    let streaming_buffers = use_state(|| HashMap::<Uuid, StreamingEntry>::new());
+    let streaming_buffers = use_state(HashMap::<Uuid, StreamingEntry>::new);
     let pending_activity_roots = use_state(HashSet::<Uuid>::new);
     let online_users = use_state(HashSet::<Uuid>::new);
-    let unread_counts = use_state(|| HashMap::<Uuid, i64>::new());
+    let unread_counts = use_state(HashMap::<Uuid, i64>::new);
     let error_message = use_state(|| None::<String>);
 
     // Refresh threads when the conversation changes
@@ -644,38 +633,34 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
         let unread_counts_handle = unread_counts.clone();
 
         use_effect_with(conversation_id_prop, move |id_opt| {
-            let mut cleanup: Option<(
-                EventSource,
-                Rc<RefCell<Vec<Closure<dyn FnMut(MessageEvent)>>>>,
-            )> = None;
+            let mut cleanup: Option<(EventSource, ListenerRegistry)> = None;
 
-            if let Some(id) = id_opt {
-                if let Ok(conv_id) = Uuid::parse_str(id) {
-                    let client = RustyGPTClient::shared();
-                    if let Ok(event_source) =
-                        EventSource::new(&client.conversation_stream_url(&conv_id))
-                    {
-                        let listeners: Rc<RefCell<Vec<Closure<dyn FnMut(MessageEvent)>>>> =
-                            Rc::new(RefCell::new(Vec::new()));
+            if let Some(id) = id_opt
+                && let Ok(conv_id) = Uuid::parse_str(id)
+            {
+                let client = RustyGPTClient::shared();
+                if let Ok(event_source) =
+                    EventSource::new(&client.conversation_stream_url(&conv_id))
+                {
+                    let listeners: ListenerRegistry = Rc::new(RefCell::new(Vec::new()));
 
-                        register_stream_listeners(
-                            &event_source,
-                            conv_id,
-                            &listeners,
-                            &threads_handle,
-                            &selected_thread_handle,
-                            &messages_handle,
-                            &error_handle,
-                            &typing_handle,
-                            &typing_timer_handle,
-                            &streaming_handle,
-                            &pending_activity_handle,
-                            &online_users_handle,
-                            &unread_counts_handle,
-                        );
+                    register_stream_listeners(
+                        &event_source,
+                        conv_id,
+                        &listeners,
+                        &threads_handle,
+                        &selected_thread_handle,
+                        &messages_handle,
+                        &error_handle,
+                        &typing_handle,
+                        &typing_timer_handle,
+                        &streaming_handle,
+                        &pending_activity_handle,
+                        &online_users_handle,
+                        &unread_counts_handle,
+                    );
 
-                        cleanup = Some((event_source, listeners));
-                    }
+                    cleanup = Some((event_source, listeners));
                 }
             }
 
@@ -700,7 +685,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
         let composer_target = composer_target.clone();
         let messages = messages.clone();
         let composer_text = composer_text.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: yew::MouseEvent| {
             selected_thread.set(None);
             messages.set(Vec::new());
             composer_text.set(String::new());
@@ -729,7 +714,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
         let composer_target = composer_target.clone();
         let composer_text = composer_text.clone();
         let selected_thread = selected_thread.clone();
-        Callback::from(move |_| {
+        Callback::from(move |()| {
             composer_text.set(String::new());
             if let Some(root_id) = *selected_thread {
                 composer_target.set(ComposerTarget::Reply {
@@ -743,7 +728,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
     };
 
     let on_submit_message = {
-        let conversation_uuid = conversation_uuid.clone();
+        let conv_uuid = conversation_uuid;
         let composer_target = composer_target.clone();
         let composer_text = composer_text.clone();
         let composer_busy = composer_busy.clone();
@@ -752,12 +737,12 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
         let error = error_message.clone();
         let typing = typing_active.clone();
         let threads_handle = threads.clone();
-        Callback::from(move |_| {
+        Callback::from(move |()| {
             if *composer_busy {
                 return;
             }
 
-            let Some(conv_id) = conversation_uuid else {
+            let Some(conv_id) = conv_uuid else {
                 error.set(Some("Conversation not selected".to_string()));
                 return;
             };
@@ -855,13 +840,11 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                                                     .iter_mut()
                                                     .find(|item| item.root_id == root_id)
                                                 {
-                                                    summary.last_activity_at = tree
-                                                        .messages
-                                                        .last()
-                                                        .map(|msg| msg.created_at.clone())
-                                                        .unwrap_or_else(|| {
-                                                            summary.last_activity_at.clone()
-                                                        });
+                                                    summary.last_activity_at =
+                                                        tree.messages.last().map_or_else(
+                                                            || summary.last_activity_at.clone(),
+                                                            |msg| msg.created_at.clone(),
+                                                        );
                                                     summary.message_count += 1;
                                                 }
                                                 next.sort_by(|a, b| {
@@ -924,6 +907,8 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
         ComposerTarget::Reply { .. } => "Send Reply".to_string(),
     };
 
+    let online_count = online_users.len();
+
     html! {
         <div class="h-full flex">
             <div class="w-full md:w-1/3 border-r border-base-300 flex flex-col">
@@ -933,7 +918,7 @@ pub fn chat_page(props: &ChatPageProps) -> Html {
                 </div>
                 <div class="flex-1 overflow-y-auto">
                     <div class="px-3 py-2 text-xs text-base-content/60">
-                        { format!("Participants online: {}", online_users.len()) }
+                        { format!("Participants online: {online_count}") }
                     </div>
                     <ThreadList
                         threads={(*threads).clone()}

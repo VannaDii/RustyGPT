@@ -26,7 +26,7 @@ pub fn thread_list(props: &ThreadListProps) -> Html {
     html! {
         <ul class="divide-y divide-base-300">
             { for props.threads.iter().map(|thread| {
-                let is_selected = props.selected.map(|id| id == thread.root_id).unwrap_or(false);
+                let is_selected = props.selected.is_some_and(|id| id == thread.root_id);
                 let summary = thread.clone();
                 let on_select = props.on_select.clone();
                 let unread = props.unread_counts.get(&summary.root_id).copied().unwrap_or(0);

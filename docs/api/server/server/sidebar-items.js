@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_api_router","create_app_router","create_app_state","create_cors_layer","create_database_pool","create_shutdown_signal","create_static_service","initialize_tracing","metrics_handle","run"]};

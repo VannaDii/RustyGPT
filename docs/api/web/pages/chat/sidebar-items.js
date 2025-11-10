@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ComposerTarget"],"fn":["register_stream_listeners"],"struct":["ChatPage","ChatPageProps","StreamingEntry"],"type":["ListenerRegistry"]};

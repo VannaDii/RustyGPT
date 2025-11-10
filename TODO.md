@@ -93,6 +93,14 @@ A privacy-respecting, full-stack AI platform in Rust (Axum + Yew) that integrate
   - [ ] `rustygpt-index`
 - [X] Add Makefile or justfile
 - [ ] Add `.cargo/config.toml` for targets
+- [ ] **(deps-001)** Align transitive dependency versions for `windows-*`, `socket2`, `bitflags`, etc., so we can remove the temporary `clippy::multiple_crate_versions` allow in `rustygpt-doc-indexer/src/main.rs`.
+- [ ] **(llm-caps-001)** Replace the `ModelCapabilities`/`GlobalLLMSettings` boolean flag fields with a more expressive capability bitset once the LLM feature matrix stabilizes.
+- [ ] **(session-validate-refactor)** Split `SessionService::validate_session`/`finalize_session` logic into smaller helpers so the handler stays readable.
+- [ ] **(copilot-stream-refactor)** Break down the streaming/copilot handlers to reduce argument count and function length.
+- [ ] **(threads-assistant-reply-refactor)** Extract `run_assistant_reply` into smaller helpers (stream setup, persistence, completion) so we can drop the `clippy::too_many_lines` allow.
+- [ ] **(threads-assistant-stream-refactor)** Split `process_assistant_stream` into focused helpers (validation, persistence, SSE fan-out) to shrink the function.
+- [ ] **(auth-middleware-refactor)** Split the Axum auth middleware into focused helpers (request parsing, validation, response building) to shrink the main function.
+- [ ] **(web-chat-001)** Refactor `register_stream_listeners` in `rustygpt-web/src/pages/chat.rs` to split per-event helpers and reduce argument count/complexity.
 
 ---
 

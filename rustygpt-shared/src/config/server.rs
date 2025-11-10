@@ -1,4 +1,4 @@
-//! Central configuration loader for RustyGPT backends, CLI, and supporting tools.
+//! Central configuration loader for `RustyGPT` backends, CLI, and supporting tools.
 //!
 //! The configuration system follows a layered approach:
 //!   1. Built-in defaults per [`Profile`]
@@ -37,11 +37,13 @@ pub enum Profile {
 
 impl Profile {
     #[inline]
+    #[must_use]
     pub const fn is_prod(self) -> bool {
         matches!(self, Self::Prod)
     }
 
     #[inline]
+    #[must_use]
     pub const fn is_dev(self) -> bool {
         matches!(self, Self::Dev)
     }
@@ -63,8 +65,7 @@ impl Profile {
 
     fn default_static_dir(self) -> PathBuf {
         match self {
-            Self::Dev => PathBuf::from("../rustygpt-web/dist"),
-            Self::Test => PathBuf::from("../rustygpt-web/dist"),
+            Self::Dev | Self::Test => PathBuf::from("../rustygpt-web/dist"),
             Self::Prod => PathBuf::from("./public"),
         }
     }
@@ -124,17 +125,12 @@ impl fmt::Debug for LoggingConfig {
 }
 
 /// Output format for logs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LogFormat {
+    #[default]
     Text,
     Json,
-}
-
-impl Default for LogFormat {
-    fn default() -> Self {
-        Self::Text
-    }
 }
 
 /// Server configuration block.
@@ -300,19 +296,14 @@ impl fmt::Debug for CsrfConfig {
     }
 }
 
-/// Cookie SameSite policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+/// Cookie `SameSite` policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CookieSameSite {
+    #[default]
     Lax,
     Strict,
     None,
-}
-
-impl Default for CookieSameSite {
-    fn default() -> Self {
-        Self::Lax
-    }
 }
 
 /// Rate limiting configuration.
@@ -459,7 +450,7 @@ impl Default for ApiConfig {
 }
 
 /// OAuth provider configuration.
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Default)]
 pub struct OAuthConfig {
     pub redirect_base: Option<Url>,
     pub github: Option<OAuthProvider>,
@@ -471,21 +462,9 @@ impl fmt::Debug for OAuthConfig {
             .field("redirect_base", &self.redirect_base)
             .field(
                 "github_configured",
-                &self
-                    .github
-                    .as_ref()
-                    .map(|provider| provider.is_configured()),
+                &self.github.as_ref().map(OAuthProvider::is_configured),
             )
             .finish()
-    }
-}
-
-impl Default for OAuthConfig {
-    fn default() -> Self {
-        Self {
-            redirect_base: None,
-            github: None,
-        }
     }
 }
 
@@ -646,17 +625,12 @@ impl Default for SseBackpressureConfig {
 }
 
 /// Drop behaviour configuration for SSE backpressure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SseDropStrategy {
+    #[default]
     DropTokens,
     DropTokensAndSystem,
-}
-
-impl Default for SseDropStrategy {
-    fn default() -> Self {
-        Self::DropTokens
-    }
 }
 
 impl FromStr for SseDropStrategy {
@@ -683,6 +657,7 @@ pub struct WellKnownConfig {
 }
 
 impl WellKnownConfig {
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -811,22 +786,30 @@ impl fmt::Debug for Config {
             .field("features", &self.features)
             .field("cli", &self.cli)
             .field("web", &self.web)
+            .field("llm", &self.llm)
             .finish()
     }
 }
 
 impl Config {
     /// Helper retained for backwards compatibility. Equivalent to `default_for_profile(Profile::Dev)`.
+    #[must_use]
     pub fn with_defaults() -> Self {
         Self::defaults(Profile::Dev)
     }
 
     /// Create a configuration instance populated with defaults for the provided profile.
+    #[must_use]
     pub fn default_for_profile(profile: Profile) -> Self {
         Self::defaults(profile)
     }
 
     /// Load configuration with precedence: defaults < file < env < CLI overrides.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if configuration files cannot be read, environment variables are invalid,
+    /// or deserialization fails at any stage.
     pub fn load_config(
         config_path: Option<PathBuf>,
         port_override: Option<u16>,
@@ -884,17 +867,18 @@ impl Config {
         let rate_limits = RateLimitConfig::default();
         let limits = LimitsConfig::default();
 
-        let mut session = SessionConfig::default();
-        session.idle_seconds = auth.idle_seconds;
-        session.absolute_seconds = auth.absolute_seconds;
+        let session = SessionConfig {
+            idle_seconds: auth.idle_seconds,
+            absolute_seconds: auth.absolute_seconds,
+            ..SessionConfig::default()
+        };
 
         Self {
             profile,
             logging: LoggingConfig {
                 level: match profile {
                     Profile::Dev => "debug".into(),
-                    Profile::Test => "info".into(),
-                    Profile::Prod => "info".into(),
+                    Profile::Test | Profile::Prod => "info".into(),
                 },
                 format: LogFormat::default(),
             },
@@ -997,7 +981,7 @@ impl Config {
 
     fn apply_logging_partial(&mut self, logging: &LoggingPartial) {
         if let Some(level) = &logging.level {
-            self.logging.level = level.clone();
+            self.logging.level.clone_from(level);
         }
         if let Some(format) = logging.format {
             self.logging.format = format;
@@ -1010,7 +994,7 @@ impl Config {
         flags: &mut ApplyFlags,
     ) -> Result<(), ConfigError> {
         if let Some(host) = &server.host {
-            self.server.host = host.clone();
+            self.server.host.clone_from(host);
         }
         if let Some(port) = server.port {
             self.server.port = port;
@@ -1023,7 +1007,7 @@ impl Config {
             self.apply_cors_partial(cors);
         }
         if let Some(header) = &server.request_id_header {
-            self.server.request_id_header = header.clone();
+            self.server.request_id_header.clone_from(header);
         }
 
         Ok(())
@@ -1031,7 +1015,7 @@ impl Config {
 
     fn apply_cors_partial(&mut self, cors: &CorsPartial) {
         if let Some(origins) = &cors.allowed_origins {
-            self.server.cors.allowed_origins = origins.clone();
+            self.server.cors.allowed_origins.clone_from(origins);
         }
         if let Some(allow_credentials) = cors.allow_credentials {
             self.server.cors.allow_credentials = allow_credentials;
@@ -1082,10 +1066,10 @@ impl Config {
 
     fn apply_csrf_partial(&mut self, csrf: &CsrfPartial) {
         if let Some(cookie_name) = &csrf.cookie_name {
-            self.security.csrf.cookie_name = cookie_name.clone();
+            self.security.csrf.cookie_name.clone_from(cookie_name);
         }
         if let Some(header_name) = &csrf.header_name {
-            self.security.csrf.header_name = header_name.clone();
+            self.security.csrf.header_name.clone_from(header_name);
         }
         if let Some(enabled) = csrf.enabled {
             self.security.csrf.enabled = enabled;
@@ -1130,7 +1114,7 @@ impl Config {
             self.limits.enabled = enabled;
         }
         if let Some(default_profile) = &limits.default_profile {
-            self.limits.default_profile = default_profile.clone();
+            self.limits.default_profile.clone_from(default_profile);
         }
     }
 
@@ -1144,10 +1128,10 @@ impl Config {
             self.auth.absolute_seconds = absolute;
         }
         if let Some(cookie_name) = &session.session_cookie_name {
-            self.session.session_cookie_name = cookie_name.clone();
+            self.session.session_cookie_name.clone_from(cookie_name);
         }
         if let Some(csrf_cookie_name) = &session.csrf_cookie_name {
-            self.session.csrf_cookie_name = csrf_cookie_name.clone();
+            self.session.csrf_cookie_name.clone_from(csrf_cookie_name);
         }
         if let Some(max_sessions) = session.max_sessions_per_user {
             self.session.max_sessions_per_user = Some(max_sessions);
@@ -1189,7 +1173,7 @@ impl Config {
 
     fn apply_database_partial(&mut self, database: &DatabasePartial) {
         if let Some(url) = &database.url {
-            self.db.url = url.clone();
+            self.db.url.clone_from(url);
         }
         if let Some(timeout) = database.statement_timeout_ms {
             self.db.statement_timeout_ms = timeout;
@@ -1198,7 +1182,7 @@ impl Config {
             self.db.max_connections = max_connections;
         }
         if let Some(path) = &database.bootstrap_path {
-            self.db.bootstrap_path = path.clone();
+            self.db.bootstrap_path.clone_from(path);
         }
     }
 
@@ -1207,16 +1191,16 @@ impl Config {
             self.sse.heartbeat_seconds = heartbeat;
         }
         if let Some(capacity) = sse.channel_capacity {
-            self.sse.channel_capacity = capacity as usize;
+            self.sse.channel_capacity = clamp_usize(capacity);
         }
         if let Some(prefix) = &sse.id_prefix {
-            self.sse.id_prefix = prefix.clone();
+            self.sse.id_prefix.clone_from(prefix);
         }
         if let Some(retention) = sse.replay_retention_seconds {
             self.sse.replay_retention_seconds = retention;
         }
         if let Some(max_backfill) = sse.max_backfill_events {
-            self.sse.max_backfill_events = max_backfill as usize;
+            self.sse.max_backfill_events = clamp_usize(max_backfill);
         }
         if let Some(persistence) = &sse.persistence {
             self.apply_sse_persistence_partial(persistence);
@@ -1231,13 +1215,14 @@ impl Config {
             self.sse.persistence.enabled = enabled;
         }
         if let Some(max_events) = persistence.max_events_per_user {
-            self.sse.persistence.max_events_per_user = max_events as usize;
+            self.sse.persistence.max_events_per_user = clamp_usize(max_events);
         }
         if let Some(batch) = persistence.prune_batch_size {
-            self.sse.persistence.prune_batch_size = batch as usize;
+            self.sse.persistence.prune_batch_size = clamp_usize(batch);
         }
         if let Some(retention) = persistence.retention_hours {
-            self.sse.persistence.retention_hours = retention.min(u64::from(u32::MAX)) as u32;
+            let bounded = retention.min(u64::from(u32::MAX));
+            self.sse.persistence.retention_hours = clamp_u32(bounded);
         }
     }
 
@@ -1277,16 +1262,16 @@ impl Config {
 
     fn apply_cli_partial(&mut self, cli: &CliPartial) {
         if let Some(path) = &cli.session_store {
-            self.cli.session_store = path.clone();
+            self.cli.session_store.clone_from(path);
         }
     }
 
     fn apply_web_partial(&mut self, web: &WebPartial) {
         if let Some(static_dir) = &web.static_dir {
-            self.web.static_dir = static_dir.clone();
+            self.web.static_dir.clone_from(static_dir);
         }
         if let Some(spa_index) = &web.spa_index {
-            self.web.spa_index = spa_index.clone();
+            self.web.spa_index.clone_from(spa_index);
         }
     }
 
@@ -1309,8 +1294,8 @@ impl Config {
         self.apply_env_database_overrides()?;
         self.apply_env_sse_overrides()?;
         self.apply_env_feature_overrides()?;
-        self.apply_env_cli_overrides()?;
-        self.apply_env_web_overrides()?;
+        self.apply_env_cli_overrides();
+        self.apply_env_web_overrides();
 
         Ok(flags)
     }
@@ -1549,7 +1534,7 @@ impl Config {
             self.sse.backpressure.drop_strategy = SseDropStrategy::from_str(&strategy)?;
         }
         if let Some(ratio) = env_value_f32(&["sse", "backpressure", "warn_queue_ratio"])? {
-            self.sse.backpressure.warn_queue_ratio = ratio as f64;
+            self.sse.backpressure.warn_queue_ratio = f64::from(ratio);
         }
         Ok(())
     }
@@ -1567,21 +1552,19 @@ impl Config {
         Ok(())
     }
 
-    fn apply_env_cli_overrides(&mut self) -> Result<(), ConfigError> {
+    fn apply_env_cli_overrides(&mut self) {
         if let Some(session_store) = env_value(&["cli", "session_store"]) {
             self.cli.session_store = PathBuf::from(session_store);
         }
-        Ok(())
     }
 
-    fn apply_env_web_overrides(&mut self) -> Result<(), ConfigError> {
+    fn apply_env_web_overrides(&mut self) {
         if let Some(static_dir) = env_value(&["web", "static_dir"]) {
             self.web.static_dir = PathBuf::from(static_dir);
         }
         if let Some(spa_index) = env_value(&["web", "spa_index"]) {
             self.web.spa_index = PathBuf::from(spa_index);
         }
-        Ok(())
     }
 
     fn validate(&mut self) -> Result<Vec<String>, ConfigError> {
@@ -1706,12 +1689,10 @@ impl Config {
                     .into(),
             );
         }
-        if let Some(max_sessions) = self.session.max_sessions_per_user {
-            if max_sessions == 0 {
-                errors.push(
-                    "session.max_sessions_per_user must be greater than zero when set".into(),
-                );
-            }
+        if let Some(max_sessions) = self.session.max_sessions_per_user
+            && max_sessions == 0
+        {
+            errors.push("session.max_sessions_per_user must be greater than zero when set".into());
         }
     }
 
@@ -2217,9 +2198,6 @@ impl FileConfigData {
                 path: path.clone(),
                 message: err.to_string(),
             })?,
-            "" => {
-                return Err(ConfigError::UnsupportedFormat { path });
-            }
             _ => {
                 return Err(ConfigError::UnsupportedFormat { path });
             }
@@ -2237,14 +2215,17 @@ impl FileConfigData {
 pub struct SecretString(String);
 
 impl SecretString {
+    #[must_use]
     pub const fn new(value: String) -> Self {
         Self(value)
     }
 
+    #[must_use]
     pub fn expose(&self) -> &str {
         &self.0
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.trim().is_empty()
     }
@@ -2301,6 +2282,14 @@ fn parse_url(field: &str, value: &str) -> Result<Url, ConfigError> {
         field: field.into(),
         message: err.to_string(),
     })
+}
+
+fn clamp_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
+
+fn clamp_u32(value: u64) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
 }
 
 fn env_value(path: &[&str]) -> Option<String> {
@@ -2402,12 +2391,12 @@ fn default_session_store_path() -> PathBuf {
 }
 
 fn redact_url_credentials(url: &str) -> String {
-    if let Ok(mut parsed) = Url::parse(url) {
-        if parsed.password().is_some() || !parsed.username().is_empty() {
-            parsed.set_username("****").ok();
-            parsed.set_password(Some("****")).ok();
-            return parsed.to_string();
-        }
+    if let Ok(mut parsed) = Url::parse(url)
+        && (parsed.password().is_some() || !parsed.username().is_empty())
+    {
+        parsed.set_username("****").ok();
+        parsed.set_password(Some("****")).ok();
+        return parsed.to_string();
     }
     url.to_string()
 }
@@ -2419,6 +2408,15 @@ mod tests {
     use std::env;
     use std::io::Write;
     use tempfile::Builder;
+
+    const ENV_RESET_KEYS: &[&str] = &[
+        "RUSTYGPT_SERVER_PORT",
+        "RUSTYGPT_SERVER__PUBLIC_BASE_URL",
+        "RUSTYGPT_FEATURES__AUTH_V1",
+        "RUSTYGPT_OAUTH__GITHUB__CLIENT_ID",
+        "RUSTYGPT_OAUTH__GITHUB__CLIENT_SECRET",
+        "RUSTYGPT_OAUTH__REDIRECT_BASE",
+    ];
 
     fn set_env_var(key: &str, value: &str) {
         unsafe {
@@ -2433,15 +2431,11 @@ mod tests {
     }
 
     fn clear_relevant_env() {
-        for key in [
-            "RUSTYGPT_SERVER_PORT",
-            "RUSTYGPT_SERVER__PUBLIC_BASE_URL",
-            "RUSTYGPT_FEATURES__AUTH_V1",
-            "RUSTYGPT_OAUTH__GITHUB__CLIENT_ID",
-            "RUSTYGPT_OAUTH__GITHUB__CLIENT_SECRET",
-            "RUSTYGPT_OAUTH__REDIRECT_BASE",
-            "CONFIG_FILE",
-        ] {
+        for key in ENV_RESET_KEYS
+            .iter()
+            .copied()
+            .chain(std::iter::once("CONFIG_FILE"))
+        {
             unsafe {
                 env::remove_var(key);
             }
@@ -2528,15 +2522,6 @@ sse_v1 = true
         }
 
         clear_relevant_env();
-        const KEYS: &[&str] = &[
-            "RUSTYGPT_SERVER_PORT",
-            "RUSTYGPT_SERVER__PUBLIC_BASE_URL",
-            "RUSTYGPT_FEATURES__AUTH_V1",
-            "RUSTYGPT_OAUTH__GITHUB__CLIENT_ID",
-            "RUSTYGPT_OAUTH__GITHUB__CLIENT_SECRET",
-            "RUSTYGPT_OAUTH__REDIRECT_BASE",
-        ];
-
         set_env_var("RUSTYGPT_SERVER_PORT", "5555");
         set_env_var("RUSTYGPT_SERVER__PUBLIC_BASE_URL", "http://localhost:5555");
         set_env_var("RUSTYGPT_FEATURES__AUTH_V1", "true");
@@ -2559,7 +2544,7 @@ sse_v1 = true
             "auth_v1 remains disabled without full configuration even when env vars are present"
         );
 
-        for key in KEYS {
+        for key in ENV_RESET_KEYS {
             remove_env_var(key);
         }
     }

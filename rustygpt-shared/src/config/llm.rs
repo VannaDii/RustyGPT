@@ -34,7 +34,7 @@ pub struct LLMConfiguration {
 /// Configuration for a specific LLM provider
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProviderConfig {
-    /// Provider type (e.g., "llama_cpp", "candle", "onnx")
+    /// Provider type (e.g., `llama_cpp`, `candle`, `onnx`)
     pub provider_type: String,
 
     /// Whether this provider is enabled
@@ -53,7 +53,7 @@ pub struct ProviderConfig {
 /// Configuration for a specific model
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ModelConfig {
-    /// Path to the model file (relative to models_directory or absolute)
+    /// Path to the model file (relative to `models_directory` or absolute)
     pub path: String,
 
     /// Provider to use for this model
@@ -99,6 +99,7 @@ pub struct ModelParameters {
 
 /// Model capabilities
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // TODO(llm-caps-001): replace booleans with a capability bitset when requirements stabilize.
 pub struct ModelCapabilities {
     /// Supports text generation
     pub text_generation: bool,
@@ -121,6 +122,7 @@ pub struct ModelCapabilities {
 
 /// Global LLM settings
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // TODO(llm-caps-001): consolidate flags into structured settings when we add more tunables.
 pub struct GlobalLLMSettings {
     /// Default timeout for LLM operations (in seconds)
     pub default_timeout: u64,
@@ -226,6 +228,7 @@ impl Default for GlobalLLMSettings {
 
 impl LLMConfiguration {
     /// Load LLM configuration from environment variables and defaults
+    #[must_use]
     pub fn load_from_env() -> Self {
         let mut config = Self::default();
 
@@ -242,38 +245,36 @@ impl LLMConfiguration {
             config.default_chat_model = default_model;
         }
 
-        if let Ok(gpu_layers) = env::var("RUSTYGPT_GPU_LAYERS") {
-            if let Ok(layers) = gpu_layers.parse::<u32>() {
-                if let Some(llama_config) = config.providers.get_mut("llama_cpp") {
-                    llama_config.n_gpu_layers = Some(layers);
-                }
-            }
+        if let Ok(gpu_layers) = env::var("RUSTYGPT_GPU_LAYERS")
+            && let Ok(layers) = gpu_layers.parse::<u32>()
+            && let Some(llama_config) = config.providers.get_mut("llama_cpp")
+        {
+            llama_config.n_gpu_layers = Some(layers);
         }
 
-        if let Ok(threads) = env::var("RUSTYGPT_THREADS") {
-            if let Ok(thread_count) = threads.parse::<u32>() {
-                if let Some(llama_config) = config.providers.get_mut("llama_cpp") {
-                    llama_config.n_threads = Some(thread_count);
-                }
-            }
+        if let Ok(threads) = env::var("RUSTYGPT_THREADS")
+            && let Ok(thread_count) = threads.parse::<u32>()
+            && let Some(llama_config) = config.providers.get_mut("llama_cpp")
+        {
+            llama_config.n_threads = Some(thread_count);
         }
 
-        if let Ok(timeout) = env::var("RUSTYGPT_LLM_TIMEOUT") {
-            if let Ok(timeout_secs) = timeout.parse::<u64>() {
-                config.global_settings.default_timeout = timeout_secs;
-            }
+        if let Ok(timeout) = env::var("RUSTYGPT_LLM_TIMEOUT")
+            && let Ok(timeout_secs) = timeout.parse::<u64>()
+        {
+            config.global_settings.default_timeout = timeout_secs;
         }
 
-        if let Ok(max_requests) = env::var("RUSTYGPT_MAX_CONCURRENT_REQUESTS") {
-            if let Ok(max) = max_requests.parse::<u32>() {
-                config.global_settings.max_concurrent_requests = max;
-            }
+        if let Ok(max_requests) = env::var("RUSTYGPT_MAX_CONCURRENT_REQUESTS")
+            && let Ok(max) = max_requests.parse::<u32>()
+        {
+            config.global_settings.max_concurrent_requests = max;
         }
 
-        if let Ok(persist_chunks) = env::var("RUSTYGPT_PERSIST_STREAM_CHUNKS") {
-            if let Ok(value) = persist_chunks.parse::<bool>() {
-                config.global_settings.persist_stream_chunks = value;
-            }
+        if let Ok(persist_chunks) = env::var("RUSTYGPT_PERSIST_STREAM_CHUNKS")
+            && let Ok(value) = persist_chunks.parse::<bool>()
+        {
+            config.global_settings.persist_stream_chunks = value;
         }
 
         config
@@ -294,56 +295,60 @@ impl LLMConfiguration {
             self.default_chat_model = default_model;
         }
 
-        if let Ok(gpu_layers) = env::var("RUSTYGPT_GPU_LAYERS") {
-            if let Ok(layers) = gpu_layers.parse::<u32>() {
-                if let Some(llama_config) = self.providers.get_mut("llama_cpp") {
-                    llama_config.n_gpu_layers = Some(layers);
-                }
-            }
+        if let Ok(gpu_layers) = env::var("RUSTYGPT_GPU_LAYERS")
+            && let Ok(layers) = gpu_layers.parse::<u32>()
+            && let Some(llama_config) = self.providers.get_mut("llama_cpp")
+        {
+            llama_config.n_gpu_layers = Some(layers);
         }
 
-        if let Ok(threads) = env::var("RUSTYGPT_THREADS") {
-            if let Ok(thread_count) = threads.parse::<u32>() {
-                if let Some(llama_config) = self.providers.get_mut("llama_cpp") {
-                    llama_config.n_threads = Some(thread_count);
-                }
-            }
+        if let Ok(threads) = env::var("RUSTYGPT_THREADS")
+            && let Ok(thread_count) = threads.parse::<u32>()
+            && let Some(llama_config) = self.providers.get_mut("llama_cpp")
+        {
+            llama_config.n_threads = Some(thread_count);
         }
 
-        if let Ok(timeout) = env::var("RUSTYGPT_LLM_TIMEOUT") {
-            if let Ok(timeout_secs) = timeout.parse::<u64>() {
-                self.global_settings.default_timeout = timeout_secs;
-            }
+        if let Ok(timeout) = env::var("RUSTYGPT_LLM_TIMEOUT")
+            && let Ok(timeout_secs) = timeout.parse::<u64>()
+        {
+            self.global_settings.default_timeout = timeout_secs;
         }
 
-        if let Ok(max_requests) = env::var("RUSTYGPT_MAX_CONCURRENT_REQUESTS") {
-            if let Ok(max) = max_requests.parse::<u32>() {
-                self.global_settings.max_concurrent_requests = max;
-            }
+        if let Ok(max_requests) = env::var("RUSTYGPT_MAX_CONCURRENT_REQUESTS")
+            && let Ok(max) = max_requests.parse::<u32>()
+        {
+            self.global_settings.max_concurrent_requests = max;
         }
 
-        if let Ok(persist_chunks) = env::var("RUSTYGPT_PERSIST_STREAM_CHUNKS") {
-            if let Ok(value) = persist_chunks.parse::<bool>() {
-                self.global_settings.persist_stream_chunks = value;
-            }
+        if let Ok(persist_chunks) = env::var("RUSTYGPT_PERSIST_STREAM_CHUNKS")
+            && let Ok(value) = persist_chunks.parse::<bool>()
+        {
+            self.global_settings.persist_stream_chunks = value;
         }
     }
 
     /// Get configuration for a specific model
+    #[must_use]
     pub fn get_model_config(&self, model_name: &str) -> Option<&ModelConfig> {
         self.models.get(model_name)
     }
 
     /// Get configuration for a specific provider
+    #[must_use]
     pub fn get_provider_config(&self, provider_name: &str) -> Option<&ProviderConfig> {
         self.providers.get(provider_name)
     }
 
-    /// Convert model configuration to LLMConfig for use with the trait system
+    /// Convert model configuration to `LLMConfig` for use with the trait system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the requested model or its provider is missing from the configuration.
     pub fn to_llm_config(&self, model_name: &str) -> Result<LLMConfig, String> {
         let model_config = self
             .get_model_config(model_name)
-            .ok_or_else(|| format!("Model '{}' not found in configuration", model_name))?;
+            .ok_or_else(|| format!("Model '{model_name}' not found in configuration"))?;
 
         let provider_config = self
             .get_provider_config(&model_config.provider)
@@ -384,12 +389,20 @@ impl LLMConfiguration {
         })
     }
 
-    /// Get the default chat model configuration
+    /// Get the default chat model configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the default chat model cannot be resolved.
     pub fn get_default_chat_config(&self) -> Result<LLMConfig, String> {
         self.to_llm_config(&self.default_chat_model)
     }
 
-    /// Get the default embedding model configuration (if available)
+    /// Get the default embedding model configuration (if available).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no default embedding model is configured or cannot be resolved.
     pub fn get_default_embedding_config(&self) -> Result<LLMConfig, String> {
         let embedding_model = self
             .default_embedding_model
@@ -409,7 +422,11 @@ impl LLMConfiguration {
         self.providers.insert(name, config);
     }
 
-    /// Validate the configuration
+    /// Validate the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns a collection of descriptive error messages when validation fails.
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
@@ -438,13 +455,12 @@ impl LLMConfiguration {
         }
 
         // Check if embedding model exists (if configured)
-        if let Some(ref embedding_model) = self.default_embedding_model {
-            if !self.models.contains_key(embedding_model) {
-                errors.push(format!(
-                    "Default embedding model '{}' not found in models configuration",
-                    embedding_model
-                ));
-            }
+        if let Some(embedding_model) = self.default_embedding_model.as_ref()
+            && !self.models.contains_key(embedding_model)
+        {
+            errors.push(format!(
+                "Default embedding model '{embedding_model}' not found in models configuration"
+            ));
         }
 
         // Validate each model configuration

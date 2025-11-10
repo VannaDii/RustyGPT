@@ -1,6 +1,8 @@
-#![allow(clippy::all, clippy::pedantic)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![deny(warnings, clippy::pedantic)]
+#![allow(clippy::multiple_crate_versions)] // TODO(deps-001): remove once transitive dependencies converge.
 
-//! Main entry point for the RustyGPT backend CLI.
+//! Main entry point for the `RustyGPT` backend CLI.
 
 use clap::{Parser, Subcommand};
 use dotenv::dotenv;
@@ -10,7 +12,7 @@ use std::{error::Error, path::PathBuf};
 
 mod commands;
 
-/// RustyGPT CLI
+/// `RustyGPT` CLI
 #[derive(Parser)]
 #[command(name = "RustyGPT CLI")]
 #[command(about = "Command-line interface for RustyGPT", long_about = None)]
@@ -19,7 +21,7 @@ struct Cli {
     command: Commands,
 }
 
-/// Subcommands for the RustyGPT CLI
+/// Subcommands for the `RustyGPT` CLI
 #[derive(Subcommand)]
 enum Commands {
     /// Start the backend server
@@ -47,9 +49,9 @@ enum Commands {
     Reply(commands::chat::ReplyArgs),
     /// Follow SSE updates for a thread
     Follow(commands::chat::FollowArgs),
-    /// Generate the OpenAPI specification
+    /// Generate the `OpenAPI` specification
     Spec {
-        /// Output path for the OpenAPI spec (YAML or JSON based on extension, or "json"/"yaml" for streaming)
+        /// Output path for the `OpenAPI` spec (YAML or JSON based on extension, or "json"/"yaml" for streaming)
         output_path: Option<String>,
     },
 
@@ -150,12 +152,12 @@ mod tests {
     fn test_cli_spec_command() {
         let cli = Cli::try_parse_from(["cli", "spec", "test.json"]);
         if let Err(e) = &cli {
-            panic!("CLI parse error: {}", e);
+            panic!("CLI parse error: {e}");
         }
 
         match cli.unwrap().command {
             Commands::Spec { output_path } => {
-                assert_eq!(output_path, Some("test.json".to_string()))
+                assert_eq!(output_path, Some("test.json".to_string()));
             }
             _ => panic!("Expected Spec command"),
         }

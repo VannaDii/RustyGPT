@@ -27,7 +27,6 @@ use std::{env, sync::Arc};
     ),
     tag = "Auth"
 )]
-#[axum::debug_handler]
 pub async fn github_oauth_init() -> Json<OAuthInitResponse> {
     // In a real implementation, this would generate a proper OAuth URL with state
     let github_client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
@@ -35,8 +34,7 @@ pub async fn github_oauth_init() -> Json<OAuthInitResponse> {
     let auth_base_url = env::var("GITHUB_AUTH_URL").unwrap_or_default();
 
     let auth_url = format!(
-        "{}?client_id={}&redirect_uri={}&scope=user",
-        auth_base_url, github_client_id, redirect_uri
+        "{auth_base_url}?client_id={github_client_id}&redirect_uri={redirect_uri}&scope=user"
     );
 
     Json(OAuthInitResponse { auth_url })
@@ -52,7 +50,6 @@ pub async fn github_oauth_init() -> Json<OAuthInitResponse> {
     ),
     tag = "Auth"
 )]
-#[axum::debug_handler]
 pub async fn github_oauth_callback(
     query: Query<OAuthCallback>,
     state: State<Arc<AppState>>,
@@ -70,7 +67,6 @@ pub async fn github_oauth_callback(
     ),
     tag = "Auth"
 )]
-#[axum::debug_handler]
 pub async fn github_oauth_manual(
     state: State<Arc<AppState>>,
     payload: Json<OAuthRequest>,

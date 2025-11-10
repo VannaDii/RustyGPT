@@ -62,7 +62,7 @@ pub struct SystemHardware {
     pub gpu_memory: Option<u64>,
     /// Whether the system supports memory mapping
     pub supports_mmap: bool,
-    /// Architecture (x86_64, aarch64, etc.)
+    /// Architecture (`x86_64`, `aarch64`, etc.)
     pub architecture: String,
 }
 
@@ -442,14 +442,16 @@ impl SystemHardware {
     /// # Returns
     ///
     /// [`OptimalParams`] with recommended settings for optimal performance.
+    #[must_use]
     pub fn calculate_optimal_params(&self, model_size_estimate: Option<u64>) -> OptimalParams {
-        let memory_buffer_percent = self.memory_buffer_percent();
-        let available_for_model = self.available_memory_for_model(memory_buffer_percent);
+        let buffer_basis_points = self.memory_buffer_basis_points();
+        let memory_buffer_percent = f32::from(buffer_basis_points) / 10_000.0;
+        let available_for_model = self.available_memory_for_model(buffer_basis_points);
         let n_threads = self.optimal_thread_count();
         let n_gpu_layers = self.recommended_gpu_layers();
         let context_size = self.recommended_context_size(available_for_model, model_size_estimate);
         let batch_size = self.recommended_batch_size();
-        let max_model_size = (available_for_model as f32 * 0.7) as u64;
+        let max_model_size = available_for_model.saturating_mul(7) / 10;
 
         OptimalParams {
             n_threads,
@@ -462,17 +464,21 @@ impl SystemHardware {
         }
     }
 
-    const fn memory_buffer_percent(&self) -> f32 {
+    const fn memory_buffer_basis_points(&self) -> u16 {
         match self.total_memory {
-            mem if mem < 4 * 1024 * 1024 * 1024 => 0.3,
-            mem if mem < 8 * 1024 * 1024 * 1024 => 0.25,
-            mem if mem < 16 * 1024 * 1024 * 1024 => 0.2,
-            _ => 0.15,
+            mem if mem < 4 * 1024 * 1024 * 1024 => 3_000,
+            mem if mem < 8 * 1024 * 1024 * 1024 => 2_500,
+            mem if mem < 16 * 1024 * 1024 * 1024 => 2_000,
+            _ => 1_500,
         }
     }
 
-    fn available_memory_for_model(&self, buffer_percent: f32) -> u64 {
-        (self.available_memory as f32 * (1.0 - buffer_percent)) as u64
+    fn available_memory_for_model(&self, buffer_basis_points: u16) -> u64 {
+        let reserve = self
+            .available_memory
+            .saturating_mul(u64::from(buffer_basis_points))
+            / 10_000;
+        self.available_memory.saturating_sub(reserve)
     }
 
     const fn optimal_thread_count(&self) -> u32 {
@@ -577,22 +583,41 @@ impl SystemHardware {
             self.cpu_model,
             self.cpu_cores,
             self.cpu_threads,
-            self.total_memory as f64 / (1024.0 * 1024.0 * 1024.0),
-            self.available_memory as f64 / (1024.0 * 1024.0 * 1024.0),
+            Self::bytes_to_gib(self.total_memory),
+            Self::bytes_to_gib(self.available_memory),
             self.gpu_type,
             self.gpu_memory.map_or_else(String::new, |gpu_mem| {
-                format!(
-                    " ({:.1}GB VRAM)",
-                    gpu_mem as f64 / (1024.0 * 1024.0 * 1024.0)
-                )
+                format!(" ({:.1}GB VRAM)", Self::bytes_to_gib(gpu_mem))
             })
         )
+    }
+
+    fn bytes_to_gib(bytes: u64) -> f64 {
+        const GIB_F64: f64 = 1024.0 * 1024.0 * 1024.0;
+        const TWO_POW_32_F64: f64 = 4_294_967_296.0;
+
+        let Ok(high) = u32::try_from(bytes >> 32) else {
+            return f64::MAX;
+        };
+        let Ok(low) = u32::try_from(bytes & 0xFFFF_FFFF) else {
+            return f64::MAX;
+        };
+
+        f64::from(high).mul_add(TWO_POW_32_F64, f64::from(low)) / GIB_F64
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_f32_close(actual: f32, expected: f32) {
+        let diff = (actual - expected).abs();
+        assert!(
+            diff <= f32::EPSILON,
+            "expected {expected}, got {actual} (diff {diff})"
+        );
+    }
 
     #[test]
     fn test_gpu_type_serialization() {
@@ -707,7 +732,7 @@ mod tests {
     #[test]
     fn test_hardware_error_debug() {
         let error = HardwareError::MemoryDetectionFailed("test".to_string());
-        let debug_str = format!("{:?}", error);
+        let debug_str = format!("{error:?}");
         assert!(debug_str.contains("MemoryDetectionFailed"));
         assert!(debug_str.contains("test"));
     }
@@ -778,7 +803,7 @@ mod tests {
     #[test]
     fn test_gpu_type_debug() {
         let gpu_type = GpuType::Nvidia;
-        let debug_str = format!("{:?}", gpu_type);
+        let debug_str = format!("{gpu_type:?}");
         assert_eq!(debug_str, "Nvidia");
     }
 
@@ -824,7 +849,7 @@ mod tests {
             architecture: "x86_64".to_string(),
         };
 
-        let debug_str = format!("{:?}", hardware);
+        let debug_str = format!("{hardware:?}");
         assert!(debug_str.contains("SystemHardware"));
         assert!(debug_str.contains("Test CPU"));
         assert!(debug_str.contains("Nvidia"));
@@ -851,9 +876,9 @@ mod tests {
         assert_eq!(params.batch_size, deserialized.batch_size);
         assert_eq!(params.max_model_size, deserialized.max_model_size);
         assert_eq!(params.use_mmap, deserialized.use_mmap);
-        assert_eq!(
+        assert_f32_close(
             params.memory_buffer_percent,
-            deserialized.memory_buffer_percent
+            deserialized.memory_buffer_percent,
         );
     }
 
@@ -869,7 +894,7 @@ mod tests {
             memory_buffer_percent: 0.2,
         };
 
-        let debug_str = format!("{:?}", params);
+        let debug_str = format!("{params:?}");
         assert!(debug_str.contains("OptimalParams"));
         assert!(debug_str.contains("n_threads: 8"));
         assert!(debug_str.contains("n_gpu_layers: 20"));
@@ -895,7 +920,7 @@ mod tests {
         assert!(params.n_gpu_layers == 35); // Should use maximum GPU acceleration
         assert_eq!(params.context_size, 8192); // Should allow large context
         assert_eq!(params.batch_size, 1024); // Large batch size for high memory
-        assert_eq!(params.memory_buffer_percent, 0.15); // 15% buffer for high memory systems
+        assert_f32_close(params.memory_buffer_percent, 0.15); // 15% buffer for high memory systems
     }
 
     #[test]
@@ -918,7 +943,7 @@ mod tests {
         assert_eq!(params.n_gpu_layers, 20); // 6GB VRAM should get 20 layers
         // 8GB total gets 20% buffer, Available for model: 6GB * 0.8 = 4.8GB, remaining: 4.8GB - 2GB = 2.8GB, so 4096 context
         assert_eq!(params.context_size, 4096);
-        assert_eq!(params.memory_buffer_percent, 0.2); // 20% buffer for 8GB systems (not < 8GB)
+        assert_f32_close(params.memory_buffer_percent, 0.2); // 20% buffer for 8GB systems (not < 8GB)
     }
 
     #[test]
@@ -1187,7 +1212,7 @@ mod tests {
         };
 
         let params = low_memory_hardware.calculate_optimal_params(None);
-        assert_eq!(params.memory_buffer_percent, 0.3); // 30% buffer
+        assert_f32_close(params.memory_buffer_percent, 0.3); // 30% buffer
 
         // Test 8GB system (25% buffer)
         let medium_memory_hardware = SystemHardware {
@@ -1203,7 +1228,7 @@ mod tests {
         };
 
         let params = medium_memory_hardware.calculate_optimal_params(None);
-        assert_eq!(params.memory_buffer_percent, 0.25); // 25% buffer
+        assert_f32_close(params.memory_buffer_percent, 0.25); // 25% buffer
 
         // Test 16GB system (20% buffer)
         let good_memory_hardware = SystemHardware {
@@ -1219,7 +1244,7 @@ mod tests {
         };
 
         let params = good_memory_hardware.calculate_optimal_params(None);
-        assert_eq!(params.memory_buffer_percent, 0.2); // 20% buffer
+        assert_f32_close(params.memory_buffer_percent, 0.2); // 20% buffer
     }
 
     #[test]
@@ -1273,7 +1298,7 @@ mod tests {
             }
             Err(e) => {
                 // It's okay if it fails in CI environments
-                eprintln!("Memory detection failed (expected in CI): {:?}", e);
+                eprintln!("Memory detection failed (expected in CI): {e:?}");
             }
         }
     }
@@ -1291,7 +1316,7 @@ mod tests {
             }
             Err(e) => {
                 // It's okay if it fails in CI environments
-                eprintln!("Memory detection failed (expected in CI): {:?}", e);
+                eprintln!("Memory detection failed (expected in CI): {e:?}");
             }
         }
     }
@@ -1309,7 +1334,7 @@ mod tests {
             }
             Err(e) => {
                 // It's okay if it fails in CI environments
-                eprintln!("CPU detection failed (expected in CI): {:?}", e);
+                eprintln!("CPU detection failed (expected in CI): {e:?}");
             }
         }
     }
@@ -1327,7 +1352,7 @@ mod tests {
             }
             Err(e) => {
                 // It's okay if it fails in CI environments
-                eprintln!("CPU detection failed (expected in CI): {:?}", e);
+                eprintln!("CPU detection failed (expected in CI): {e:?}");
             }
         }
     }
@@ -1344,7 +1369,7 @@ mod tests {
             }
             Err(e) => {
                 // It's okay if it fails in CI environments
-                eprintln!("GPU detection failed (expected in CI): {:?}", e);
+                eprintln!("GPU detection failed (expected in CI): {e:?}");
             }
         }
     }
@@ -1361,7 +1386,7 @@ mod tests {
             }
             Err(e) => {
                 // It's okay if it fails in CI environments
-                eprintln!("GPU detection failed (expected in CI): {:?}", e);
+                eprintln!("GPU detection failed (expected in CI): {e:?}");
             }
         }
     }
@@ -1403,8 +1428,7 @@ mod tests {
             Err(e) => {
                 // It's okay if it fails in CI environments or unsupported platforms
                 eprintln!(
-                    "Hardware detection failed (expected in CI or unsupported platform): {:?}",
-                    e
+                    "Hardware detection failed (expected in CI or unsupported platform): {e:?}"
                 );
             }
         }

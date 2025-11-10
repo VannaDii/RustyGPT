@@ -318,7 +318,7 @@ mod tests {
         let error = LLMError::InvalidInput {
             message: "test".to_string(),
         };
-        let debug_str = format!("{:?}", error);
+        let debug_str = format!("{error:?}");
         assert!(debug_str.contains("InvalidInput"));
         assert!(debug_str.contains("test"));
     }
@@ -340,7 +340,7 @@ mod tests {
         // Test with String from concatenation
         let prefix = "Error";
         let suffix = "occurred";
-        let error4 = LLMError::invalid_input(format!("{} {}", prefix, suffix));
+        let error4 = LLMError::invalid_input(format!("{prefix} {suffix}"));
         assert!(matches!(error4, LLMError::InvalidInput { .. }));
     }
 
@@ -387,15 +387,15 @@ mod tests {
             "Operation timed out after 1 seconds"
         );
 
-        let timeout_60s = LLMError::Timeout { seconds: 60 };
+        let timeout_sixty_seconds = LLMError::Timeout { seconds: 60 };
         assert_eq!(
-            timeout_60s.to_string(),
+            timeout_sixty_seconds.to_string(),
             "Operation timed out after 60 seconds"
         );
 
-        let timeout_0s = LLMError::Timeout { seconds: 0 };
+        let timeout_zero_seconds = LLMError::Timeout { seconds: 0 };
         assert_eq!(
-            timeout_0s.to_string(),
+            timeout_zero_seconds.to_string(),
             "Operation timed out after 0 seconds"
         );
     }

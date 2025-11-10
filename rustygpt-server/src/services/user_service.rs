@@ -1,7 +1,7 @@
 //! User service supporting the currently implemented OAuth flows.
 
-use anyhow::Result;
 use sqlx::PgPool;
+use thiserror::Error;
 use uuid::Uuid;
 
 /// Minimal user service wrapper around stored procedures invoked by the OAuth handlers.
@@ -9,6 +9,16 @@ use uuid::Uuid;
 pub struct UserService {
     pool: PgPool,
 }
+
+#[derive(Debug, Error)]
+pub enum UserServiceError {
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+    #[error("failed to register OAuth user")]
+    MissingUserId,
+}
+
+type Result<T> = std::result::Result<T, UserServiceError>;
 
 impl UserService {
     /// Construct a new service bound to the provided connection pool.
@@ -33,6 +43,6 @@ impl UserService {
                 .fetch_one(&self.pool)
                 .await?;
 
-        user_id.ok_or_else(|| anyhow::anyhow!("Failed to register OAuth user"))
+        user_id.ok_or(UserServiceError::MissingUserId)
     }
 }

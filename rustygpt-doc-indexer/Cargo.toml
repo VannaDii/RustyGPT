@@ -1,7 +1,8 @@
 [package]
 name = "rustygpt-doc-indexer"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version.workspace = true
 description = "RustyGPT mdBook companion that builds machine-readable doc manifests."
 license = "Apache-2.0"
 repository = "https://github.com/vanna/rusty_gpt"

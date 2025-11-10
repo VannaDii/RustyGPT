@@ -55,14 +55,14 @@ mod native {
             if let Some(use_mmap) = config
                 .additional_params
                 .get("use_mmap")
-                .and_then(|value| value.as_bool())
+                .and_then(serde_json::Value::as_bool)
             {
                 params.use_mmap = use_mmap;
             }
             if let Some(use_mlock) = config
                 .additional_params
                 .get("use_mlock")
-                .and_then(|value| value.as_bool())
+                .and_then(serde_json::Value::as_bool)
             {
                 params.use_mlock = use_mlock;
             }
@@ -70,10 +70,10 @@ mod native {
         }
 
         fn build_model_info(model: &LlamaModel, config: &LLMConfig) -> ModelInfo {
-            let name = Path::new(&config.model_path)
-                .file_name()
-                .map(|value| value.to_string_lossy().to_string())
-                .unwrap_or_else(|| config.model_path.clone());
+            let name = Path::new(&config.model_path).file_name().map_or_else(
+                || config.model_path.clone(),
+                |value| value.to_string_lossy().to_string(),
+            );
 
             let capabilities = ModelCapabilities {
                 text_generation: true,
@@ -90,7 +90,7 @@ mod native {
                 version: None,
                 architecture: Some("llama.cpp".to_string()),
                 parameter_count: None,
-                context_length: Some(model.train_len() as u32),
+                context_length: Some(u32::try_from(model.train_len()).unwrap_or(u32::MAX)),
                 capabilities,
             }
         }
@@ -131,7 +131,7 @@ mod native {
                 move || LlamaModel::load_from_file(path, params)
             })
             .await
-            .map_err(|err| LLMError::internal(err))?
+            .map_err(LLMError::internal)?
             .map_err(map_load_error)?;
 
             let elapsed = load_started.elapsed().as_secs_f64();
@@ -162,8 +162,7 @@ mod native {
         fn is_model_supported(&self, model_path: &str) -> bool {
             Path::new(model_path)
                 .extension()
-                .map(|ext| ext.eq_ignore_ascii_case("gguf"))
-                .unwrap_or(false)
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
         }
     }
 
@@ -180,7 +179,7 @@ mod native {
                 text.push_str(&chunk.text_delta);
                 usage = chunk.usage.clone();
                 if chunk.is_final {
-                    finish_reason = chunk.finish_reason.clone();
+                    finish_reason.clone_from(&chunk.finish_reason);
                 }
             }
 
@@ -218,19 +217,9 @@ mod native {
                     .unwrap_or(u32::MAX);
 
                 let sampler = build_sampler(&config, &request);
-                let max_tokens_limit = request
-                    .max_tokens
-                    .or(config.max_tokens)
-                    .unwrap_or(512);
-                let max_tokens = if max_tokens_limit == 0 {
-                    None
-                } else {
-                    Some(max_tokens_limit)
-                };
-
+                let max_tokens = determine_max_tokens(&request, &config);
                 let max_predictions = max_tokens
-                    .map(|value| value as usize)
-                    .unwrap_or(u32::MAX as usize);
+                    .map_or(u32::MAX as usize, |value| value as usize);
 
                 let completion = session
                     .start_completing_with(
@@ -264,36 +253,32 @@ mod native {
                         }
                         if !delta.is_empty() {
                             let usage = TokenUsage::new(prompt_tokens, emitted_tokens);
-                            yield StreamingResponse {
-                                request_id: request.id,
-                                text_delta: delta.clone(),
-                                is_final: false,
-                                current_text: None,
-                                finish_reason: None,
+                            yield make_streaming_response(
+                                request.id,
+                                delta.clone(),
+                                false,
+                                None,
+                                None,
                                 usage,
-                                timestamp: Utc::now(),
-                            };
+                            );
                         }
                         finish_reason = Some(FinishReason::StopSequence);
                         break;
                     }
 
                     let usage = TokenUsage::new(prompt_tokens, emitted_tokens);
-                    yield StreamingResponse {
-                        request_id: request.id,
-                        text_delta: delta.clone(),
-                        is_final: false,
-                        current_text: None,
-                        finish_reason: None,
+                    yield make_streaming_response(
+                        request.id,
+                        delta.clone(),
+                        false,
+                        None,
+                        None,
                         usage,
-                        timestamp: Utc::now(),
-                    };
+                    );
 
-                    if let Some(limit) = max_tokens {
-                        if emitted_tokens >= limit {
-                            finish_reason = Some(FinishReason::MaxTokens);
-                            break;
-                        }
+                    if max_tokens.is_some_and(|limit| emitted_tokens >= limit) {
+                        finish_reason = Some(FinishReason::MaxTokens);
+                        break;
                     }
                 }
 
@@ -304,15 +289,14 @@ mod native {
 
                 let usage = TokenUsage::new(prompt_tokens, emitted_tokens);
                 let final_reason = finish_reason.unwrap_or(FinishReason::EndOfText);
-                yield StreamingResponse {
-                    request_id: request.id,
-                    text_delta: final_delta.clone(),
-                    is_final: true,
-                    current_text: Some(aggregated.clone()),
-                    finish_reason: Some(final_reason),
+                yield make_streaming_response(
+                    request.id,
+                    final_delta.clone(),
+                    true,
+                    Some(aggregated.clone()),
+                    Some(final_reason),
                     usage,
-                    timestamp: Utc::now(),
-                };
+                );
             };
 
             Ok(Box::pin(stream))
@@ -342,10 +326,17 @@ mod native {
             let tokens =
                 task::spawn_blocking(move || model.tokenize_bytes(input.as_bytes(), false, true))
                     .await
-                    .map_err(|err| LLMError::internal(err))?
+                    .map_err(LLMError::internal)?
                     .map_err(map_tokenization_error)?;
 
-            Ok(tokens.into_iter().map(|token| token.0 as u32).collect())
+            tokens
+                .into_iter()
+                .map(|token| {
+                    u32::try_from(token.0).map_err(|_| LLMError::TokenizationError {
+                        details: format!("token id {} is negative", token.0),
+                    })
+                })
+                .collect()
         }
     }
 
@@ -353,7 +344,7 @@ mod native {
         let params = session_params(config);
         task::spawn_blocking(move || model.create_session(params))
             .await
-            .map_err(|err| LLMError::internal(err))?
+            .map_err(LLMError::internal)?
             .map_err(map_context_error)
     }
 
@@ -384,13 +375,14 @@ mod native {
         });
 
         if let Some(top_k) = config.top_k {
-            stages.push(SamplerStage::TopK(top_k as i32));
+            let top_k_i32 = i32::try_from(top_k).unwrap_or(i32::MAX);
+            stages.push(SamplerStage::TopK(top_k_i32));
         }
         if let Some(top_p) = request
             .metadata
             .get("top_p")
-            .and_then(|value| value.as_f64())
-            .map(|value| value as f32)
+            .and_then(serde_json::Value::as_f64)
+            .and_then(f64_to_f32)
             .or(config.top_p)
         {
             stages.push(SamplerStage::TopP(top_p));
@@ -398,14 +390,14 @@ mod native {
         if let Some(min_p) = request
             .metadata
             .get("min_p")
-            .and_then(|value| value.as_f64())
-            .map(|value| value as f32)
+            .and_then(serde_json::Value::as_f64)
+            .and_then(f64_to_f32)
             .or_else(|| {
                 config
                     .additional_params
                     .get("min_p")
-                    .and_then(|value| value.as_f64())
-                    .map(|value| value as f32)
+                    .and_then(serde_json::Value::as_f64)
+                    .and_then(f64_to_f32)
             })
         {
             stages.push(SamplerStage::MinP(min_p));
@@ -428,6 +420,41 @@ mod native {
                 }
             },
         )
+    }
+
+    fn determine_max_tokens(request: &LLMRequest, config: &LLMConfig) -> Option<u32> {
+        let limit = request.max_tokens.or(config.max_tokens).unwrap_or(512);
+        (limit != 0).then_some(limit)
+    }
+
+    fn make_streaming_response(
+        request_id: uuid::Uuid,
+        text_delta: String,
+        is_final: bool,
+        current_text: Option<String>,
+        finish_reason: Option<FinishReason>,
+        usage: TokenUsage,
+    ) -> StreamingResponse {
+        StreamingResponse {
+            request_id,
+            text_delta,
+            is_final,
+            current_text,
+            finish_reason,
+            usage,
+            timestamp: Utc::now(),
+        }
+    }
+
+    fn f64_to_f32(value: f64) -> Option<f32> {
+        if !(f64::from(f32::MIN)..=f64::from(f32::MAX)).contains(&value) {
+            return None;
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            // Range check above ensures this narrow cast is safe.
+            Some(value as f32)
+        }
     }
 
     fn detect_stop_sequence<'a>(text: &'a str, stops: &'a [String]) -> Option<&'a str> {
@@ -531,9 +558,10 @@ mod native {
                     Err(err) => {
                         let valid_up_to = err.valid_up_to();
                         if valid_up_to > 0 {
-                            unsafe {
-                                output
-                                    .push_str(std::str::from_utf8_unchecked(&token[..valid_up_to]));
+                            if let Ok(valid_prefix) = std::str::from_utf8(&token[..valid_up_to]) {
+                                output.push_str(valid_prefix);
+                            } else {
+                                output.push_str(&String::from_utf8_lossy(&token[..valid_up_to]));
                             }
                         }
 

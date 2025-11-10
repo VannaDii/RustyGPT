@@ -26,7 +26,7 @@ pub fn app() -> Html {
     {
         let app_state_handle = app_state.clone();
         let store_dispatch_handle = store_dispatch.clone();
-        use_effect_with((), move |_| {
+        use_effect_with((), move |()| {
             let app_state_handle = app_state_handle.clone();
             spawn_local(async move {
                 let client = RustyGPTClient::shared();
@@ -60,8 +60,7 @@ pub fn app() -> Html {
                     Err(err) => {
                         let unauthorized = err
                             .status()
-                            .map(|status| status == StatusCode::UNAUTHORIZED)
-                            .unwrap_or(false);
+                            .is_some_and(|status| status == StatusCode::UNAUTHORIZED);
                         if unauthorized {
                             client.set_csrf_token(None);
                         }
@@ -91,7 +90,7 @@ pub fn app() -> Html {
     let logout_callback = {
         let state_setter = app_state.clone();
         let logout_dispatch = store_dispatch.clone();
-        Callback::from(move |_| {
+        Callback::from(move |()| {
             let client = RustyGPTClient::shared();
             client.set_csrf_token(None);
             let state = AppState {
@@ -109,7 +108,7 @@ pub fn app() -> Html {
         <Suspense fallback={ html!{ <crate::components::loading::Loading/> } }>
             {
                 match *app_state {
-                    None => html!{ /* Pending API response */ },
+                    None => html!{ <crate::components::loading::Loading/> },
                     Some(ref state) if state.is_setup == Some(false) => html!{
                         <Setup />
                     },
@@ -144,7 +143,7 @@ pub fn app() -> Html {
                             </BrowserRouter>
                         }
                     },
-                    _ => html!{}
+                    Some(_) => html!{}
                 }
             }
         </Suspense>

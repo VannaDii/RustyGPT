@@ -102,8 +102,8 @@ impl AssistantService {
         let prompt_tokens = model
             .count_tokens(&request.prompt)
             .await
-            .map_err(|err| AssistantError::Inference(err.to_string()))?
-            as i64;
+            .map_err(|err| AssistantError::Inference(err.to_string()))?;
+        let prompt_tokens = i64::from(prompt_tokens);
 
         let stream = model
             .generate_stream(request.clone())
@@ -292,12 +292,14 @@ impl AssistantMetrics {
         *count += 1;
         let current = *count;
         drop(guard);
+        #[allow(clippy::cast_precision_loss)]
+        let gauge_value = current as f64;
         metrics::gauge!(
             "llm_active_sessions",
             "provider" => provider.to_string(),
             "model" => model.to_string()
         )
-        .set(current as f64);
+        .set(gauge_value);
     }
 
     fn decrement(&self, provider: &str, model: &str) {
@@ -320,12 +322,14 @@ impl AssistantMetrics {
             guard.remove(&key);
         }
         drop(guard);
+        #[allow(clippy::cast_precision_loss)]
+        let gauge_value = current as f64;
         metrics::gauge!(
             "llm_active_sessions",
             "provider" => provider.to_string(),
             "model" => model.to_string()
         )
-        .set(current as f64);
+        .set(gauge_value);
     }
 }
 

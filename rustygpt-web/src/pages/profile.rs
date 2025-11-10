@@ -8,7 +8,7 @@ extern "C" {
     fn log(s: &str);
 }
 
-/// ProfilePage page component
+/// `ProfilePage` page component
 #[function_component(ProfilePage)]
 pub fn profile_page() -> Html {
     let (_i18n, _) = use_translation();

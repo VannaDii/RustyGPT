@@ -19,10 +19,10 @@ pub fn header_nav_item_dropdown<R: Routable + Clone + PartialEq + Eq + Into<AppR
     let route = props.route.clone();
     let route_path = format!(
         "admin.routes{}",
-        route.to_path().replace("/admin", "").replace("/", ".")
+        route.to_path().replace("/admin", "").replace('/', ".")
     );
-    let route_name = i18n.t(&format!("{}.title", route_path));
-    let route_icon = i18n.t(&format!("{}.icon", route_path));
+    let route_name = i18n.t(&format!("{route_path}.title"));
+    let route_icon = i18n.t(&format!("{route_path}.icon"));
 
     // Convert R to AppRoute for comparison
     let app_route: AppRoute = props.route.clone().into();
@@ -35,7 +35,7 @@ pub fn header_nav_item_dropdown<R: Routable + Clone + PartialEq + Eq + Into<AppR
     html! {
       <li>
           <Link<R> to={props.route.clone()} classes={classes!("btn", "btn-ghost", "gap-2", active_route_class)}>
-              <i class={classes!("fa-solid", "fa-fw", format!("fa-{}", route_icon))}></i>
+              <i class={classes!("fa-solid", "fa-fw", format!("fa-{route_icon}"))}></i>
               {route_name}
           </Link<R>>
       </li>

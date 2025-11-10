@@ -10,6 +10,12 @@ use crate::llms::{
 };
 
 /// Example function demonstrating basic LLM usage
+///
+/// # Errors
+///
+/// This mock does not currently return an error, but a real implementation would
+/// propagate any [`LLMError`](crate::llms::errors::LLMError) that occurs while constructing the provider,
+/// loading models, or generating text.
 pub async fn basic_example() -> LLMResult<String> {
     // Create a configuration for the LLM
     let _config = LLMConfig {
@@ -18,6 +24,8 @@ pub async fn basic_example() -> LLMResult<String> {
         temperature: Some(0.7),
         ..Default::default()
     };
+
+    futures_util::future::ready(()).await;
 
     // In a real implementation, you would:
     // let provider = LlamaCppProvider::new(config).await?;
@@ -33,6 +41,11 @@ pub async fn basic_example() -> LLMResult<String> {
 }
 
 /// Example function demonstrating text generation
+///
+/// # Errors
+///
+/// Returns an [`LLMError`](crate::llms::errors::LLMError) if the underlying `LlamaCppProvider::new` call fails
+/// or if subsequent model loading/generation encounters an error.
 pub async fn text_generation_example() -> LLMResult<String> {
     // This example shows how to use the LLM for text generation
     // In a real application, you would have an actual model file
@@ -65,9 +78,16 @@ pub async fn text_generation_example() -> LLMResult<String> {
 }
 
 /// Example function demonstrating streaming generation
+///
+/// # Errors
+///
+/// Returns an [`LLMError`](crate::llms::errors::LLMError) if provider initialization or streaming generation
+/// fails in a real implementation.
 pub async fn streaming_example() -> LLMResult<Vec<String>> {
     // For this example, we'll simulate streaming without requiring actual models
     let _config = LLMConfig::default();
+
+    futures_util::future::ready(()).await;
 
     // In a real implementation, you would:
     // let provider = LlamaCppProvider::new(config).await?;

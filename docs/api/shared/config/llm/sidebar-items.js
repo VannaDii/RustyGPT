@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["GlobalLLMSettings","LLMConfiguration","ModelCapabilities","ModelConfig","ModelParameters","ProviderConfig"]};

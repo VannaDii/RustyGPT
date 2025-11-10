@@ -27,7 +27,7 @@ use tracing::{info, instrument};
 #[instrument(skip(state))]
 pub async fn get_setup(State(state): State<Arc<AppState>>) -> Response {
     info!("Received setup check request");
-    match is_setup(&state.pool).await {
+    match is_setup(state.pool.as_ref()).await {
         Ok(is_setup) => {
             info!("Setup check completed, is_setup: {}", is_setup);
             (StatusCode::OK, Json(SetupResponse { is_setup })).into_response()
@@ -64,7 +64,7 @@ pub async fn post_setup(
     Json(payload): Json<SetupRequest>,
 ) -> Response {
     info!("Received setup request: {:?}", payload);
-    match init_setup(&state.pool, &payload).await {
+    match init_setup(state.pool.as_ref(), &payload).await {
         Ok(true) => {
             info!("Setup completed successfully");
             (StatusCode::OK).into_response()

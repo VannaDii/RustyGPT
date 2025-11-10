@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["generate_report","print_audit_report"]};

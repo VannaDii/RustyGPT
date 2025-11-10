@@ -45,7 +45,7 @@ fn default_model_object() -> String {
 pub struct Model {
     /// The unique identifier of the model.
     pub id: String,
-    /// Object type, fixed to "model" for OpenAI compatibility.
+    /// Object type, fixed to "model" for `OpenAI` compatibility.
     #[serde(default = "default_model_object")]
     pub object: String,
     /// Unix timestamp when the model metadata was created.
@@ -98,7 +98,7 @@ pub struct ChatCompletionRequest {
     /// Whether to stream deltas. Defaults to false.
     #[serde(default)]
     pub stream: Option<bool>,
-    /// Arbitrary metadata; RustyGPT extensions expect `metadata.rustygpt`.
+    /// Arbitrary metadata; `RustyGPT` extensions expect `metadata.rustygpt`.
     #[serde(default)]
     pub metadata: Option<Value>,
 }
