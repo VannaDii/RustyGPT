@@ -78,7 +78,7 @@ serde_yml = "0.0"
 toml = "0.9"
 cookie = "0.18"
 metrics = "0.24"
-metrics-exporter-prometheus = "0.17"
+metrics-exporter-prometheus = "0.18"
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }
