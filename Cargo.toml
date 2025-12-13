@@ -102,7 +102,7 @@ utoipa-swagger-ui = { version = "9.0", features = ["axum", "reqwest"] }
 
 # Frontend/WASM
 yew = { version = "0.21", features = ["csr"] }
-yew-hooks = "0.3"
+yew-hooks = "0.4"
 yew-router = "0.18"
 yew_icons = { version = "0.8", features = [
   "heroicons_solid",
