@@ -55,7 +55,7 @@ jobs:
         run: echo "${{ github.workspace }}/.cargo/bin" >> $GITHUB_PATH
 
       - name: Cache Cargo tools
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CARGO_HOME }}/bin
           key: ${{ runner.os }}-cargo-tools-${{ hashFiles('Justfile') }}
@@ -63,7 +63,7 @@ jobs:
             ${{ runner.os }}-cargo-tools-
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
