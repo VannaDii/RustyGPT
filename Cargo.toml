@@ -104,7 +104,7 @@ utoipa-swagger-ui = { version = "9.0", features = ["axum", "reqwest"] }
 yew = { version = "0.21", features = ["csr"] }
 yew-hooks = "0.3"
 yew-router = "0.18"
-yew_icons = { version = "0.8", features = [
+yew_icons = { version = "0.9", features = [
   "heroicons_solid",
   "heroicons_outline",
   "heroicons_mini_solid",
